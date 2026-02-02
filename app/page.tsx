@@ -61,9 +61,9 @@ export default function HomePage() {
             </a>
           </div>
 
-          {/* Fixed Background Image - Ensure file is public/std-bg.jpeg */}
+          {/* Fixed Background Image - Ensure file is public/savethedate-bg.JPEG */}
           <div className="relative max-w-sm mx-auto p-4 bg-white shadow-2xl rounded-sm">
-             <img src="/std-bg.jpeg" alt="Wedding Venue" className="w-full h-auto object-cover" />
+             <img src="/savethedate-bg.JPEG" alt="Wedding Venue" className="w-full h-auto object-cover" />
              <p className="mt-4 font-serif italic text-stone-400">Reflections Garden, 2026</p>
           </div>
         </div>
