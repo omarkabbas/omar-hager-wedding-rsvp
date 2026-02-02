@@ -1,142 +1,84 @@
 "use client";
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import Link from 'next/link';
 
 export default function AdminDashboard() {
   const [responses, setResponses] = useState<any[]>([]);
   const [authorized, setAuthorized] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  // Form State for Adding New Guests
   const [newName, setNewName] = useState('');
   const [newCode, setNewCode] = useState('');
   const [newLimit, setNewLimit] = useState(1);
 
-  const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD;
-
   const fetchData = async () => {
-    setLoading(true);
     const { data } = await supabase.from('rsvp_list').select('*').order('guest_name', { ascending: true });
     if (data) setResponses(data);
-    setLoading(false);
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (authorized) {
+      fetchData();
+      const channel = supabase.channel('admin_live').on('postgres_changes', { event: '*', table: 'rsvp_list', schema: 'public' }, fetchData).subscribe();
+      return () => { supabase.removeChannel(channel); };
+    }
+  }, [authorized]);
+
+  const addGuest = async (e: any) => {
     e.preventDefault();
-    if (passwordInput === ADMIN_PASSWORD) {
-      setAuthorized(true);
-      fetchData();
-    } else {
-      alert("Incorrect password.");
-    }
+    const { error } = await supabase.from('rsvp_list').insert([{ guest_name: newName, invite_code: newCode.toUpperCase().trim(), max_guests: newLimit }]);
+    if (error) alert("Error: " + error.message);
+    setNewName(''); setNewCode(''); setNewLimit(1);
   };
 
-  // ADD GUEST LOGIC
-  const addGuest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const { error } = await supabase.from('rsvp_list').insert([
-      { guest_name: newName, invite_code: newCode.toUpperCase().trim(), max_guests: newLimit }
-    ]);
-    if (error) alert("Error adding guest: " + error.message);
-    else {
-      setNewName(''); setNewCode(''); setNewLimit(1);
-      fetchData();
-    }
-  };
+  const totalAccepted = responses.filter(r => r.attending === true).reduce((sum, r) => sum + (r.confirmed_guests || 0), 0);
 
-  // DELETE GUEST LOGIC
-  const deleteGuest = async (id: string) => {
-    if (confirm("Are you sure you want to remove this guest?")) {
-      await supabase.from('rsvp_list').delete().eq('id', id);
-      fetchData();
-    }
-  };
-
-  if (!authorized) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FAF9F6] p-6 font-sans">
-        <form onSubmit={handleLogin} className="bg-white p-10 rounded-3xl shadow-sm border border-stone-100 w-full max-w-sm text-center">
-          <h1 className="text-2xl font-serif mb-6 text-stone-900">Admin Login</h1>
-          <input 
-            type="password" 
-            className="w-full border-b py-3 mb-8 outline-none text-center tracking-widest"
-            placeholder="Password"
-            onChange={(e) => setPasswordInput(e.target.value)}
-          />
-          <button className="w-full bg-stone-900 text-white py-4 rounded-full text-[10px] uppercase tracking-widest">Access Dashboard</button>
-        </form>
-      </div>
-    );
-  }
+  if (!authorized) return (
+    <div className="min-h-screen flex items-center justify-center bg-[#D0E0F0] p-6 font-sans">
+      <form onSubmit={(e: any) => { e.preventDefault(); if (passwordInput === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) setAuthorized(true); }} className="bg-white p-12 rounded-[40px] shadow-2xl w-full max-w-sm text-center">
+        <h1 className="text-3xl font-serif mb-8 text-stone-900">Admin Login</h1>
+        <input type="password" className="w-full border-b py-4 mb-10 outline-none text-center font-bold" placeholder="Password" onChange={(e) => setPasswordInput(e.target.value)} />
+        <button className="w-full bg-stone-900 text-white py-5 rounded-full text-[12px] uppercase font-bold">Access</button>
+      </form>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-white p-8 md:p-16 text-stone-800 font-sans">
-      <div className="max-w-5xl mx-auto">
-        
-        <header className="mb-12 border-b pb-10">
-          <h1 className="text-4xl font-serif text-stone-900">Guest Management</h1>
-          <p className="text-stone-400 text-[10px] tracking-[0.3em] uppercase mt-2 font-bold text-pink-800">Omar & Hager | Dallas 2026</p>
+    <div className="min-h-screen bg-white p-12 text-stone-800 font-sans">
+      <div className="max-w-6xl mx-auto">
+        <Link href="/" className="px-8 py-3 bg-stone-100 rounded-full text-[11px] uppercase font-bold hover:bg-stone-900 hover:text-white transition-all">Back to Home</Link>
+        <header className="flex justify-between items-end mt-12 mb-16 border-b pb-12">
+          <div><h1 className="text-5xl font-serif text-stone-900">Guest Management</h1><p className="text-stone-400 uppercase text-[10px] mt-2 font-bold font-sans">Omar & Hager | 2026</p></div>
+          <div className="text-right font-sans"><p className="text-[10px] uppercase text-stone-400 font-bold mb-1">Final Count</p><span className="text-7xl font-serif text-pink-900">{totalAccepted}</span></div>
         </header>
 
-        {/* ADD NEW GUEST FORM */}
-        <section className="bg-stone-50 p-8 rounded-3xl mb-16 border border-stone-100">
-          <h2 className="text-lg font-serif mb-6">Add New Invitation</h2>
-          <form onSubmit={addGuest} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-            <div>
-              <label className="block text-[9px] uppercase tracking-widest text-stone-400 mb-2">Guest/Party Name</label>
-              <input value={newName} onChange={(e)=>setNewName(e.target.value)} required className="w-full p-3 rounded-lg border bg-white text-sm outline-none focus:border-stone-900" placeholder="e.g. The Miller Family" />
-            </div>
-            <div>
-              <label className="block text-[9px] uppercase tracking-widest text-stone-400 mb-2">Invite Code</label>
-              <input value={newCode} onChange={(e)=>setNewCode(e.target.value)} required className="w-full p-3 rounded-lg border bg-white text-sm outline-none focus:border-stone-900" placeholder="MILLER2026" />
-            </div>
-            <div>
-              <label className="block text-[9px] uppercase tracking-widest text-stone-400 mb-2">Guest Limit</label>
-              <input type="number" value={newLimit} onChange={(e)=>setNewLimit(parseInt(e.target.value))} required className="w-full p-3 rounded-lg border bg-white text-sm outline-none focus:border-stone-900" min="1" />
-            </div>
-            <button type="submit" className="bg-stone-900 text-white p-3 rounded-lg text-[10px] uppercase tracking-widest hover:bg-stone-700 transition-all font-bold">Add Guest</button>
+        <section className="bg-stone-50 p-10 rounded-[40px] mb-16 border border-stone-100 text-center font-sans">
+          <h2 className="text-2xl font-serif mb-8 text-stone-900">Add New Invitation</h2>
+          <form onSubmit={addGuest} className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end font-sans">
+            <input value={newName} onChange={(e)=>setNewName(e.target.value)} required className="p-4 rounded-xl border text-sm font-sans" placeholder="Guest Name" />
+            <input value={newCode} onChange={(e)=>setNewCode(e.target.value)} required className="p-4 rounded-xl border text-sm font-sans" placeholder="Invite Code" />
+            <input type="number" value={newLimit} onChange={(e)=>setNewLimit(parseInt(e.target.value))} required className="p-4 rounded-xl border text-sm font-sans" min="1" />
+            <button className="bg-stone-900 text-white p-4 rounded-xl text-[11px] uppercase font-bold shadow-lg font-sans">Add to List</button>
           </form>
         </section>
 
-        {/* GUEST LIST TABLE */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-[10px] uppercase tracking-widest text-stone-400 border-b border-stone-100">
-                <th className="pb-4">Name</th>
-                <th className="pb-4 text-center">Code</th>
-                <th className="pb-4 text-center">RSVP Status</th>
-                <th className="pb-4 text-center">Limit/Actual</th>
-                <th className="pb-4 text-right">Action</th>
+        <table className="w-full text-left font-sans">
+          <thead className="text-[10px] uppercase text-stone-400 border-b border-stone-100">
+            <tr><th className="pb-6">Name</th><th className="pb-6 text-center">Status</th><th className="pb-6 text-center">Invited / Accepted</th><th className="pb-6 text-center">Invite</th><th className="pb-6 text-center">Code</th><th className="pb-6 text-right font-sans">Action</th></tr>
+          </thead>
+          <tbody className="divide-y divide-stone-50">
+            {responses.map((guest) => (
+              <tr key={guest.id} className="text-stone-900">
+                <td className="py-8 font-serif text-xl">{guest.guest_name}</td>
+                <td className="py-8 text-center font-sans"><span className={`px-4 py-2 rounded-full text-[10px] uppercase font-bold ${guest.attending === null ? 'text-stone-300' : guest.attending ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{guest.attending === null ? 'Pending' : guest.attending ? 'Attending' : 'Declined'}</span></td>
+                <td className="py-8 text-center font-serif text-2xl"><span className="text-stone-300">{guest.max_guests}</span> <span className="mx-1 text-stone-200">/</span> {guest.attending ? guest.confirmed_guests : 0}</td>
+                <td className="py-8 text-center"><button onClick={() => { navigator.clipboard.writeText(`Hi ${guest.guest_name}! Please RSVP at: omar-hager.com/${guest.invite_code}`); alert("Copied!"); }} className="px-5 py-2 bg-stone-100 rounded-full text-[10px] uppercase font-bold hover:bg-stone-900 hover:text-white transition-all font-sans">Copy</button></td>
+                <td className="py-8 text-center font-mono text-stone-400 text-xs uppercase italic">{guest.invite_code}</td>
+                <td className="py-8 text-right font-sans"><button onClick={async () => { if(confirm("Remove?")) await supabase.from('rsvp_list').delete().eq('id', guest.id); }} className="text-[10px] uppercase text-red-300 font-bold hover:text-red-600 transition-colors font-sans">Remove</button></td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-50">
-              {responses.map((guest) => (
-                <tr key={guest.id}>
-                  <td className="py-6 font-serif text-lg">{guest.guest_name}</td>
-                  <td className="py-6 text-center text-xs font-mono uppercase text-stone-400">{guest.invite_code}</td>
-                  <td className="py-6 text-center">
-                    {guest.attending === null ? (
-                      <span className="text-[9px] uppercase tracking-widest text-stone-300 italic font-bold">Pending</span>
-                    ) : (
-                      <span className={`px-3 py-1 rounded-full text-[9px] uppercase tracking-widest font-bold ${guest.attending ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                        {guest.attending ? 'Attending' : 'Declined'}
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-6 text-center font-serif">
-                     <span className="text-stone-300">{guest.max_guests} / </span>
-                     <span className="text-xl">{guest.attending ? guest.confirmed_guests : 0}</span>
-                  </td>
-                  <td className="py-6 text-right">
-                    <button onClick={() => deleteGuest(guest.id)} className="text-[9px] uppercase tracking-widest text-red-300 hover:text-red-600 font-bold transition-colors">Remove</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
