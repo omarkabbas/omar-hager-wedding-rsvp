@@ -16,7 +16,10 @@ export default function GuestRSVP() {
     async function fetchGuest() {
       if (!inviteCode) return;
       const { data } = await supabase.from('rsvp_list').select('*').eq('invite_code', inviteCode.toUpperCase().trim()).maybeSingle();
-      if (data) { setGuestData(data); if (data.attending !== null) setSubmitted(true); }
+      if (data) {
+        setGuestData(data);
+        if (data.attending !== null) setSubmitted(true);
+      }
       setLoading(false);
     }
     fetchGuest();
@@ -30,7 +33,10 @@ export default function GuestRSVP() {
       attending: attendingValue,
       confirmed_guests: attendingValue ? parseInt(formData.get('count') as string) : 0,
     }).eq('id', guestData.id);
-    if (!error) { setGuestData({ ...guestData, attending: attendingValue }); setSubmitted(true); }
+    if (!error) {
+      setGuestData({ ...guestData, attending: attendingValue });
+      setSubmitted(true);
+    }
   }
 
   return (
@@ -41,26 +47,31 @@ export default function GuestRSVP() {
       </nav>
 
       <section className="max-w-md w-full bg-white p-12 rounded-[40px] shadow-2xl border border-stone-100 mb-20 text-center">
-        <div className="flex justify-center mb-8"><img src="/logo.png" alt="Logo" className="w-20 h-auto" /></div>
+        <div className="flex justify-center mb-8"><img src="/logo.png" alt="Logo" className="w-24 h-auto" /></div>
+        
         {loading ? ( <div className="py-10 font-serif italic text-stone-400">Finding invitation...</div> ) : !guestData ? (
           <div className="py-10">
             <h2 className="text-3xl font-serif mb-6 text-stone-900">Invite Not Found</h2>
-            <p className="text-stone-500 italic mb-10 leading-relaxed font-sans">Please check your invite or contact Omar & Hager!</p>
+            <p className="text-stone-500 italic mb-10 leading-relaxed font-sans">Please check the invite or contact Omar & Hager!</p>
             <Link href="/" className="inline-block px-12 py-5 bg-stone-900 text-white rounded-full text-[12px] uppercase font-bold">Return Home</Link>
           </div>
         ) : submitted ? (
           <div className="py-6 animate-in fade-in duration-1000">
-            <h2 className="text-4xl font-serif mb-4 text-stone-900">{guestData.attending ? "You're RSVP'd!" : "Thanks for your response"}</h2>
-            <p className="text-stone-600 italic mb-10 text-lg">{guestData.attending ? "We can't wait to celebrate with you!" : "We're sad to know you won't make it :("}</p>
+            <h2 className="text-4xl font-serif mb-4 text-stone-900">
+              {guestData.attending ? "You're RSVP'd!" : "Thanks for your response"}
+            </h2>
+            <p className="text-stone-600 italic mb-10 text-lg">
+              {guestData.attending ? "We can't wait to celebrate with you!" : "Thanks for letting us know you won't make it :("}
+            </p>
             {guestData.attending && (
               <div className="space-y-6 text-left">
                 <div className="p-6 bg-stone-50 rounded-3xl border border-stone-100 text-center">
                    <p className="text-[10px] uppercase tracking-widest text-stone-400 mb-2 font-bold font-sans">Venue</p>
-                   <a href="https://maps.google.com/?q=Reflections+Venue+and+Gardens+Plano+TX" target="_blank" className="font-serif text-xl text-stone-900 underline">Reflections Venue & Gardens</a>
+                   <a href="https://maps.google.com/?q=Reflections+Venue+and+Gardens+Plano" target="_blank" className="font-serif text-xl text-stone-900 underline">Reflections Venue & Gardens</a>
                 </div>
-                <div className="p-6 bg-stone-50 rounded-3xl border border-stone-100 text-center">
-                  <p className="text-[10px] uppercase tracking-widest text-stone-400 mb-3 font-bold font-sans">A Note on Gifts</p>
-                  <p className="text-sm text-stone-500 italic leading-relaxed font-sans">As we already have a home filled with everything we need, we kindly request no boxed or bagged gifts. Should you wish to honor us with a gift toward our future together, it would be most sincerely appreciated.</p>
+                <div className="p-6 bg-stone-50 rounded-3xl border border-stone-100">
+                  <p className="text-[10px] uppercase tracking-widest text-stone-400 mb-3 font-bold font-sans text-center">A Note on Gifts</p>
+                  <p className="text-sm text-stone-500 italic leading-relaxed text-center font-sans">As we already have a home filled with everything we need, we kindly request no boxed or bagged gifts. Should you wish to honor us with a gift toward our future together, it would be most sincerely appreciated.</p>
                 </div>
               </div>
             )}
@@ -68,26 +79,26 @@ export default function GuestRSVP() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-12">
-            <div className="border-b border-stone-50 pb-8 text-center font-serif">
-              <p className="italic text-stone-400 text-xl mb-2">Welcome,</p>
-              <h2 className="text-4xl text-stone-900">{guestData.guest_name}</h2>
+            <div className="border-b border-stone-50 pb-8 text-center">
+              <p className="font-serif italic text-stone-400 text-xl mb-2">Welcome,</p>
+              <h2 className="text-4xl font-serif text-stone-900">{guestData.guest_name}</h2>
             </div>
-            <div className="space-y-6 text-left font-sans">
-              <label className="text-[12px] uppercase text-stone-500 font-bold ml-2">Will you be joining us?</label>
-              <select name="attending" value={isAttending} onChange={(e) => setIsAttending(e.target.value)} required className="w-full p-6 border rounded-2xl bg-stone-50 text-lg outline-none cursor-pointer">
-                <option value="true">Happily Accept</option>
-                <option value="false">Regretfully Decline</option>
+            <div className="space-y-6 text-left">
+              <label className="text-[12px] uppercase text-stone-500 font-bold ml-2 font-sans">Will you join us?</label>
+              <select name="attending" value={isAttending} onChange={(e) => setIsAttending(e.target.value)} required className="w-full p-6 border rounded-2xl bg-stone-50 text-lg outline-none cursor-pointer font-sans">
+                <option value="true">Happily Accepts</option>
+                <option value="false">Regretfully Declines</option>
               </select>
             </div>
             {isAttending === "true" && (
-              <div className="space-y-6 text-left font-sans">
-                <label className="text-[12px] uppercase text-stone-500 font-bold ml-2">How many of you are coming? (Max: {guestData.max_guests})</label>
-                <select name="count" required className="w-full p-6 border rounded-2xl bg-stone-50 text-lg outline-none cursor-pointer">
+              <div className="space-y-6 text-left animate-in slide-in-from-top-2">
+                <label className="text-[12px] uppercase text-stone-500 font-bold ml-2 font-sans">Guests (Max: {guestData.max_guests})</label>
+                <select name="count" required className="w-full p-6 border rounded-2xl bg-stone-50 text-lg outline-none cursor-pointer font-sans">
                   {[...Array(guestData.max_guests)].map((_, i) => <option key={i+1} value={i+1}>{i+1}</option>)}
                 </select>
               </div>
             )}
-            <button type="submit" className="w-full bg-stone-900 text-white py-7 rounded-full uppercase text-sm font-bold shadow-xl">Confirm RSVP</button>
+            <button type="submit" className="w-full bg-stone-900 text-white py-7 rounded-full uppercase text-sm font-bold font-sans shadow-xl">Confirm RSVP</button>
           </form>
         )}
       </section>
