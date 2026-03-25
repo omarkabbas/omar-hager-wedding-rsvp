@@ -42,9 +42,9 @@ export default function GuestRSVP() {
 
   return (
     <div className="min-h-screen bg-[#D0E0F0] text-stone-800 flex flex-col items-center font-sans relative">
-      <div className="w-full"><Navigation /></div>
+      <Navigation />
 
-      <section className="max-w-md w-full mx-4 bg-white p-8 md:p-12 rounded-[40px] shadow-2xl border border-stone-100 mb-20 text-center">
+      <section className="max-w-md w-full mx-4 mt-6 md:mt-8 bg-white p-8 md:p-12 rounded-[40px] shadow-2xl border border-stone-100 mb-20 text-center">
         <div className="flex justify-center mb-8"><img src="/logo.png" alt="Logo" className="w-24 h-auto" /></div>
         
         {loading ? ( <div className="py-10 font-serif italic text-stone-400">Finding invitation...</div> ) : !guestData ? (

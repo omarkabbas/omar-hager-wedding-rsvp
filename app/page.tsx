@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Navigation from '@/app/components/Navigation';
 import { supabase } from '@/lib/supabase';
+import HeroCarousel from '@/app/components/HeroCarousel';
 
 export default function HomePage() {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
@@ -38,7 +39,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#D0E0F0] text-stone-800 flex flex-col font-sans relative">
       <Navigation />
 
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-start pt-6 pb-20 p-6 text-center">
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-start pt-6 pb-20 px-4 md:px-6 text-center">
         <div className="max-w-4xl w-full animate-in fade-in zoom-in duration-1000">
           
           <div className="flex justify-center mb-10">
@@ -69,8 +70,10 @@ export default function HomePage() {
           </div>
 
           {/* Venue card with no tilt and standard path */}
-          <div className="relative max-w-sm mx-auto p-4 bg-white shadow-2xl rounded-sm">
-             <img src="/savethedate-bg.JPEG" alt="Wedding Garden" className="w-full h-auto object-cover" />
+          <div className="relative w-full max-w-md md:max-w-lg mx-auto p-3 md:p-5 bg-white shadow-2xl rounded-md md:rounded-xl">
+            <div className="relative w-full aspect-[3/4] md:aspect-[4/5]">
+              <HeroCarousel />
+            </div>
           </div>
 
           {isSeatingChartEnabled && (

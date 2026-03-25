@@ -7,10 +7,21 @@ export default function AdminDashboard() {
   const [responses, setResponses] = useState<any[]>([]);
   const [authorized, setAuthorized] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
+  const [error, setError] = useState('');
   const [newName, setNewName] = useState('');
   const [newCode, setNewCode] = useState('');
   const [newLimit, setNewLimit] = useState(1);
   const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState(false);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passwordInput === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
+      setAuthorized(true);
+    } else {
+      setError('Incorrect password');
+      setPasswordInput('');
+    }
+  };
 
   const fetchData = async () => {
     const { data } = await supabase.from('rsvp_list').select('*').order('guest_name', { ascending: true });
@@ -52,10 +63,17 @@ export default function AdminDashboard() {
 
   if (!authorized) return (
     <div className="min-h-screen flex items-center justify-center bg-[#D0E0F0] p-6 font-sans">
-      <form onSubmit={(e: any) => { e.preventDefault(); if (passwordInput === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) setAuthorized(true); }} className="bg-white p-12 rounded-[40px] shadow-2xl w-full max-w-sm text-center">
+      <form onSubmit={handleLogin} className="bg-white p-12 rounded-[40px] shadow-2xl w-full max-w-sm text-center">
         <h1 className="text-3xl font-serif mb-8 text-stone-900">Admin Login</h1>
-        <input type="password" className="w-full border-b py-4 mb-10 outline-none text-center font-bold" placeholder="Password" onChange={(e) => setPasswordInput(e.target.value)} />
-        <button className="w-full bg-stone-900 text-white py-5 rounded-full text-[12px] uppercase font-bold hover:bg-stone-800 transition-colors">Access</button>
+        <input 
+          type="password" 
+          value={passwordInput}
+          className="w-full border-b-2 border-stone-400 py-4 mb-4 outline-none text-center font-bold focus:border-stone-900 transition-colors placeholder-stone-500 text-stone-900" 
+          placeholder="Password" 
+          onChange={(e) => setPasswordInput(e.target.value)} 
+        />
+        {error && <p className="text-red-500 text-xs mt-2 mb-4">{error}</p>}
+        <button className="w-full bg-stone-900 text-white py-5 rounded-full text-[12px] uppercase font-bold hover:bg-stone-800 transition-colors mt-6">Access</button>
       </form>
     </div>
   );
