@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import Navigation from '@/app/components/Navigation';
 
 export default function GuestRSVP() {
   const params = useParams();
@@ -40,20 +41,17 @@ export default function GuestRSVP() {
   }
 
   return (
-    <div className="min-h-screen bg-[#D0E0F0] text-stone-800 p-6 flex flex-col items-center font-sans relative">
-      <nav className="p-10 flex justify-center space-x-12 text-[14px] uppercase tracking-[0.3em] text-stone-600">
-        <Link href="/" className="px-10 py-5 hover:text-stone-900 transition-all">Home</Link>
-        <Link href="/registry" className="px-10 py-5 hover:text-stone-900 transition-all">Registry</Link>
-      </nav>
+    <div className="min-h-screen bg-[#D0E0F0] text-stone-800 flex flex-col items-center font-sans relative">
+      <div className="w-full"><Navigation /></div>
 
-      <section className="max-w-md w-full bg-white p-12 rounded-[40px] shadow-2xl border border-stone-100 mb-20 text-center">
+      <section className="max-w-md w-full mx-4 bg-white p-8 md:p-12 rounded-[40px] shadow-2xl border border-stone-100 mb-20 text-center">
         <div className="flex justify-center mb-8"><img src="/logo.png" alt="Logo" className="w-24 h-auto" /></div>
         
         {loading ? ( <div className="py-10 font-serif italic text-stone-400">Finding invitation...</div> ) : !guestData ? (
           <div className="py-10">
             <h2 className="text-3xl font-serif mb-6 text-stone-900">Invite Not Found</h2>
             <p className="text-stone-500 italic mb-10 leading-relaxed font-sans">Please check the invite or contact Omar & Hager!</p>
-            <Link href="/" className="inline-block px-12 py-5 bg-stone-900 text-white rounded-full text-[12px] uppercase font-bold">Return Home</Link>
+            <Link href="/" className="inline-block px-10 py-5 bg-stone-900 text-white rounded-full text-xs uppercase font-bold hover:bg-stone-800 transition-colors">Return Home</Link>
           </div>
         ) : submitted ? (
           <div className="py-6 animate-in fade-in duration-1000">
@@ -75,17 +73,17 @@ export default function GuestRSVP() {
                 </div>
               </div>
             )}
-            <Link href="/" className="inline-block mt-8 px-12 py-5 border border-stone-200 rounded-full text-[11px] uppercase font-bold w-full">Back to Home</Link>
+            <Link href="/" className="inline-block mt-8 px-10 py-5 border border-stone-200 rounded-full text-[11px] uppercase font-bold w-full hover:bg-stone-50 transition-colors">Back to Home</Link>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-12">
+          <form onSubmit={handleSubmit} className="space-y-8 md:space-y-10">
             <div className="border-b border-stone-50 pb-8 text-center">
               <p className="font-serif italic text-stone-400 text-xl mb-2">Welcome,</p>
               <h2 className="text-4xl font-serif text-stone-900">{guestData.guest_name}</h2>
             </div>
             <div className="space-y-6 text-left">
               <label className="text-[12px] uppercase text-stone-500 font-bold ml-2 font-sans">Will you join us?</label>
-              <select name="attending" value={isAttending} onChange={(e) => setIsAttending(e.target.value)} required className="w-full p-6 border rounded-2xl bg-stone-50 text-lg outline-none cursor-pointer font-sans">
+              <select name="attending" value={isAttending} onChange={(e) => setIsAttending(e.target.value)} required className="w-full p-4 md:p-5 border border-stone-200 rounded-2xl bg-stone-50 text-base md:text-lg outline-none cursor-pointer font-sans focus:border-stone-400 transition-colors">
                 <option value="true">Happily Accepts</option>
                 <option value="false">Regretfully Declines</option>
               </select>
@@ -93,12 +91,12 @@ export default function GuestRSVP() {
             {isAttending === "true" && (
               <div className="space-y-6 text-left animate-in slide-in-from-top-2">
                 <label className="text-[12px] uppercase text-stone-500 font-bold ml-2 font-sans">Guests (Max: {guestData.max_guests})</label>
-                <select name="count" required className="w-full p-6 border rounded-2xl bg-stone-50 text-lg outline-none cursor-pointer font-sans">
+                <select name="count" required className="w-full p-4 md:p-5 border border-stone-200 rounded-2xl bg-stone-50 text-base md:text-lg outline-none cursor-pointer font-sans focus:border-stone-400 transition-colors">
                   {[...Array(guestData.max_guests)].map((_, i) => <option key={i+1} value={i+1}>{i+1}</option>)}
                 </select>
               </div>
             )}
-            <button type="submit" className="w-full bg-stone-900 text-white py-7 rounded-full uppercase text-sm font-bold font-sans shadow-xl">Confirm RSVP</button>
+            <button type="submit" className="w-full bg-stone-900 text-white py-5 md:py-6 rounded-full uppercase text-xs md:text-sm font-bold font-sans shadow-xl hover:bg-stone-800 transition-colors">Confirm RSVP</button>
           </form>
         )}
       </section>

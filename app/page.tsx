@@ -1,11 +1,23 @@
 "use client";
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Navigation from '@/app/components/Navigation';
+import { supabase } from '@/lib/supabase';
 
 export default function HomePage() {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+  const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState(false);
 
   useEffect(() => {
+    const fetchSettings = async () => {
+      const { data, error } = await supabase.from('settings').select('value').eq('key', 'is_seating_chart_enabled').single();
+      if (data) {
+        setIsSeatingChartEnabled(data.value === 'true');
+      }
+    };
+
+    fetchSettings();
+
     const target = new Date("June 6, 2026 00:00:00").getTime();
     const interval = setInterval(() => {
       const now = new Date().getTime();
@@ -24,10 +36,7 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-[#D0E0F0] text-stone-800 flex flex-col font-sans relative">
-      <nav className="relative z-50 p-10 flex justify-center space-x-12 text-[14px] uppercase tracking-[0.3em] text-stone-600 font-bold">
-        <Link href="/" className="px-8 py-4 text-stone-900 border-b-2 border-stone-900">Home</Link>
-        <Link href="/registry" className="px-8 py-4 hover:text-stone-900 transition-all">Registry</Link>
-      </nav>
+      <Navigation />
 
       <main className="relative z-10 flex-1 flex flex-col items-center justify-start pt-6 pb-20 p-6 text-center">
         <div className="max-w-4xl w-full animate-in fade-in zoom-in duration-1000">
@@ -63,6 +72,14 @@ export default function HomePage() {
           <div className="relative max-w-sm mx-auto p-4 bg-white shadow-2xl rounded-sm">
              <img src="/savethedate-bg.JPEG" alt="Wedding Garden" className="w-full h-auto object-cover" />
           </div>
+
+          {isSeatingChartEnabled && (
+            <div className="mt-16 animate-in fade-in duration-1000">
+              <Link href="/mytable" className="inline-block px-14 py-5 bg-stone-900 text-white rounded-full text-sm uppercase font-bold shadow-xl hover:bg-stone-800 transition-colors">
+                Find Your Table
+              </Link>
+            </div>
+          )}
         </div>
       </main>
     </div>
