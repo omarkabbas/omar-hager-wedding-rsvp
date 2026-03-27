@@ -1,11 +1,29 @@
 "use client";
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Navigation from '@/app/components/Navigation';
+import { supabase } from '@/lib/supabase';
+import HeroCarousel from '@/app/components/HeroCarousel';
 
 export default function HomePage() {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+  const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState(false);
+  const [isGalleryEnabled, setIsGalleryEnabled] = useState(false);
 
   useEffect(() => {
+    const fetchSettings = async () => {
+      const { data, error } = await supabase.from('settings').select('key, value').in('key', ['is_seating_chart_enabled', 'is_gallery_enabled']);
+      if (data) {
+        const seatingSetting = data.find(s => s.key === 'is_seating_chart_enabled');
+        if (seatingSetting) setIsSeatingChartEnabled(seatingSetting.value === 'true');
+        
+        const gallerySetting = data.find(s => s.key === 'is_gallery_enabled');
+        if (gallerySetting) setIsGalleryEnabled(gallerySetting.value === 'true');
+      }
+    };
+
+    fetchSettings();
+
     const target = new Date("June 6, 2026 00:00:00").getTime();
     const interval = setInterval(() => {
       const now = new Date().getTime();
@@ -24,12 +42,9 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-[#D0E0F0] text-stone-800 flex flex-col font-sans relative">
-      <nav className="relative z-50 p-10 flex justify-center space-x-12 text-[14px] uppercase tracking-[0.3em] text-stone-600 font-bold">
-        <Link href="/" className="px-8 py-4 text-stone-900 border-b-2 border-stone-900">Home</Link>
-        <Link href="/registry" className="px-8 py-4 hover:text-stone-900 transition-all">Registry</Link>
-      </nav>
+      <Navigation />
 
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-start pt-6 pb-20 p-6 text-center">
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-start pt-6 pb-20 px-4 md:px-6 text-center">
         <div className="max-w-4xl w-full animate-in fade-in zoom-in duration-1000">
           
           <div className="flex justify-center mb-10">
@@ -60,9 +75,26 @@ export default function HomePage() {
           </div>
 
           {/* Venue card with no tilt and standard path */}
-          <div className="relative max-w-sm mx-auto p-4 bg-white shadow-2xl rounded-sm">
-             <img src="/savethedate-bg.JPEG" alt="Wedding Garden" className="w-full h-auto object-cover" />
+          <div className="relative w-full max-w-md md:max-w-lg mx-auto p-3 md:p-5 bg-white shadow-2xl rounded-md md:rounded-xl">
+            <div className="relative w-full aspect-[3/4] md:aspect-[4/5]">
+              <HeroCarousel />
+            </div>
           </div>
+
+          {(isSeatingChartEnabled || isGalleryEnabled) && (
+            <div className="mt-16 flex flex-col md:flex-row justify-center items-center gap-6 animate-in fade-in duration-1000">
+              {isSeatingChartEnabled && (
+                <Link href="/mytable" className="inline-block px-14 py-5 bg-stone-900 text-white rounded-full text-sm uppercase font-bold shadow-xl hover:bg-stone-800 transition-colors w-full md:w-auto">
+                  Find Your Table
+                </Link>
+              )}
+              {isGalleryEnabled && (
+                <Link href="/gallery" className="inline-block px-14 py-5 bg-stone-900 text-white rounded-full text-sm uppercase font-bold shadow-xl hover:bg-stone-800 transition-colors w-full md:w-auto">
+                  Guest Gallery
+                </Link>
+              )}
+            </div>
+          )}
         </div>
       </main>
     </div>
