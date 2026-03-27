@@ -1,7 +1,8 @@
 "use client";
 import { useState, useEffect } from 'react';
 import Navigation from '@/app/components/Navigation';
-import { supabase } from '@/lib/supabase'; // Ensure this points to your client
+import { supabase } from '@/lib/supabase';
+import imageCompression from 'browser-image-compression';
 
 export default function GalleryPage() {
   const [files, setFiles] = useState<File[]>([]);
@@ -9,8 +10,6 @@ export default function GalleryPage() {
   const [progress, setProgress] = useState(0); 
   const [photos, setPhotos] = useState<any[]>([]);
   const [status, setStatus] = useState("");
-  
-  // Security State
   const [isEnabled, setIsEnabled] = useState<boolean | null>(null);
 
   const fetchPhotos = async () => {
@@ -24,7 +23,6 @@ export default function GalleryPage() {
   };
 
   useEffect(() => {
-    // 1. Check Security Status from Supabase
     const checkSecurity = async () => {
       const { data } = await supabase
         .from('settings')
@@ -32,22 +30,17 @@ export default function GalleryPage() {
         .eq('key', 'is_gallery_enabled')
         .single();
       
-      if (data) {
-        setIsEnabled(data.value === 'true');
-      }
+      if (data) setIsEnabled(data.value === 'true');
     };
 
     checkSecurity();
     fetchPhotos();
 
-    // 2. Real-time Security Listener (Locks/Unlocks instantly from Admin)
     const channel = supabase
       .channel('gallery_security')
       .on('postgres_changes', 
         { event: 'UPDATE', schema: 'public', table: 'settings', filter: 'key=eq.is_gallery_enabled' }, 
-        (payload) => {
-          setIsEnabled(payload.new.value === 'true');
-        }
+        (payload) => setIsEnabled(payload.new.value === 'true')
       )
       .subscribe();
 
@@ -73,41 +66,46 @@ export default function GalleryPage() {
     if (files.length === 0) return;
 
     setUploading(true);
-    setStatus("Uploading...");
+    setStatus("Optimizing for upload...");
     setProgress(15);
-    
-    const interval = setInterval(() => {
-      setProgress((prev) => (prev >= 95 ? prev : prev + 8));
-    }, 300);
+
+    const options = {
+      maxSizeMB: 3,           // BYPASS VERCEL LIMIT: Keeps files under 4.5MB
+      maxWidthOrHeight: 2560, // 2K resolution (looks sharp on iPhone 14 Pro Max)
+      useWebWorker: true,
+    };
 
     const formData = new FormData();
-    files.forEach((file) => formData.append('file', file));
 
     try {
+      for (const file of files) {
+        // Compress on guest's phone
+        const compressedFile = await imageCompression(file, options);
+        formData.append('file', compressedFile, file.name);
+      }
+
+      setStatus("Sending to gallery...");
+      setProgress(45);
+
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
-      clearInterval(interval);
-      
+
       if (res.ok) {
         setProgress(100);
-        setStatus("Success! Photos shared.");
+        setStatus("✨ Success! Photos shared.");
         setFiles([]);
         const input = document.querySelector('input[type="file"]') as HTMLInputElement;
         if (input) input.value = ''; 
         fetchPhotos(); 
-
-        setTimeout(() => { setProgress(0); }, 1500);
+        setTimeout(() => setProgress(0), 1500);
       } else {
         const errorData = await res.json();
-        setStatus(`Failed: ${errorData.error}`);
-        setProgress(0);
+        setStatus(`Error: ${errorData.error}`);
       }
     } catch (err) {
-      clearInterval(interval);
-      setStatus("Error connecting to server.");
-      setProgress(0);
+      setStatus("Upload failed. Try again.");
     } finally {
       setUploading(false);
-      setTimeout(() => { setStatus(""); }, 5000);
+      setTimeout(() => setStatus(""), 5000);
     }
   };
 
@@ -117,30 +115,25 @@ export default function GalleryPage() {
     );
   };
 
-  const photoRows = chunkPhotos(photos, 6);
-
-  // SECURITY: Show this if gallery is toggled OFF in Admin
   if (isEnabled === false) {
     return (
       <div className="min-h-screen bg-[#D0E0F0] text-stone-800 flex flex-col items-center font-sans relative">
         <Navigation />
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-700">
           <img src="/logo.png" alt="Logo" className="w-20 h-auto mb-8 opacity-50" />
-          <h1 className="text-3xl font-serif text-stone-900 mb-2">Gallery is currently private</h1>
-          <p className="text-stone-500 italic font-serif">We'll open this up after the ceremony!</p>
+          <h1 className="text-3xl font-serif text-stone-900 mb-2">Gallery is available yet</h1>
+          <p className="text-stone-500 italic font-serif">Check back later!</p>
         </div>
       </div>
     );
   }
 
-  // Prevents layout flicker while checking database
   if (isEnabled === null) return <div className="min-h-screen bg-[#D0E0F0]" />;
 
   return (
     <div className="min-h-screen bg-[#D0E0F0] text-stone-800 flex flex-col items-center font-sans relative pb-20 overflow-x-hidden">
       <Navigation />
 
-      {/* UPLOAD CARD */}
       <section className="max-w-md w-full mx-4 mt-6 md:mt-8 bg-white p-8 md:p-12 rounded-[40px] shadow-2xl border border-stone-100 text-center animate-in fade-in duration-1000">
         <div className="flex justify-center mb-6">
           <img src="/logo.png" alt="Logo" className="w-20 h-auto" />
@@ -153,22 +146,14 @@ export default function GalleryPage() {
 
         <form onSubmit={handleUpload} className="space-y-6">
           <div className="space-y-4 text-left relative">
-            <label className="text-[11px] uppercase text-stone-500 font-bold ml-2 tracking-widest">Select Photos</label>
+            <label className="text-[11px] uppercase text-stone-500 font-bold ml-2 tracking-widest">Select Photos (Max 5)</label>
             <div className="relative w-full">
-              <input 
-                type="file" 
-                multiple
-                accept="image/*" 
-                onChange={handleFileChange}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
-              />
-              <div className="w-full p-4 border border-stone-200 rounded-2xl bg-stone-50 text-base flex justify-between items-center focus-within:border-stone-400 transition-colors">
+              <input type="file" multiple accept="image/*" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+              <div className="w-full p-4 border border-stone-200 rounded-2xl bg-stone-50 text-base flex justify-between items-center focus-within:border-stone-400">
                 <span className={`truncate mr-4 ${files.length > 0 ? 'text-stone-900' : 'text-stone-400 italic'}`}>
-                  {files.length > 0 ? `${files.length} file(s) selected` : "Click to Choose photos"}
+                  {files.length > 0 ? `${files.length} selected` : "Click to choose photos"}
                 </span>
-                <span className="shrink-0 text-[10px] uppercase font-bold text-stone-600 bg-stone-200 px-4 py-2 rounded-full">
-                  Browse
-                </span>
+                <span className="shrink-0 text-[10px] uppercase font-bold text-stone-600 bg-stone-200 px-4 py-2 rounded-full">Browse</span>
               </div>
             </div>
           </div>
@@ -176,12 +161,10 @@ export default function GalleryPage() {
           {progress > 0 && (
             <div className="w-full bg-stone-100 rounded-full h-3 overflow-hidden relative shadow-inner animate-in fade-in duration-300">
               <div 
-                className="bg-stone-900 h-full transition-all duration-300 ease-out flex items-center justify-center" 
+                className={`h-full transition-all duration-300 ease-out flex items-center justify-center ${progress === 100 ? 'bg-green-500' : 'bg-stone-900'}`} 
                 style={{ width: `${progress}%` }}
               >
-                {progress > 20 && (
-                  <span className="text-[9px] text-white font-black">{progress}%</span>
-                )}
+                {progress > 20 && <span className="text-[9px] text-white font-black">{progress}%</span>}
               </div>
             </div>
           )}
@@ -190,21 +173,20 @@ export default function GalleryPage() {
             type="submit" 
             disabled={uploading || files.length === 0}
             className={`w-full bg-stone-900 text-white py-5 rounded-full uppercase text-xs font-bold tracking-widest shadow-xl transition-all ${
-              files.length === 0 || uploading ? 'opacity-30 cursor-not-allowed scale-95' : 'hover:bg-stone-800 active:scale-95'
+              files.length === 0 || uploading ? 'opacity-30' : 'hover:bg-stone-800 active:scale-95'
             }`}
           >
             {uploading ? "Uploading..." : "Upload Photos"}
           </button>
 
           {status && (
-            <p className={`text-sm italic font-serif h-4 ${status.includes('⚠️') ? 'text-red-500' : 'text-stone-500'}`}>
+            <p className={`text-sm italic font-serif h-4 ${status.includes('Success') ? 'text-green-600' : 'text-stone-500'}`}>
               {status}
             </p>
           )}
         </form>
       </section>
 
-      {/* GALLERY SECTION */}
       <section className="max-w-[1400px] w-full mt-16 md:mt-24 px-4 md:px-0">
         <h2 className="text-4xl font-serif text-center mb-12 text-stone-900">Shared Photos</h2>
         
@@ -212,24 +194,16 @@ export default function GalleryPage() {
           <p className="text-center italic text-stone-400 font-serif text-lg py-10">No photos shared yet.</p>
         ) : (
           <div className="space-y-10 md:space-y-16">
-            {photoRows.map((row, rowIndex) => (
+            {chunkPhotos(photos, 6).map((row, rowIndex) => (
               <div 
                 key={`row-${rowIndex}`} 
-                // FIXED: flex-nowrap + overflow-x-auto forces horizontal row. 
-                // gap-10 md:gap-12 provides the "baby blue" spacing you wanted.
                 className="flex flex-nowrap md:grid md:grid-cols-6 gap-10 md:gap-12 overflow-x-auto snap-x snap-mandatory pb-8 scrollbar-hide w-full"
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
               >
-                <style jsx>{`div::-webkit-scrollbar { display: none; }`}</style>
-                
                 {row.map((photo: any) => (
-                  <div 
-                    key={photo.id} 
-                    // FIXED: 31% width ensures 3 fit on iPhone. shrink-0 prevents them from collapsing.
-                    className="shrink-0 w-[31%] md:w-auto snap-start"
-                  >
-                    {/* FIXED: Thinner Padding (p-1.5 md:p-2.5) for a lighter container feel */}
-                    <div className="bg-white p-1.5 md:p-2.5 shadow-[0_8px_25px_rgba(0,0,0,0.08)] rounded-sm border-[1px] border-white active:scale-95 transition-all duration-200">
+                  <div key={photo.id} className="shrink-0 w-[31%] md:w-auto snap-start">
+                    {/* THIN WHITE POLAROID FRAME */}
+                    <div className="bg-white p-1 md:p-1.5 shadow-[0_8px_25px_rgba(0,0,0,0.08)] rounded-sm border-[1px] border-white active:scale-95 transition-all duration-200">
                       <a 
                         href={photo.thumbnailLink?.replace('=s220', '=s1600') || `https://drive.google.com/thumbnail?id=${photo.id}&sz=w1600`} 
                         target="_blank" 
@@ -239,9 +213,7 @@ export default function GalleryPage() {
                         <img 
                           src={photo.thumbnailLink?.replace('=s220', '=s600') || `https://drive.google.com/thumbnail?id=${photo.id}&sz=w600`} 
                           alt={photo.name}
-                          referrerPolicy="no-referrer"
                           className="w-full h-full object-cover"
-                          onError={(e) => (e.currentTarget.src = '/logo.png')}
                         />
                       </a>
                     </div>
