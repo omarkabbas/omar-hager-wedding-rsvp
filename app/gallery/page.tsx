@@ -2,7 +2,6 @@
 import { useState, useEffect } from 'react';
 import Navigation from '@/app/components/Navigation';
 import { supabase } from '@/lib/supabase';
-import imageCompression from 'browser-image-compression';
 
 export default function GalleryPage() {
   const [files, setFiles] = useState<File[]>([]);
@@ -67,45 +66,53 @@ export default function GalleryPage() {
 
     setUploading(true);
     setStatus("Optimizing for upload...");
-    setProgress(15);
-
-    const options = {
-      maxSizeMB: 3,           // BYPASS VERCEL LIMIT: Keeps files under 4.5MB
-      maxWidthOrHeight: 2560, // 2K resolution (looks sharp on iPhone 14 Pro Max)
-      useWebWorker: true,
-    };
-
-    const formData = new FormData();
+    const CHUNK_SIZE = 1024 * 1024; // 1MB chunks
 
     try {
       for (const file of files) {
-        // Compress on guest's phone
-        const compressedFile = await imageCompression(file, options);
-        formData.append('file', compressedFile, file.name);
+        const totalSize = file.size;
+        const totalChunks = Math.ceil(totalSize / CHUNK_SIZE);
+        const fileId = Math.random().toString(36).substring(7);
+
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+          const start = chunkIndex * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, totalSize);
+          const chunk = file.slice(start, end);
+          
+          const reader = new FileReader();
+          const base64Promise = new Promise((resolve) => {
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(chunk);
+          });
+          const base64Data = (await base64Promise) as string;
+
+          const res = await fetch('/api/upload-chunk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fileId,
+              fileName: file.name,
+              fileType: file.type,
+              chunkIndex,
+              totalChunks,
+              totalSize,
+              data: base64Data.split(',')[1], 
+            }),
+          });
+
+          if (!res.ok) throw new Error("Chunk failed");
+          setProgress(Math.round(((chunkIndex + 1) / totalChunks) * 100));
+        }
       }
-
-      setStatus("Sending to gallery...");
-      setProgress(45);
-
-      const res = await fetch('/api/upload', { method: 'POST', body: formData });
-
-      if (res.ok) {
-        setProgress(100);
-        setStatus("✨ Success! Photos shared.");
-        setFiles([]);
-        const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-        if (input) input.value = ''; 
-        fetchPhotos(); 
-        setTimeout(() => setProgress(0), 1500);
-      } else {
-        const errorData = await res.json();
-        setStatus(`Error: ${errorData.error}`);
-      }
+      setStatus("✨ Success! Photos shared.");
+      setFiles([]);
+      fetchPhotos();
+      setTimeout(() => setProgress(0), 1500);
     } catch (err) {
-      setStatus("Upload failed. Try again.");
+      setStatus("⚠️ Upload failed. Check connection.");
     } finally {
       setUploading(false);
-      setTimeout(() => setStatus(""), 5000);
+      setTimeout(() => setStatus(""), 3000);
     }
   };
 
@@ -121,7 +128,7 @@ export default function GalleryPage() {
         <Navigation />
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-700">
           <img src="/logo.png" alt="Logo" className="w-20 h-auto mb-8 opacity-50" />
-          <h1 className="text-3xl font-serif text-stone-900 mb-2">Gallery is available yet</h1>
+          <h1 className="text-3xl font-serif text-stone-900 mb-2">Gallery is not available yet</h1>
           <p className="text-stone-500 italic font-serif">Check back later!</p>
         </div>
       </div>
@@ -200,25 +207,43 @@ export default function GalleryPage() {
                 className="flex flex-nowrap md:grid md:grid-cols-6 gap-10 md:gap-12 overflow-x-auto snap-x snap-mandatory pb-8 scrollbar-hide w-full"
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
               >
-                {row.map((photo: any) => (
-                  <div key={photo.id} className="shrink-0 w-[31%] md:w-auto snap-start">
-                    {/* THIN WHITE POLAROID FRAME */}
-                    <div className="bg-white p-1 md:p-1.5 shadow-[0_8px_25px_rgba(0,0,0,0.08)] rounded-sm border-[1px] border-white active:scale-95 transition-all duration-200">
-                      <a 
-                        href={photo.thumbnailLink?.replace('=s220', '=s1600') || `https://drive.google.com/thumbnail?id=${photo.id}&sz=w1600`} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="block relative aspect-[4/5] overflow-hidden bg-stone-50"
-                      >
-                        <img 
-                          src={photo.thumbnailLink?.replace('=s220', '=s600') || `https://drive.google.com/thumbnail?id=${photo.id}&sz=w600`} 
-                          alt={photo.name}
-                          className="w-full h-full object-cover"
-                        />
-                      </a>
-                    </div>
-                  </div>
-                ))}
+                {row.map((photo: any) => {
+  // Use the high-res thumbnail if available, otherwise show a processing state
+  const imageSrc = photo.thumbnailLink 
+    ? photo.thumbnailLink.replace('=s220', '=s1000') 
+    : null;
+
+  return (
+    <div key={photo.id} className="shrink-0 w-[65vw] md:w-[250px] snap-center">
+      <div className="bg-white p-1 md:p-1.5 shadow-xl rounded-sm border-[1px] border-white active:scale-95 transition-all duration-200">
+        <a 
+          href={photo.webViewLink} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="block relative aspect-[4/5] overflow-hidden bg-stone-100"
+        >
+          {imageSrc ? (
+            <img 
+              src={imageSrc} 
+              alt={photo.name}
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer" // Helps with Google permission blocks
+              onError={(e) => {
+                // If the thumbnail fails, hide the broken icon
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center p-4">
+              <div className="animate-pulse bg-stone-200 w-full h-full rounded-sm mb-2" />
+              <p className="text-[10px] text-stone-400 italic">Processing HD...</p>
+            </div>
+          )}
+        </a>
+      </div>
+    </div>
+  );
+})}
               </div>
             ))}
           </div>
