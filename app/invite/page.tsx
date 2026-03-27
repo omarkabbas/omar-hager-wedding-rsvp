@@ -68,14 +68,11 @@ function InviteContent() {
   );
 
   return (
-    <div className="min-h-screen bg-[#D0E0F0] flex flex-col items-center justify-center p-4 md:p-8 overflow-x-hidden py-16">
+    <div className="min-h-screen bg-[#D0E0F0] flex flex-col items-center justify-center p-4 md:p-8 overflow-x-hidden py-16 relative">
       
-      {/* Increased max-w-2xl and padding-top (pt-32 / pt-40) 
-        This pushes the envelope down and gives the guest name room to breathe.
-      */}
-      <div className="max-w-md md:max-w-2xl w-full bg-white p-6 md:p-16 pt-32 md:pt-40 rounded-[40px] shadow-2xl border border-stone-100 flex flex-col items-center relative animate-in zoom-in duration-1000">
+      <div className="max-w-md md:max-w-2xl w-full bg-white p-6 md:p-16 pt-32 md:pt-40 rounded-[40px] shadow-2xl border border-stone-100 flex flex-col items-center relative animate-in zoom-in duration-1000 mt-8 mb-8">
 
-        {/* --- PERSONALIZATION: Centered and positioned clearly at the top --- */}
+        {/* --- PERSONALIZATION --- */}
         <div className="absolute top-12 md:top-16 text-center z-0 px-4 w-full">
           <p className="text-[11px] uppercase tracking-[0.5em] text-stone-400 font-bold mb-3 font-sans opacity-80">You're invited,</p>
           <h1 className="text-4xl md:text-6xl font-serif text-stone-900 tracking-tight italic leading-tight">
@@ -103,23 +100,56 @@ function InviteContent() {
             align-items: center;
             justify-content: center;
             margin-bottom: 2.5rem;
-            /* Extra top margin so the envelope doesn't hug the guest name */
-            margin-top: 6rem;
+            margin-top: 10rem;
             transition: all 0.8s ease;
             z-index: 10;
           }
           
-          /* In Step 2, the card spans high, so we push the envelope margin even more */
           .cssletter.step-2 {
-            margin-top: 14rem;
+            margin-top: 16rem;
           }
 
+          /* --- TOP INSTRUCTION --- */
+          .tap-top-instruction {
+            position: absolute;
+            top: -60px; /* Pushed slightly higher for better framing */
+            width: 100%;
+            text-align: center;
+            font-family: serif;
+            font-style: italic;
+            font-size: 1rem; /* Slightly larger */
+            font-weight: 600; /* Bolder for visibility */
+            letter-spacing: 0.15em; /* Elegant spacing */
+            color: #78716c; /* Darker stone color for better contrast */
+            text-shadow: 0 1px 2px rgba(255,255,255,0.8);
+            transition: opacity 0.5s ease;
+            z-index: 20;
+          }
+
+          /* --- BOTTOM INSTRUCTION --- */
+          .tap-bottom-instruction {
+            position: absolute;
+            bottom: -60px; /* Pushed slightly lower */
+            width: 100%;
+            text-align: center;
+            font-family: serif;
+            font-style: italic;
+            font-size: 1.125rem; /* Larger than top to be very obvious */
+            font-weight: 600; /* Bolder */
+            letter-spacing: 0.15em;
+            color: #78716c; /* Darker stone color */
+            text-shadow: 0 1px 2px rgba(255,255,255,0.8);
+            transition: opacity 0.5s ease;
+            z-index: 20;
+          }
+
+          /* --- ENVELOPE BASE --- */
           .envelope {
             position: relative;
             width: var(--env-w);
             height: var(--env-h);
-            background: #CDB98B;
-            box-shadow: inset 0 0 30px -5px rgba(0,0,0,0.1), 0 15px 30px rgba(0,0,0,0.1);
+            background: #C3AF7D; 
+            box-shadow: inset 0 0 40px rgba(0,0,0,0.15), 0 15px 30px rgba(0,0,0,0.1);
             border-radius: 6px;
           }
 
@@ -158,10 +188,13 @@ function InviteContent() {
             content: ""; transform: rotate(45deg); width: 100%; aspect-ratio: 1; display: block; position: absolute;
           }
 
-          .envelope-flap::before { background: #FDF5D3; box-shadow: 0 0 30px -5px rgba(0,0,0,0.15); top: auto; bottom: 30%; border-radius: 2rem; }
-          .envelope-left::before { background: #F3E3AC; top: 10%; left: -65%; }
-          .envelope-right::before { background: #EAD99F; top: 10%; right: -65%; }
-          .envelope-bottom::before { background: #F6E8B6; top: 65%; left: 0; border-radius: 2rem; }
+          .envelope-flap::before { 
+            background: linear-gradient(135deg, #FDF5D3 0%, #F5E8B7 50%, #FDF5D3 100%);
+            box-shadow: 0 0 30px -5px rgba(0,0,0,0.15); top: auto; bottom: 30%; border-radius: 2rem; 
+          }
+          .envelope-left::before { background: linear-gradient(135deg, #F3E3AC 0%, #EDDBA1 100%); top: 10%; left: -65%; }
+          .envelope-right::before { background: linear-gradient(135deg, #EAD99F 0%, #E3D194 100%); top: 10%; right: -65%; }
+          .envelope-bottom::before { background: linear-gradient(135deg, #F6E8B6 0%, #F1DEA6 100%); top: 65%; left: 0; border-radius: 2rem; box-shadow: 0 -5px 20px rgba(0,0,0,0.05); }
 
           .cssletter.step-1 .envelope-flap, .cssletter.step-2 .envelope-flap { transform: rotateX(180deg) translateY(0); z-index: 1; }
           .cssletter.step-1 .invite-card { transform: translate(-50%, -50%); z-index: 2; }
@@ -197,24 +230,21 @@ function InviteContent() {
             z-index: 4; transition: 0.3s opacity; pointer-events: none;
           }
           .cssletter.step-1 .monogram-logo, .cssletter.step-2 .monogram-logo { opacity: 0; }
-
-          .tap-instruction { position: absolute; bottom: -40px; width: 100%; text-align: center; pointer-events: none; z-index: 0; }
         `}</style>
 
         <div className={`cssletter ${step === 1 ? 'step-1' : step === 2 ? 'step-2' : ''}`}>
+          
+          {/* TOP INSTRUCTION: PULSING */}
+          <div className={`tap-top-instruction animate-pulse ${step === 0 ? 'opacity-100' : 'opacity-0'}`}>
+            Tap envelope to open
+          </div>
+
           <div className="envelope">
             <div className="envelope-flap"></div>
             <div className="envelope-folds">
               <div className="envelope-left"></div>
               <div className="envelope-right"></div>
               <div className="envelope-bottom"></div>
-            </div>
-            
-            <div className={`tap-instruction transition-opacity duration-500 ${step === 0 ? 'opacity-100' : 'opacity-0'}`}>
-              <p className="text-stone-400 font-serif italic text-sm tracking-widest animate-pulse">Tap envelope to open</p>
-            </div>
-            <div className={`tap-instruction transition-opacity duration-500 ${step === 1 ? 'opacity-100' : 'opacity-0'}`}>
-              <p className="text-stone-400 font-serif italic text-sm tracking-widest animate-pulse">Tap card to view</p>
             </div>
           </div>
 
@@ -224,21 +254,21 @@ function InviteContent() {
               alt="Wedding Invitation" 
               className="w-full h-auto object-contain rounded-sm border border-stone-50" 
             />
-            <div className={`scroll-instruction ${step === 2 && isAtTop ? 'opacity-100' : 'opacity-0'}`}>
-               <p className="text-stone-500 font-sans text-[10px] font-bold uppercase tracking-widest animate-bounce drop-shadow-sm">Scroll to view ↓</p>
+            <div className={`scroll-instruction ${step === 2 && isAtTop ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+               <p className="text-stone-500 font-sans text-[10px] font-bold uppercase tracking-widest animate-bounce">Scroll to view ↓</p>
             </div>
+          </div>
+
+          {/* BOTTOM INSTRUCTION: RESTORED, PULSING, BIGGER */}
+          <div className={`tap-bottom-instruction animate-pulse ${step === 1 ? 'opacity-100' : 'opacity-0'}`}>
+            Tap card to view
           </div>
 
           <div className="monogram-logo">
             <img 
               src="/logo.png" 
               alt="Logo" 
-              style={{ 
-                width: '65px', 
-                height: 'auto', 
-                filter: 'brightness(0) contrast(100%)',
-                transform: 'rotate(-2deg)' 
-              }}
+              style={{ width: '65px', height: 'auto', filter: 'brightness(0) contrast(100%)', transform: 'rotate(-2deg)' }}
               className="opacity-90"
             />
           </div>
@@ -247,17 +277,19 @@ function InviteContent() {
             <img 
               src="/seal.png" 
               alt="Seal" 
-              style={{ width: '70px', height: '70px', objectFit: 'contain' }}
-              className="drop-shadow-2xl saturate-[1.1] brightness-105 z-10"
+              style={{ 
+                width: '70px', 
+                height: '70px', 
+                objectFit: 'contain',
+                filter: 'drop-shadow(0 3px 5px rgba(0,0,0,0.15)) saturate(1.15)',
+              }}
+              className="z-10"
             />
           </button>
         </div>
 
         <div className={`w-full max-w-[280px] transition-all duration-1000 mt-12 ${showButton ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
-          <button 
-            onClick={handleProceed} 
-            className="w-full bg-stone-900 text-white py-5 md:py-6 rounded-full uppercase text-xs md:text-sm font-bold font-sans shadow-xl hover:bg-stone-800 active:scale-95 transition-colors tracking-widest"
-          >
+          <button onClick={handleProceed} className="w-full bg-stone-900 text-white py-5 md:py-6 rounded-full uppercase text-xs md:text-sm font-bold tracking-widest shadow-xl">
             RSVP
           </button>
         </div>
