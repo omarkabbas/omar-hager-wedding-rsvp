@@ -1,12 +1,13 @@
 "use client";
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Navigation from '@/app/components/Navigation';
 
 export default function GuestRSVP() {
   const params = useParams();
+  const router = useRouter();
   const inviteCode = params.code as string;
   const [guestData, setGuestData] = useState<any>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -19,12 +20,21 @@ export default function GuestRSVP() {
       const { data } = await supabase.from('rsvp_list').select('*').eq('invite_code', inviteCode.toUpperCase().trim()).maybeSingle();
       if (data) {
         setGuestData(data);
-        if (data.attending !== null) setSubmitted(true);
+        if (data.attending !== null) {
+          setSubmitted(true);
+        } else {
+          // Check if they came from the envelope; if not, redirect to the animation
+          const hasSeenEnvelope = sessionStorage.getItem(`seen_envelope_${inviteCode}`);
+          if (!hasSeenEnvelope) {
+            router.push(`/invite?code=${inviteCode}`);
+            return;
+          }
+        }
       }
       setLoading(false);
     }
     fetchGuest();
-  }, [inviteCode]);
+  }, [inviteCode, router]);
 
   async function handleSubmit(e: any) {
     e.preventDefault();
@@ -41,62 +51,95 @@ export default function GuestRSVP() {
   }
 
   return (
-    <div className="min-h-screen bg-[#D0E0F0] text-stone-800 flex flex-col items-center font-sans relative">
+    <div className="min-h-screen bg-[#D0E0F0] text-stone-800 flex flex-col items-center font-sans relative overflow-x-hidden">
       <Navigation />
 
-      <section className="max-w-md w-full mx-4 mt-6 md:mt-8 bg-white p-8 md:p-12 rounded-[40px] shadow-2xl border border-stone-100 mb-20 text-center">
-        <div className="flex justify-center mb-8"><img src="/logo.png" alt="Logo" className="w-24 h-auto" /></div>
+      <section className="max-w-md md:max-w-xl w-full mx-4 mt-6 md:mt-12 bg-white p-8 md:p-12 rounded-[40px] shadow-2xl border border-stone-100 mb-20 text-center animate-in zoom-in duration-1000">
+        <div className="flex justify-center mb-8"><img src="/logo.png" alt="Logo" className="w-20 md:w-28 h-auto" /></div>
         
-        {loading ? ( <div className="py-10 font-serif italic text-stone-400">Finding invitation...</div> ) : !guestData ? (
+        {loading ? ( 
+          <div className="py-10 font-serif italic text-stone-400 animate-pulse text-lg">Finding invitation...</div> 
+        ) : !guestData ? (
           <div className="py-10">
-            <h2 className="text-3xl font-serif mb-6 text-stone-900">Invite Not Found</h2>
-            <p className="text-stone-500 italic mb-10 leading-relaxed font-sans">Please check the invite or contact Omar & Hager!</p>
-            <Link href="/" className="inline-block px-10 py-5 bg-stone-900 text-white rounded-full text-xs uppercase font-bold hover:bg-stone-800 transition-colors">Return Home</Link>
+            <h2 className="text-3xl font-serif mb-6 text-stone-900 tracking-tight">Invite Not Found</h2>
+            <p className="text-stone-500 italic mb-10 leading-relaxed">Please check the invite or contact Omar & Hager!</p>
+            <Link href="/" className="inline-block px-10 py-5 bg-stone-900 text-white rounded-full text-xs uppercase font-bold tracking-widest shadow-xl hover:bg-stone-800 transition-colors">Return Home</Link>
           </div>
         ) : submitted ? (
-          <div className="py-6 animate-in fade-in duration-1000">
-            <h2 className="text-4xl font-serif mb-4 text-stone-900">
-              {guestData.attending ? "You're RSVP'd!" : "Thanks for your response"}
+          <div className="py-4 animate-in fade-in duration-1000">
+            <h2 className="text-4xl md:text-5xl font-serif mb-6 text-stone-900 tracking-tight">
+              {guestData.attending ? "You're RSVP'd!" : "Thank You"}
             </h2>
-            <p className="text-stone-600 italic mb-10 text-lg">
-              {guestData.attending ? "We can't wait to celebrate with you!" : "Thanks for letting us know you won't make it :("}
+            <div className="h-px w-16 bg-stone-200 mx-auto mb-8"></div>
+            <p className="text-stone-600 italic mb-10 text-lg md:text-xl">
+              {guestData.attending ? "We can't wait to celebrate with you!" : "Thanks for letting us know."}
             </p>
+            
             {guestData.attending && (
-              <div className="space-y-6 text-left">
-                <div className="p-6 bg-stone-50 rounded-3xl border border-stone-100 text-center">
-                   <p className="text-[10px] uppercase tracking-widest text-stone-400 mb-2 font-bold font-sans">Venue</p>
-                   <a href="https://maps.google.com/?q=Reflections+Venue+and+Gardens+Plano" target="_blank" className="font-serif text-xl text-stone-900 underline">Reflections Venue & Gardens</a>
+              <div className="space-y-6 text-left max-w-lg mx-auto">
+                {/* VENUE CARD */}
+                <div className="p-6 md:p-8 border border-stone-100 rounded-3xl bg-stone-50 shadow-inner text-center">
+                   <p className="text-[10px] uppercase tracking-widest text-stone-400 mb-2 font-bold font-sans">The Venue</p>
+                   <a href="https://maps.google.com/?q=Reflections+Venue+%26+Gardens" target="_blank" rel="noopener noreferrer" className="font-serif text-xl md:text-2xl text-stone-900 underline underline-offset-8 decoration-stone-200 hover:text-stone-600 transition-colors">Reflections Venue & Gardens</a>
                 </div>
-                <div className="p-6 bg-stone-50 rounded-3xl border border-stone-100">
-                  <p className="text-[10px] uppercase tracking-widest text-stone-400 mb-3 font-bold font-sans text-center">A Note on Gifts</p>
-                  <p className="text-sm text-stone-500 italic leading-relaxed text-center font-sans">As we already have a home filled with everything we need, we kindly request no boxed or bagged gifts. Should you wish to honor us with a gift toward our future together, it would be most sincerely appreciated.</p>
+                
+                {/* NOTE ON GIFTS */}
+                <div className="p-6 md:p-8 border border-stone-100 rounded-3xl bg-stone-50 shadow-inner text-center">
+                  <p className="text-[10px] uppercase tracking-widest text-stone-400 mb-4 font-bold font-sans">A Note on Gifts</p>
+                  <p className="text-sm md:text-base text-stone-600 italic leading-relaxed font-sans">
+                    As we already have a home filled with everything we need, we kindly request no boxed or bagged gifts. Should you wish to honor us with a gift toward our future together, it would be most sincerely appreciated.
+                  </p>
                 </div>
               </div>
             )}
-            <Link href="/" className="inline-block mt-8 px-10 py-5 border border-stone-200 rounded-full text-[11px] uppercase font-bold w-full hover:bg-stone-50 transition-colors">Back to Home</Link>
+            
+            {/* FOOTER BUTTON - Spaced away from the Gift Note */}
+            <div className="mt-12">
+              <Link href="/" className="inline-block w-full bg-stone-900 text-white py-5 rounded-full uppercase text-xs font-bold tracking-widest shadow-xl hover:bg-stone-800 active:scale-95 transition-all">
+                Explore Our Website
+              </Link>
+            </div>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-8 md:space-y-10">
-            <div className="border-b border-stone-50 pb-8 text-center">
-              <p className="font-serif italic text-stone-400 text-xl mb-2">Welcome,</p>
-              <h2 className="text-4xl font-serif text-stone-900">{guestData.guest_name}</h2>
+          /* FORM SECTION - MATCHES MYTABLE STYLING */
+          <form onSubmit={handleSubmit} className="space-y-8">
+            <div className="text-center mb-10">
+              <p className="font-serif italic text-stone-400 text-xl md:text-2xl mb-1">Welcome,</p>
+              <h2 className="text-4xl md:text-5xl font-serif text-stone-900 tracking-tight">{guestData.guest_name}</h2>
             </div>
-            <div className="space-y-6 text-left">
-              <label className="text-[12px] uppercase text-stone-500 font-bold ml-2 font-sans">Will you join us?</label>
-              <select name="attending" value={isAttending} onChange={(e) => setIsAttending(e.target.value)} required className="w-full p-4 md:p-5 border border-stone-200 rounded-2xl bg-stone-50 text-base md:text-lg outline-none cursor-pointer font-sans focus:border-stone-400 transition-colors">
+            
+            <div className="relative text-left">
+              <label className="text-[11px] uppercase text-stone-500 font-bold ml-2 tracking-widest">Will you join us?</label>
+              <select 
+                name="attending" 
+                value={isAttending} 
+                onChange={(e) => setIsAttending(e.target.value)} 
+                required 
+                className="mt-2 w-full px-6 py-4 rounded-2xl bg-stone-50 border border-stone-100 text-base text-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-200 transition-all cursor-pointer appearance-none shadow-sm"
+              >
                 <option value="true">Happily Accepts</option>
                 <option value="false">Regretfully Declines</option>
               </select>
             </div>
+            
             {isAttending === "true" && (
-              <div className="space-y-6 text-left animate-in slide-in-from-top-2">
-                <label className="text-[12px] uppercase text-stone-500 font-bold ml-2 font-sans">Guests (Max: {guestData.max_guests})</label>
-                <select name="count" required className="w-full p-4 md:p-5 border border-stone-200 rounded-2xl bg-stone-50 text-base md:text-lg outline-none cursor-pointer font-sans focus:border-stone-400 transition-colors">
-                  {[...Array(guestData.max_guests)].map((_, i) => <option key={i+1} value={i+1}>{i+1}</option>)}
+              <div className="relative text-left animate-in slide-in-from-top-2 duration-500">
+                <label className="text-[11px] uppercase text-stone-500 font-bold ml-2 tracking-widest">Number of Guests (Max: {guestData.max_guests})</label>
+                <select 
+                  name="count" 
+                  required 
+                  className="mt-2 w-full px-6 py-4 rounded-2xl bg-stone-50 border border-stone-100 text-base text-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-200 transition-all cursor-pointer appearance-none shadow-sm"
+                >
+                  {[...Array(guestData.max_guests)].map((_, i) => (
+                    <option key={i+1} value={i+1}>{i+1} {i === 0 ? 'Guest' : 'Guests'}</option>
+                  ))}
                 </select>
               </div>
             )}
-            <button type="submit" className="w-full bg-stone-900 text-white py-5 md:py-6 rounded-full uppercase text-xs md:text-sm font-bold font-sans shadow-xl hover:bg-stone-800 transition-colors">Confirm RSVP</button>
+            
+            <button type="submit" className="w-full bg-stone-900 text-white py-5 rounded-full uppercase text-xs font-bold tracking-widest shadow-xl hover:bg-stone-800 active:scale-95 transition-all mt-4">
+              Confirm RSVP
+            </button>
           </form>
         )}
       </section>
