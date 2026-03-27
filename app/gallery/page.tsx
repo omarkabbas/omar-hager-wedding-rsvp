@@ -65,16 +65,22 @@ export default function GalleryPage() {
     if (files.length === 0) return;
 
     setUploading(true);
-    setStatus("Optimizing for upload...");
-    const CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+    setProgress(5);
+    const CHUNK_SIZE = 1024 * 1024; 
 
     try {
       for (const file of files) {
+        setStatus(`✨ Optimizing ${file.name}...`);
         const totalSize = file.size;
         const totalChunks = Math.ceil(totalSize / CHUNK_SIZE);
         const fileId = Math.random().toString(36).substring(7);
 
         for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+          // Dynamic Wedding Statuses
+          if (chunkIndex === 0) setStatus("🖼️ Connecting to gallery...");
+          else if (chunkIndex === Math.floor(totalChunks / 2)) setStatus("📸 Sending memories...");
+          else if (chunkIndex === totalChunks - 1) setStatus("❤️ Almost there...");
+
           const start = chunkIndex * CHUNK_SIZE;
           const end = Math.min(start + CHUNK_SIZE, totalSize);
           const chunk = file.slice(start, end);
@@ -107,12 +113,14 @@ export default function GalleryPage() {
       setStatus("✨ Success! Photos shared.");
       setFiles([]);
       fetchPhotos();
-      setTimeout(() => setProgress(0), 1500);
+      setTimeout(() => {
+        setProgress(0);
+        setStatus("");
+      }, 4000);
     } catch (err) {
       setStatus("⚠️ Upload failed. Check connection.");
     } finally {
       setUploading(false);
-      setTimeout(() => setStatus(""), 3000);
     }
   };
 
@@ -156,7 +164,7 @@ export default function GalleryPage() {
             <label className="text-[11px] uppercase text-stone-500 font-bold ml-2 tracking-widest">Select Photos (Max 5)</label>
             <div className="relative w-full">
               <input type="file" multiple accept="image/*" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
-              <div className="w-full p-4 border border-stone-200 rounded-2xl bg-stone-50 text-base flex justify-between items-center focus-within:border-stone-400">
+              <div className="w-full p-4 border border-stone-200 rounded-2xl bg-stone-50 text-base flex justify-between items-center focus-within:border-stone-400 transition-colors">
                 <span className={`truncate mr-4 ${files.length > 0 ? 'text-stone-900' : 'text-stone-400 italic'}`}>
                   {files.length > 0 ? `${files.length} selected` : "Click to choose photos"}
                 </span>
@@ -179,7 +187,7 @@ export default function GalleryPage() {
           <button 
             type="submit" 
             disabled={uploading || files.length === 0}
-            className={`w-full bg-stone-900 text-white py-5 rounded-full uppercase text-xs font-bold tracking-widest shadow-xl transition-all ${
+            className={`w-full flex justify-center items-center gap-3 bg-stone-900 text-white py-5 rounded-full uppercase text-xs font-bold tracking-widest shadow-xl transition-all ${
               files.length === 0 || uploading ? 'opacity-30' : 'hover:bg-stone-800 active:scale-95'
             }`}
           >
@@ -187,7 +195,7 @@ export default function GalleryPage() {
           </button>
 
           {status && (
-            <p className={`text-sm italic font-serif h-4 ${status.includes('Success') ? 'text-green-600' : 'text-stone-500'}`}>
+            <p className={`text-sm italic font-serif h-4 transition-all duration-500 ${status.includes('Success') ? 'text-green-600 font-bold scale-105' : 'text-stone-500'}`}>
               {status}
             </p>
           )}
@@ -204,46 +212,42 @@ export default function GalleryPage() {
             {chunkPhotos(photos, 6).map((row, rowIndex) => (
               <div 
                 key={`row-${rowIndex}`} 
-                className="flex flex-nowrap md:grid md:grid-cols-6 gap-10 md:gap-12 overflow-x-auto snap-x snap-mandatory pb-8 scrollbar-hide w-full"
+                className="flex flex-nowrap overflow-x-auto snap-x snap-mandatory px-4 md:px-0 gap-10 md:gap-12 pb-8 scrollbar-hide w-full"
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
               >
                 {row.map((photo: any) => {
-  // Use the high-res thumbnail if available, otherwise show a processing state
-  const imageSrc = photo.thumbnailLink 
-    ? photo.thumbnailLink.replace('=s220', '=s1000') 
-    : null;
-
-  return (
-    <div key={photo.id} className="shrink-0 w-[65vw] md:w-[250px] snap-center">
-      <div className="bg-white p-1 md:p-1.5 shadow-xl rounded-sm border-[1px] border-white active:scale-95 transition-all duration-200">
+                  const imageSrc = photo.thumbnailLink ? photo.thumbnailLink.replace('=s220', '=s1000') : null;
+                  return (
+                    <div key={photo.id} className="shrink-0 w-[65vw] md:w-[250px] snap-center">
+                      <div className="bg-white p-1 md:p-1.5 shadow-xl rounded-sm border-[1px] border-white active:scale-95 transition-all duration-200">
         <a 
           href={photo.webViewLink} 
           target="_blank" 
           rel="noopener noreferrer"
           className="block relative aspect-[4/5] overflow-hidden bg-stone-100"
         >
-          {imageSrc ? (
-            <img 
-              src={imageSrc} 
-              alt={photo.name}
-              className="w-full h-full object-cover"
+                          {imageSrc ? (
+                            <img 
+                              src={imageSrc} 
+                              alt={photo.name}
+                              className="w-full h-full object-cover"
               referrerPolicy="no-referrer" // Helps with Google permission blocks
               onError={(e) => {
                 // If the thumbnail fails, hide the broken icon
                 e.currentTarget.style.display = 'none';
               }}
-            />
-          ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center p-4">
-              <div className="animate-pulse bg-stone-200 w-full h-full rounded-sm mb-2" />
-              <p className="text-[10px] text-stone-400 italic">Processing HD...</p>
-            </div>
-          )}
-        </a>
-      </div>
-    </div>
-  );
-})}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center p-4">
+                              <div className="animate-pulse bg-stone-200 w-full h-full rounded-sm mb-2" />
+                              <p className="text-[10px] text-stone-400 italic">Processing HD...</p>
+                            </div>
+                          )}
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
