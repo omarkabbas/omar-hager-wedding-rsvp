@@ -108,7 +108,7 @@ export default function GuestRSVP() {
                   <div className="space-y-6 text-left max-w-lg mx-auto">
                     <div className="p-6 md:p-8 bg-stone-50 rounded-3xl border border-stone-100 text-center shadow-inner">
                        <p className="text-[10px] uppercase tracking-widest text-stone-400 mb-2 font-bold font-sans">The Venue</p>
-                       <a href="https://maps.google.com" target="_blank" rel="noreferrer" className="font-serif text-xl md:text-2xl text-stone-900 underline underline-offset-8 decoration-stone-200 hover:text-stone-600 transition-colors">Reflections Venue & Gardens</a>
+                       <a href="https://maps.google.com/maps?q=Reflections+Venue+and+Gardens+Plano" target="_blank" rel="noreferrer" className="font-serif text-xl md:text-2xl text-stone-900 underline underline-offset-8 decoration-stone-200 hover:text-stone-600 transition-colors">Reflections Venue & Gardens</a>
                     </div>
                     
                     <div className="p-6 md:p-8 bg-stone-50 rounded-3xl border border-stone-100 text-center shadow-inner">
