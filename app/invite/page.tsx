@@ -112,38 +112,37 @@ function InviteContent() {
           /* --- TOP INSTRUCTION --- */
           .tap-top-instruction {
             position: absolute;
-            top: -60px; /* Pushed slightly higher for better framing */
+            top: -60px;
             width: 100%;
             text-align: center;
             font-family: serif;
             font-style: italic;
-            font-size: 1rem; /* Slightly larger */
-            font-weight: 600; /* Bolder for visibility */
-            letter-spacing: 0.15em; /* Elegant spacing */
-            color: #78716c; /* Darker stone color for better contrast */
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: 0.15em;
+            color: #78716c;
             text-shadow: 0 1px 2px rgba(255,255,255,0.8);
-            transition: opacity 0.5s ease;
-            z-index: 20;
+            transition: opacity 0.3s ease;
+            z-index: 4; /* Sits UNDER the flap when it rotates up (flap is z-5) */
           }
 
           /* --- BOTTOM INSTRUCTION --- */
           .tap-bottom-instruction {
             position: absolute;
-            bottom: -60px; /* Pushed slightly lower */
+            bottom: -60px;
             width: 100%;
             text-align: center;
             font-family: serif;
             font-style: italic;
-            font-size: 1.125rem; /* Larger than top to be very obvious */
-            font-weight: 600; /* Bolder */
+            font-size: 1.125rem;
+            font-weight: 600;
             letter-spacing: 0.15em;
-            color: #78716c; /* Darker stone color */
+            color: #78716c;
             text-shadow: 0 1px 2px rgba(255,255,255,0.8);
             transition: opacity 0.5s ease;
             z-index: 20;
           }
 
-          /* --- ENVELOPE BASE --- */
           .envelope {
             position: relative;
             width: var(--env-w);
@@ -180,7 +179,8 @@ function InviteContent() {
 
           .envelope-flap {
             width: 100%; height: 75%; position: absolute; top: 0;
-            z-index: 5; overflow: hidden; transition: 0.6s linear all;
+            z-index: 5; /* Higher than top instruction */
+            overflow: hidden; transition: 0.6s linear all;
             transform-origin: top; pointer-events: none;
           }
 
@@ -234,8 +234,8 @@ function InviteContent() {
 
         <div className={`cssletter ${step === 1 ? 'step-1' : step === 2 ? 'step-2' : ''}`}>
           
-          {/* TOP INSTRUCTION: PULSING */}
-          <div className={`tap-top-instruction animate-pulse ${step === 0 ? 'opacity-100' : 'opacity-0'}`}>
+          {/* TOP INSTRUCTION: Pinned to step 0 only */}
+          <div className={`tap-top-instruction animate-pulse ${step === 0 ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
             Tap envelope to open
           </div>
 
@@ -259,8 +259,8 @@ function InviteContent() {
             </div>
           </div>
 
-          {/* BOTTOM INSTRUCTION: RESTORED, PULSING, BIGGER */}
-          <div className={`tap-bottom-instruction animate-pulse ${step === 1 ? 'opacity-100' : 'opacity-0'}`}>
+          {/* BOTTOM INSTRUCTION: Pinned to step 1 only */}
+          <div className={`tap-bottom-instruction animate-pulse ${step === 1 ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
             Tap card to view
           </div>
 
