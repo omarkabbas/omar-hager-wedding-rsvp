@@ -19,9 +19,9 @@ export default function RegistryPage() {
           </div>
 
           {/* Title - Optimized for iPhone Width */}
-          <h1 className="text-4xl md:text-8xl font-serif mb-6 md:mb-10 text-stone-900 tracking-tight leading-tight">
+          <h2 className="text-4xl md:text-8xl font-serif mb-6 md:mb-10 text-stone-900 tracking-tight leading-tight">
             Registry
-          </h1>
+          </h2>
 
           {/* Decorative line */}
           <div className="h-px w-20 md:w-32 bg-stone-300 mx-auto mb-8 md:mb-12"></div>

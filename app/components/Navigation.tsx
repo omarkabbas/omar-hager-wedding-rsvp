@@ -14,18 +14,20 @@ export default function Navigation() {
         Home
       </Link>
       
-      <Link 
-        href="/gallery" 
-        className={`px-3 md:px-8 py-2 md:py-4 transition-all ${pathname === '/gallery' ? 'text-stone-900 border-b-2 border-stone-900' : 'hover:text-stone-900'}`}
-      >
-        Gallery
-      </Link>
+      
 
       <Link 
         href="/registry" 
         className={`px-3 md:px-8 py-2 md:py-4 transition-all ${pathname === '/registry' ? 'text-stone-900 border-b-2 border-stone-900' : 'hover:text-stone-900'}`}
       >
         Registry
+      </Link>
+
+      <Link 
+        href="/gallery" 
+        className={`px-3 md:px-8 py-2 md:py-4 transition-all ${pathname === '/gallery' ? 'text-stone-900 border-b-2 border-stone-900' : 'hover:text-stone-900'}`}
+      >
+        Gallery
       </Link>
     </nav>
   );
