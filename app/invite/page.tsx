@@ -109,7 +109,6 @@ function InviteContent() {
             margin-top: 16rem;
           }
 
-          /* --- TOP INSTRUCTION --- */
           .tap-top-instruction {
             position: absolute;
             top: -60px;
@@ -123,10 +122,9 @@ function InviteContent() {
             color: #78716c;
             text-shadow: 0 1px 2px rgba(255,255,255,0.8);
             transition: opacity 0.3s ease;
-            z-index: 4; /* Sits UNDER the flap when it rotates up (flap is z-5) */
+            z-index: 4; 
           }
 
-          /* --- BOTTOM INSTRUCTION --- */
           .tap-bottom-instruction {
             position: absolute;
             bottom: -60px;
@@ -179,7 +177,7 @@ function InviteContent() {
 
           .envelope-flap {
             width: 100%; height: 75%; position: absolute; top: 0;
-            z-index: 5; /* Higher than top instruction */
+            z-index: 5; 
             overflow: hidden; transition: 0.6s linear all;
             transform-origin: top; pointer-events: none;
           }
@@ -235,9 +233,11 @@ function InviteContent() {
         <div className={`cssletter ${step === 1 ? 'step-1' : step === 2 ? 'step-2' : ''}`}>
           
           {/* TOP INSTRUCTION: Pinned to step 0 only */}
-          <div className={`tap-top-instruction animate-pulse ${step === 0 ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-            Tap envelope to open
-          </div>
+          {step === 0 && (
+             <div className="tap-top-instruction animate-pulse">
+                Tap envelope to open
+             </div>
+          )}
 
           <div className="envelope">
             <div className="envelope-flap"></div>
@@ -260,9 +260,11 @@ function InviteContent() {
           </div>
 
           {/* BOTTOM INSTRUCTION: Pinned to step 1 only */}
-          <div className={`tap-bottom-instruction animate-pulse ${step === 1 ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-            Tap card to view
-          </div>
+          {step === 1 && (
+            <div className="tap-bottom-instruction animate-pulse">
+              Tap card to view
+            </div>
+          )}
 
           <div className="monogram-logo">
             <img 
