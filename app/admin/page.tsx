@@ -12,6 +12,7 @@ export default function AdminDashboard() {
   const [newCode, setNewCode] = useState('');
   const [newLimit, setNewLimit] = useState(1);
   const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState(false);
+  const [isGalleryEnabled, setIsGalleryEnabled] = useState(false);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,9 +30,13 @@ export default function AdminDashboard() {
   };
 
   const fetchSettings = async () => {
-    const { data, error } = await supabase.from('settings').select('value').eq('key', 'is_seating_chart_enabled').single();
+    const { data, error } = await supabase.from('settings').select('key, value').in('key', ['is_seating_chart_enabled', 'is_gallery_enabled']);
     if (data) {
-      setIsSeatingChartEnabled(data.value === 'true');
+      const seatingSetting = data.find(s => s.key === 'is_seating_chart_enabled');
+      if (seatingSetting) setIsSeatingChartEnabled(seatingSetting.value === 'true');
+      
+      const gallerySetting = data.find(s => s.key === 'is_gallery_enabled');
+      if (gallerySetting) setIsGalleryEnabled(gallerySetting.value === 'true');
     }
   };
 
@@ -56,6 +61,14 @@ export default function AdminDashboard() {
     const { error } = await supabase.from('settings').update({ value: newValue.toString() }).eq('key', 'is_seating_chart_enabled');
     if (!error) {
       setIsSeatingChartEnabled(newValue);
+    }
+  };
+
+  const toggleGallery = async () => {
+    const newValue = !isGalleryEnabled;
+    const { error } = await supabase.from('settings').update({ value: newValue.toString() }).eq('key', 'is_gallery_enabled');
+    if (!error) {
+      setIsGalleryEnabled(newValue);
     }
   };
 
@@ -89,11 +102,19 @@ export default function AdminDashboard() {
 
         <section className="bg-stone-50 p-8 md:p-10 rounded-[40px] mb-16 border border-stone-100 text-center font-sans">
           <h2 className="text-2xl font-serif mb-8 text-stone-900">Settings</h2>
-          <div className="flex items-center justify-between max-w-md mx-auto">
-            <span className="text-stone-700">Enable "Find Your Table" Page</span>
-            <button onClick={toggleSeatingChart} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${isSeatingChartEnabled ? 'bg-stone-800' : 'bg-stone-300'}`}>
-              <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${isSeatingChartEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-            </button>
+          <div className="flex flex-col gap-6 max-w-md mx-auto">
+            <div className="flex items-center justify-between">
+              <span className="text-stone-700">Enable "Find Your Table" Page</span>
+              <button onClick={toggleSeatingChart} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${isSeatingChartEnabled ? 'bg-stone-800' : 'bg-stone-300'}`}>
+                <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${isSeatingChartEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-stone-700">Enable "Guest Gallery" Page</span>
+              <button onClick={toggleGallery} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${isGalleryEnabled ? 'bg-stone-800' : 'bg-stone-300'}`}>
+                <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${isGalleryEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
           </div>
         </section>
 

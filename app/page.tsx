@@ -8,12 +8,17 @@ import HeroCarousel from '@/app/components/HeroCarousel';
 export default function HomePage() {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
   const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState(false);
+  const [isGalleryEnabled, setIsGalleryEnabled] = useState(false);
 
   useEffect(() => {
     const fetchSettings = async () => {
-      const { data, error } = await supabase.from('settings').select('value').eq('key', 'is_seating_chart_enabled').single();
+      const { data, error } = await supabase.from('settings').select('key, value').in('key', ['is_seating_chart_enabled', 'is_gallery_enabled']);
       if (data) {
-        setIsSeatingChartEnabled(data.value === 'true');
+        const seatingSetting = data.find(s => s.key === 'is_seating_chart_enabled');
+        if (seatingSetting) setIsSeatingChartEnabled(seatingSetting.value === 'true');
+        
+        const gallerySetting = data.find(s => s.key === 'is_gallery_enabled');
+        if (gallerySetting) setIsGalleryEnabled(gallerySetting.value === 'true');
       }
     };
 
@@ -76,11 +81,18 @@ export default function HomePage() {
             </div>
           </div>
 
-          {isSeatingChartEnabled && (
-            <div className="mt-16 animate-in fade-in duration-1000">
-              <Link href="/mytable" className="inline-block px-14 py-5 bg-stone-900 text-white rounded-full text-sm uppercase font-bold shadow-xl hover:bg-stone-800 transition-colors">
-                Find Your Table
-              </Link>
+          {(isSeatingChartEnabled || isGalleryEnabled) && (
+            <div className="mt-16 flex flex-col md:flex-row justify-center items-center gap-6 animate-in fade-in duration-1000">
+              {isSeatingChartEnabled && (
+                <Link href="/mytable" className="inline-block px-14 py-5 bg-stone-900 text-white rounded-full text-sm uppercase font-bold shadow-xl hover:bg-stone-800 transition-colors w-full md:w-auto">
+                  Find Your Table
+                </Link>
+              )}
+              {isGalleryEnabled && (
+                <Link href="/gallery" className="inline-block px-14 py-5 bg-stone-900 text-white rounded-full text-sm uppercase font-bold shadow-xl hover:bg-stone-800 transition-colors w-full md:w-auto">
+                  Guest Gallery
+                </Link>
+              )}
             </div>
           )}
         </div>
