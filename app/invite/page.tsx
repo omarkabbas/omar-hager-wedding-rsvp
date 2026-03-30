@@ -37,10 +37,16 @@ function InviteContent() {
 
   const handleInteraction = () => {
     if (step === 0) {
+      // Step 1 triggers the flap opening CSS
       setStep(1); 
-      setTimeout(() => setShowButton(true), 1500); 
-    } else if (step === 1) {
-      setStep(2); 
+      
+      // Wait for flap to open (600ms), then trigger the card pop-out (Step 2)
+      setTimeout(() => {
+        setStep(2);
+      }, 600);
+      
+      // Show the RSVP button after the whole animation finishes
+      setTimeout(() => setShowButton(true), 2000); 
     }
   };
 
@@ -82,13 +88,14 @@ function InviteContent() {
 
         <style>{`
           :root {
-            --env-w: 280px;
-            --env-h: 380px;
+            /* --- HORIZONTAL ENVELOPE DIMENSIONS --- */
+            --env-w: 320px;
+            --env-h: 220px;
           }
           @media (min-width: 768px) {
             :root {
-              --env-w: 360px;
-              --env-h: 480px; 
+              --env-w: 460px;
+              --env-h: 320px; 
             }
           }
 
@@ -123,22 +130,6 @@ function InviteContent() {
             text-shadow: 0 1px 2px rgba(255,255,255,0.8);
             transition: opacity 0.3s ease;
             z-index: 4; 
-          }
-
-          .tap-bottom-instruction {
-            position: absolute;
-            bottom: -60px;
-            width: 100%;
-            text-align: center;
-            font-family: serif;
-            font-style: italic;
-            font-size: 1.125rem;
-            font-weight: 600;
-            letter-spacing: 0.15em;
-            color: #78716c;
-            text-shadow: 0 1px 2px rgba(255,255,255,0.8);
-            transition: opacity 0.5s ease;
-            z-index: 20;
           }
 
           .envelope {
@@ -178,8 +169,10 @@ function InviteContent() {
           .envelope-flap {
             width: 100%; height: 75%; position: absolute; top: 0;
             z-index: 5; 
-            overflow: hidden; transition: 0.6s linear all;
+            overflow: hidden; 
             transform-origin: top; pointer-events: none;
+            /* Instant z-index change when closing */
+            transition: transform 0.6s linear, z-index 0s 0s;
           }
 
           .envelope-flap::before, .envelope-left::before, .envelope-right::before, .envelope-bottom::before {
@@ -188,22 +181,31 @@ function InviteContent() {
 
           .envelope-flap::before { 
             background: linear-gradient(135deg, #FDF5D3 0%, #F5E8B7 50%, #FDF5D3 100%);
-            box-shadow: 0 0 30px -5px rgba(0,0,0,0.15); top: auto; bottom: 30%; border-radius: 2rem; 
+            
+            top: auto; 
+            bottom: 26%; /* This aligns the flap tip exactly to center */
+            border-radius: 1.5rem; 
           }
-          .envelope-left::before { background: linear-gradient(135deg, #F3E3AC 0%, #EDDBA1 100%); top: 10%; left: -65%; }
-          .envelope-right::before { background: linear-gradient(135deg, #EAD99F 0%, #E3D194 100%); top: 10%; right: -65%; }
-          .envelope-bottom::before { background: linear-gradient(135deg, #F6E8B6 0%, #F1DEA6 100%); top: 65%; left: 0; border-radius: 2rem; box-shadow: 0 -5px 20px rgba(0,0,0,0.05); }
+          .envelope-left::before { background: linear-gradient(135deg, #F3E3AC 0%, #EDDBA1 100%); top: 5%; left: -60%; }
+          .envelope-right::before { background: linear-gradient(135deg, #EAD99F 0%, #E3D194 100%); top: 5%; right: -60%; }
+          .envelope-bottom::before { background: linear-gradient(135deg, #F6E8B6 0%, #F1DEA6 100%); top: 45%; left: 0; border-radius: 2rem; box-shadow: 0 -5px 20px rgba(0,0,0,0.05); }
 
-          .cssletter.step-1 .envelope-flap, .cssletter.step-2 .envelope-flap { transform: rotateX(180deg) translateY(0); z-index: 1; }
+          /* --- CLIPPING FIX: 0.3s z-index delay so flap clears image --- */
+          .cssletter.step-1 .envelope-flap, .cssletter.step-2 .envelope-flap { 
+            transform: rotateX(180deg) translateY(0); 
+            z-index: 1; 
+            transition: transform 0.6s linear, z-index 0s 0.3s; 
+          }
+ 
           .cssletter.step-1 .invite-card { transform: translate(-50%, -50%); z-index: 2; }
           
           .cssletter.step-2 .invite-card {
-            transform: translate(-50%, -15%) scale(1); 
+            transform: translate(-50%, 10%) scale(1); 
             z-index: 20; 
             width: 125%; 
             max-width: 92vw; 
-            height: 135%; 
-            max-height: 72vh; 
+            height: 250%; 
+            max-height: 100vh; 
             padding: 8px;
             box-shadow: 0 20px 50px rgba(0,0,0,0.2);
             border-radius: 8px;
@@ -217,22 +219,35 @@ function InviteContent() {
           }
 
           .seal-container {
-            position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%);
-            z-index: 6; transition: 0.3s all; cursor: pointer;
+            position: absolute; 
+            top: 75%; 
+            left: 50%; 
+            transform: translate(-50%, -50%);
+            z-index: 6; 
+            transition: 0.3s all; 
+            pointer-events: none; /* Clicks pass through to envelope */
             display: flex; flex-direction: column; align-items: center; justify-content: center;
           }
-          .cssletter.step-1 .seal-container, .cssletter.step-2 .seal-container { opacity: 0; pointer-events: none; }
+          .cssletter.step-1 .seal-container, .cssletter.step-2 .seal-container { opacity: 0; }
 
           .monogram-logo {
-            position: absolute; top: 74%; left: 50%; transform: translateX(-50%);
-            z-index: 4; transition: 0.3s opacity; pointer-events: none;
+            position: absolute; 
+            top: 35%; 
+            left: 50%; 
+            transform: translate(-50%, -50%);
+            z-index: 6; 
+            transition: 0.3s opacity; 
+            pointer-events: none;
           }
           .cssletter.step-1 .monogram-logo, .cssletter.step-2 .monogram-logo { opacity: 0; }
         `}</style>
 
-        <div className={`cssletter ${step === 1 ? 'step-1' : step === 2 ? 'step-2' : ''}`}>
+        <div 
+          className={`cssletter ${step === 1 ? 'step-1' : step === 2 ? 'step-2' : ''} ${step === 0 ? 'cursor-pointer' : ''}`}
+          onClick={step === 0 ? handleInteraction : undefined}
+        >
           
-          {/* TOP INSTRUCTION: Pinned to step 0 only */}
+          {/* TOP INSTRUCTION */}
           {step === 0 && (
              <div className="tap-top-instruction animate-pulse">
                 Tap envelope to open
@@ -248,9 +263,9 @@ function InviteContent() {
             </div>
           </div>
 
-          <div className="invite-card" onClick={handleInteraction} onScroll={handleScroll} ref={cardRef}>
+          <div className="invite-card" onScroll={handleScroll} ref={cardRef}>
             <img 
-              src="/savethedate-bg.JPEG" 
+              src="/invitation.jpeg" 
               alt="Wedding Invitation" 
               className="w-full h-auto object-contain rounded-sm border border-stone-50" 
             />
@@ -259,35 +274,28 @@ function InviteContent() {
             </div>
           </div>
 
-          {/* BOTTOM INSTRUCTION: Pinned to step 1 only */}
-          {step === 1 && (
-            <div className="tap-bottom-instruction animate-pulse">
-              Tap card to view
-            </div>
-          )}
-
           <div className="monogram-logo">
             <img 
               src="/logo.png" 
               alt="Logo" 
-              style={{ width: '65px', height: 'auto', filter: 'brightness(0) contrast(100%)', transform: 'rotate(-2deg)' }}
+              style={{ width: '75px', height: 'auto', filter: 'brightness(0) contrast(100%)', transform: 'rotate(-2deg)' }}
               className="opacity-90"
             />
           </div>
 
-          <button onClick={handleInteraction} className="seal-container hover:scale-110 active:scale-95 transition-transform group">
+          <div className="seal-container">
             <img 
               src="/seal.png" 
               alt="Seal" 
               style={{ 
-                width: '70px', 
-                height: '70px', 
+                width: '75px', 
+                height: '75px', 
                 objectFit: 'contain',
                 filter: 'drop-shadow(0 3px 5px rgba(0,0,0,0.15)) saturate(1.15)',
               }}
               className="z-10"
             />
-          </button>
+          </div>
         </div>
 
         <div className={`w-full max-w-[280px] transition-all duration-1000 mt-12 ${showButton ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
