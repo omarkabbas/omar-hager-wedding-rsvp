@@ -1,9 +1,10 @@
 "use client";
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import Navigation from '@/app/components/Navigation';
-import { supabase } from '@/lib/supabase';
-import HeroCarousel from '@/app/components/HeroCarousel';
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import Navigation from "@/app/components/Navigation";
+import HeroCarousel from "@/app/components/HeroCarousel";
+import { supabase } from "@/lib/supabase";
 
 export default function HomePage() {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
@@ -12,14 +13,18 @@ export default function HomePage() {
 
   useEffect(() => {
     const fetchSettings = async () => {
-      const { data, error } = await supabase.from('settings').select('key, value').in('key', ['is_seating_chart_enabled', 'is_gallery_enabled']);
-      if (data) {
-        const seatingSetting = data.find(s => s.key === 'is_seating_chart_enabled');
-        if (seatingSetting) setIsSeatingChartEnabled(seatingSetting.value === 'true');
-        
-        const gallerySetting = data.find(s => s.key === 'is_gallery_enabled');
-        if (gallerySetting) setIsGalleryEnabled(gallerySetting.value === 'true');
-      }
+      const { data } = await supabase
+        .from("settings")
+        .select("key, value")
+        .in("key", ["is_seating_chart_enabled", "is_gallery_enabled"]);
+
+      if (!data) return;
+
+      const seatingSetting = data.find((setting) => setting.key === "is_seating_chart_enabled");
+      const gallerySetting = data.find((setting) => setting.key === "is_gallery_enabled");
+
+      if (seatingSetting) setIsSeatingChartEnabled(seatingSetting.value === "true");
+      if (gallerySetting) setIsGalleryEnabled(gallerySetting.value === "true");
     };
 
     fetchSettings();
@@ -28,6 +33,7 @@ export default function HomePage() {
     const interval = setInterval(() => {
       const now = new Date().getTime();
       const dist = target - now;
+
       if (dist > 0) {
         setTimeLeft({
           days: Math.floor(dist / (1000 * 60 * 60 * 24)),
@@ -37,65 +43,64 @@ export default function HomePage() {
         });
       }
     }, 1000);
+
     return () => clearInterval(interval);
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#D0E0F0] text-stone-800 flex flex-col font-sans relative">
+    <div className="wedding-shell">
+      <div className="wedding-backdrop" />
       <Navigation />
 
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-start pt-6 pb-20 px-4 md:px-6 text-center">
-        <div className="max-w-4xl w-full animate-in fade-in zoom-in duration-1000">
-          
-          <div className="flex justify-center mb-10">
-            <img src="/logo.png" alt="Omar & Hager Logo" className="w-44 h-auto" />
+      <main className="wedding-main wedding-center pt-2 md:pt-4">
+        <section className="wedding-panel w-full max-w-5xl px-6 py-10 md:px-12 md:py-14 text-center animate-in fade-in zoom-in duration-1000">
+          <div className="flex justify-center mb-8 md:mb-10">
+            <img src="/logo.png" alt="Omar & Hager Logo" className="w-28 md:w-36 h-auto" />
           </div>
 
-          {/* Larger "The Wedding of" text */}
-          <h2 className="uppercase tracking-[0.6em] text-[16px] md:text-[20px] text-stone-500 mb-8 font-bold">The Wedding of</h2>
-          
-          <h1 className="text-7xl md:text-9xl font-serif mb-12 text-stone-900 tracking-tighter">Omar & Hager</h1>
+          <p className="wedding-kicker mb-4">The Wedding Of</p>
+          <h1 className="wedding-title text-5xl leading-none md:text-8xl mb-6 md:mb-8">Omar & Hager</h1>
+          <p className="font-serif text-3xl md:text-5xl text-stone-700 mb-8 md:mb-10">June 06, 2026</p>
 
-          <div className="mb-14 text-5xl md:text-7xl font-serif text-stone-800 tracking-tight leading-none">June 06, 2026</div>
+          <div className="wedding-divider mb-8 md:mb-10" />
 
-          <div className="h-px w-32 bg-stone-300 mx-auto mb-16"></div>
-          
-          <div className="flex justify-center gap-6 md:gap-12 mb-20 font-serif">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-10 md:mb-12 max-w-3xl mx-auto">
             {[
               { val: timeLeft.days, label: "Days" },
-              { val: timeLeft.hours, label: "Hrs" },
-              { val: timeLeft.minutes, label: "Mins" },
-              { val: timeLeft.seconds, label: "Secs", color: "text-pink-900" }
-            ].map((item, i) => (
-              <div key={i} className="flex flex-col items-center">
-                <span className={`text-4xl md:text-6xl ${item.color || 'text-stone-800'}`}>{String(item.val).padStart(2, '0')}</span>
-                <span className="text-[10px] uppercase tracking-widest text-stone-500 mt-3 font-bold font-sans">{item.label}</span>
+              { val: timeLeft.hours, label: "Hours" },
+              { val: timeLeft.minutes, label: "Minutes" },
+              { val: timeLeft.seconds, label: "Seconds", accent: "text-pink-900" },
+            ].map((item) => (
+              <div key={item.label} className="wedding-subpanel px-4 py-5 md:px-6 md:py-6">
+                <div className={`font-serif text-4xl md:text-5xl ${item.accent || "text-stone-900"}`}>
+                  {String(item.val).padStart(2, "0")}
+                </div>
+                <div className="wedding-kicker mt-3">{item.label}</div>
               </div>
             ))}
           </div>
 
-          {/* Venue card with no tilt and standard path */}
-          <div className="relative w-full max-w-md md:max-w-lg mx-auto p-3 md:p-5 bg-white shadow-2xl rounded-md md:rounded-xl">
-            <div className="relative w-full aspect-[3/4] md:aspect-[4/5]">
+          <div className="wedding-subpanel mx-auto max-w-sm md:max-w-xl p-3 md:p-4 mb-10 md:mb-12">
+            <div className="relative w-full aspect-[3/4] md:aspect-[4/5] overflow-hidden rounded-[24px]">
               <HeroCarousel />
             </div>
           </div>
 
           {(isSeatingChartEnabled || isGalleryEnabled) && (
-            <div className="mt-16 flex flex-col md:flex-row justify-center items-center gap-6 animate-in fade-in duration-1000">
+            <div className="flex flex-col md:flex-row justify-center items-stretch md:items-center gap-4 md:gap-5">
               {isSeatingChartEnabled && (
-                <Link href="/mytable" className="inline-block px-14 py-5 bg-stone-900 text-white rounded-full text-sm uppercase font-bold shadow-xl hover:bg-stone-800 transition-colors w-full md:w-auto">
+                <Link href="/mytable" className="wedding-button-primary w-full md:w-auto">
                   Find Your Table
                 </Link>
               )}
               {isGalleryEnabled && (
-                <Link href="/gallery" className="inline-block px-14 py-5 bg-stone-900 text-white rounded-full text-sm uppercase font-bold shadow-xl hover:bg-stone-800 transition-colors w-full md:w-auto">
+                <Link href="/gallery" className="wedding-button-primary w-full md:w-auto">
                   Guest Gallery
                 </Link>
               )}
             </div>
           )}
-        </div>
+        </section>
       </main>
     </div>
   );

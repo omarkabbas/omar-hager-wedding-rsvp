@@ -1,49 +1,43 @@
 "use client";
-import Link from 'next/link';
-import Navigation from '@/app/components/Navigation';
+
+import Link from "next/link";
+import Navigation from "@/app/components/Navigation";
 
 export default function RegistryPage() {
   return (
-    <div className="min-h-screen bg-[#D0E0F0] text-stone-800 flex flex-col font-sans relative overflow-x-hidden">
+    <div className="wedding-shell">
+      <div className="wedding-backdrop" />
       <Navigation />
-      
-      {/* Centered Main Area */}
-      <main className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 text-center -mt-10 md:-mt-20">
-        
-        {/* THE WHITE CONTAINER: Matches Gallery Card Exactly */}
-        <div className="max-w-md md:max-w-2xl w-full bg-white p-8 md:p-16 rounded-[40px] md:rounded-[50px] shadow-2xl border border-stone-100 animate-in zoom-in duration-1000">
-          
-          {/* Logo - Scaled for mobile */}
-          <div className="flex justify-center mb-6 md:mb-10">
-            <img src="/logo.png" alt="Logo" className="w-20 md:w-32 h-auto" />
+
+      <main className="wedding-main wedding-center text-center">
+        <section className="wedding-page-panel text-center animate-in zoom-in duration-1000">
+          <div className="flex justify-center mb-6">
+            <img src="/logo.png" alt="Omar & Hager logo" className="w-20 md:w-24 h-auto" />
           </div>
 
-          {/* Title - Optimized for iPhone Width */}
-          <h2 className="text-4xl md:text-8xl font-serif mb-6 md:mb-10 text-stone-900 tracking-tight leading-tight">
-            Registry
-          </h2>
+          <p className="wedding-kicker mb-3">Registry</p>
+          <h1 className="wedding-title text-4xl md:text-6xl mb-4">Registry</h1>
+          <div className="wedding-divider mb-8" />
 
-          {/* Decorative line */}
-          <div className="h-px w-20 md:w-32 bg-stone-300 mx-auto mb-8 md:mb-12"></div>
+          <div className="space-y-5 max-w-xl mx-auto">
+            <p className="font-serif italic text-stone-700 text-base md:text-xl leading-relaxed">
+              Your presence at our wedding is the greatest gift of all.
+            </p>
+            <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8">
+              <p className="text-sm md:text-base text-stone-600 leading-relaxed italic">
+                &ldquo;As we already have a home filled with everything we need, we kindly request no boxed
+                or bagged gifts. Should you wish to honor us with a gift toward our future together,
+                it would be most sincerely appreciated.&rdquo;
+              </p>
+            </div>
+          </div>
 
-          {/* Subtext */}
-          <p className="text-stone-700 mb-6 md:mb-8 italic font-light text-lg md:text-2xl leading-relaxed px-2">
-            Your presence at our wedding is the greatest gift of all.
-          </p>
-
-          {/* Main Message */}
-          <p className="text-stone-600 mb-10 md:mb-16 font-light text-sm md:text-lg max-w-lg mx-auto leading-relaxed italic font-sans px-2">
-            "As we already have a home filled with everything we need, we kindly request no boxed or bagged gifts. Should you wish to honor us with a gift toward our future together, it would be most sincerely appreciated."
-          </p>
-
-          {/* CTA - Gallery Style Button */}
-          <Link 
-            href="/" 
-            className="inline-block px-10 py-4 md:py-5 bg-stone-900 text-white rounded-full text-[10px] md:text-xs uppercase font-bold tracking-widest shadow-xl hover:bg-stone-800 transition-all active:scale-95"
-          >
-            Return Home
-          </Link>
-        </div>
+          <div className="mt-8 md:mt-10">
+            <Link href="/" className="wedding-button-primary w-full md:w-auto">
+              Return Home
+            </Link>
+          </div>
+        </section>
       </main>
     </div>
   );

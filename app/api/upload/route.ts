@@ -2,12 +2,6 @@ import { google } from 'googleapis';
 import { NextRequest, NextResponse } from 'next/server';
 import { Readable } from 'stream';
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -58,8 +52,9 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, ids: uploadedIds });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Drive Upload Error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Upload failed";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

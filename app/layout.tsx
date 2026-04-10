@@ -15,10 +15,6 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'Omar & Hager’s Wedding RSVP',
   description: 'June 6, 2026 • Plano, Texas',
-  // This line adds the logo to your browser tab thumbnail
-  icons: {
-    icon: "/logo.png",
-  },
 };
 
 export default function RootLayout({
