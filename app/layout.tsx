@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { geistMono, geistSans, virust } from "./fonts";
+import { virust } from "./fonts";
 
 export const metadata: Metadata = {
   title: 'Omar & Hager’s Wedding RSVP',
@@ -14,9 +14,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} ${virust.variable} antialiased`}
-      >
+      <body className={`${virust.variable} antialiased`}>
         {children}
       </body>
     </html>

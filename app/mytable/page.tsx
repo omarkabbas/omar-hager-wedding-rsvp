@@ -37,7 +37,9 @@ export default function MyTablePage() {
         { event: "*", schema: "public", table: "settings", filter: "key=eq.is_seating_chart_enabled" },
         (payload) => {
           if (!payload.new) return;
-          setIsSeatingChartEnabled(payload.new.value === "true");
+          const settingValue = (payload.new as { value?: string }).value;
+          if (typeof settingValue !== "string") return;
+          setIsSeatingChartEnabled(settingValue === "true");
         },
       )
       .subscribe();

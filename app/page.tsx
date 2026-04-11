@@ -43,7 +43,9 @@ export default function HomePage() {
         { event: "UPDATE", schema: "public", table: "settings", filter: "key=eq.is_seating_chart_enabled" },
         (payload) => {
           if (!payload.new) return;
-          setIsSeatingChartEnabled(payload.new.value === "true");
+          const settingValue = (payload.new as { value?: string }).value;
+          if (typeof settingValue !== "string") return;
+          setIsSeatingChartEnabled(settingValue === "true");
         },
       )
       .on(
@@ -51,7 +53,9 @@ export default function HomePage() {
         { event: "*", schema: "public", table: "settings", filter: "key=eq.is_gallery_enabled" },
         (payload) => {
           if (!payload.new) return;
-          setIsGalleryEnabled(payload.new.value === "true");
+          const settingValue = (payload.new as { value?: string }).value;
+          if (typeof settingValue !== "string") return;
+          setIsGalleryEnabled(settingValue === "true");
         },
       )
       .subscribe();
