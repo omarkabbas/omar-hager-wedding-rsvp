@@ -15,14 +15,40 @@ export default function MyTablePage() {
     const fetchSettings = async () => {
       const { data } = await supabase
         .from("settings")
-        .select("value")
+        .select("key, value")
         .eq("key", "is_seating_chart_enabled")
         .single();
 
       if (data) setIsSeatingChartEnabled(data.value === "true");
     };
 
-    fetchSettings();
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === "visible") {
+        void fetchSettings();
+      }
+    };
+
+    void fetchSettings();
+
+    const channel = supabase
+      .channel("mytable_live_settings")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "settings", filter: "key=eq.is_seating_chart_enabled" },
+        (payload) => {
+          if (!payload.new) return;
+          setIsSeatingChartEnabled(payload.new.value === "true");
+        },
+      )
+      .subscribe();
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+
+    return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+    };
   }, []);
 
   const performSearch = async (name: string) => {
@@ -84,7 +110,7 @@ export default function MyTablePage() {
         <div className="wedding-backdrop" />
         <Navigation />
         <main className="wedding-main wedding-center text-center">
-          <section className="wedding-page-panel max-w-lg text-center animate-in zoom-in duration-1000">
+          <section className="wedding-page-panel wedding-animate-up max-w-lg text-center">
             <div className="flex justify-center mb-6">
               <img src="/logo.png" alt="Omar & Hager logo" className="w-20 h-auto opacity-50" />
             </div>
@@ -105,7 +131,7 @@ export default function MyTablePage() {
       <Navigation />
 
       <main className="wedding-main wedding-center text-center">
-        <section className="wedding-page-panel text-center animate-in zoom-in duration-1000">
+        <section className="wedding-page-panel wedding-animate-up text-center">
           <div className="flex justify-center mb-6">
             <img src="/logo.png" alt="Omar & Hager logo" className="w-20 md:w-24 h-auto" />
           </div>
@@ -152,7 +178,7 @@ export default function MyTablePage() {
           </form>
 
           {searchResult && (
-            <div className="animate-in slide-in-from-bottom-4 duration-500 mt-8 md:mt-10">
+            <div className="wedding-animate-up mt-8 md:mt-10">
               <div className="wedding-divider mb-8" />
               <div className="wedding-subpanel px-6 py-7 md:px-8 md:py-8">
                 <p className="wedding-lead text-lg mb-2">Welcome, {searchResult.name}!</p>

@@ -1,8 +1,10 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+
+const RSVP_BY_DATE = process.env.NEXT_PUBLIC_RSVP_BY_DATE || "May 1, 2026";
 
 function InviteContent() {
   const searchParams = useSearchParams();
@@ -18,6 +20,11 @@ function InviteContent() {
   const cardRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLDivElement>(null);
   const hasAutoScrolledRef = useRef(false);
+  const rsvpByLabel = useMemo(() => {
+    const parsed = new Date(RSVP_BY_DATE);
+    if (Number.isNaN(parsed.getTime())) return RSVP_BY_DATE;
+    return parsed.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  }, []);
 
   useEffect(() => {
     async function fetchGuest() {
@@ -98,7 +105,7 @@ function InviteContent() {
     <div className="wedding-shell wedding-center px-4 py-8 md:px-8 md:py-12">
       <div className="wedding-backdrop" />
 
-      <div className="wedding-panel relative z-10 mt-4 mb-8 flex w-full max-w-md md:max-w-2xl flex-col items-center px-5 py-8 pt-28 pb-12 md:px-8 md:py-10 md:pt-34 md:pb-16 animate-in zoom-in duration-1000">
+      <div className="wedding-panel wedding-animate-up relative z-10 mt-4 mb-8 flex w-full max-w-md flex-col items-center px-5 py-8 pb-12 pt-28 md:max-w-2xl md:px-8 md:py-10 md:pb-16 md:pt-34">
         <div className="absolute top-10 md:top-14 w-full px-4 text-center">
           <p className="wedding-kicker mb-3">You’re invited,</p>
           <h1 className="wedding-page-title italic leading-tight">{guestName}</h1>
@@ -415,6 +422,9 @@ function InviteContent() {
           ref={buttonRef}
           className={`relative z-30 w-full max-w-[280px] transition-all duration-1000 mt-12 md:mt-16 ${showButton ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4 pointer-events-none"}`}
         >
+          <p className="mb-3 text-center text-[13px] italic tracking-[0.01em] text-stone-500 md:text-sm">
+            Kindly reply by {rsvpByLabel}.
+          </p>
           <button onClick={handleProceed} className="wedding-button-primary w-full">
             RSVP
           </button>

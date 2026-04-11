@@ -18,6 +18,7 @@ export default function GalleryPage() {
   const [photos, setPhotos] = useState<GalleryPhoto[]>([]);
   const [status, setStatus] = useState("");
   const [isEnabled, setIsEnabled] = useState<boolean | null>(null);
+  const [isGalleryFeedEnabled, setIsGalleryFeedEnabled] = useState(true);
 
   const fetchPhotos = async () => {
     try {
@@ -34,15 +35,19 @@ export default function GalleryPage() {
     const checkSecurity = async () => {
       const { data } = await supabase
         .from("settings")
-        .select("value")
-        .eq("key", "is_gallery_enabled")
-        .single();
+        .select("key, value")
+        .in("key", ["is_gallery_enabled", "is_gallery_feed_enabled"]);
 
-      if (data) setIsEnabled(data.value === "true");
+      if (!data) return;
+
+      const gallerySetting = data.find((row) => row.key === "is_gallery_enabled");
+      const feedSetting = data.find((row) => row.key === "is_gallery_feed_enabled");
+
+      if (gallerySetting) setIsEnabled(gallerySetting.value === "true");
+      if (feedSetting) setIsGalleryFeedEnabled(feedSetting.value === "true");
     };
 
-    checkSecurity();
-    fetchPhotos();
+    void checkSecurity();
 
     const channel = supabase
       .channel("gallery_security")
@@ -51,12 +56,22 @@ export default function GalleryPage() {
         { event: "UPDATE", schema: "public", table: "settings", filter: "key=eq.is_gallery_enabled" },
         (payload) => setIsEnabled(payload.new.value === "true"),
       )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "settings", filter: "key=eq.is_gallery_feed_enabled" },
+        (payload) => setIsGalleryFeedEnabled(payload.new.value === "true"),
+      )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  useEffect(() => {
+    if (isEnabled !== true || !isGalleryFeedEnabled) return;
+    void fetchPhotos();
+  }, [isEnabled, isGalleryFeedEnabled]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -125,7 +140,9 @@ export default function GalleryPage() {
 
       setStatus("✨ Success! Photos shared.");
       setFiles([]);
-      fetchPhotos();
+      if (isGalleryFeedEnabled) {
+        void fetchPhotos();
+      }
       setTimeout(() => {
         setProgress(0);
         setStatus("");
@@ -196,7 +213,7 @@ export default function GalleryPage() {
       <Navigation />
 
       <main className="wedding-main pt-2 md:pt-4">
-        <section className="wedding-page-panel max-w-2xl text-center animate-in fade-in duration-1000">
+        <section className="wedding-page-panel wedding-animate-up max-w-2xl text-center">
           <div className="flex justify-center mb-6">
             <img src="/logo.png" alt="Omar & Hager logo" className="w-20 md:w-24 h-auto" />
           </div>
@@ -260,62 +277,64 @@ export default function GalleryPage() {
           </form>
         </section>
 
-        <section className="mx-auto mt-12 md:mt-16 w-full max-w-7xl">
-          <div className="text-center mb-8 md:mb-10">
-            <p className="wedding-kicker mb-3">Shared Photos</p>
-            <h2 className="wedding-state-title">Guest Moments</h2>
-          </div>
-
-          {photos.length === 0 ? (
-            <div className="wedding-panel mx-auto max-w-2xl px-6 py-10 md:px-10 text-center">
-              <p className="wedding-lead text-stone-400 text-lg">No photos shared yet.</p>
+        {isGalleryFeedEnabled && (
+          <section className="mx-auto mt-12 md:mt-16 w-full max-w-7xl">
+            <div className="text-center mb-8 md:mb-10">
+              <p className="wedding-kicker mb-3">Shared Photos</p>
+              <h2 className="wedding-state-title">Guest Moments</h2>
             </div>
-          ) : (
-            <div className="space-y-8 md:space-y-12">
-              {chunkPhotos(photos, 6).map((row, rowIndex) => (
-                <div
-                  key={`row-${rowIndex}`}
-                  className="flex w-full snap-x snap-mandatory gap-5 overflow-x-auto px-1 pb-3 md:gap-6"
-                  style={{ scrollbarWidth: "none", msOverflowStyle: "none", WebkitOverflowScrolling: "touch" }}
-                >
-                  {row.map((photo) => {
-                    const imageSrc = photo.thumbnailLink ? photo.thumbnailLink.replace("=s220", "=s1000") : null;
 
-                    return (
-                      <div key={photo.id} className="w-[72vw] max-w-[280px] shrink-0 snap-center md:w-[250px]">
-                        <div className="wedding-subpanel overflow-hidden p-2 transition-all duration-200 active:scale-95">
-                          <a
-                            href={photo.webViewLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block relative aspect-[4/5] overflow-hidden rounded-[20px] bg-stone-100"
-                          >
-                            {imageSrc ? (
-                              <img
-                                src={imageSrc}
-                                alt={photo.name}
-                                className="h-full w-full object-cover"
-                                referrerPolicy="no-referrer"
-                                onError={(e) => {
-                                  e.currentTarget.style.display = "none";
-                                }}
-                              />
-                            ) : (
-                              <div className="flex h-full w-full flex-col items-center justify-center p-4">
-                                <div className="mb-2 h-full w-full animate-pulse rounded-sm bg-stone-200" />
-                                <p className="text-[10px] italic text-stone-400">Processing HD...</p>
-                              </div>
-                            )}
-                          </a>
+            {photos.length === 0 ? (
+              <div className="wedding-panel mx-auto max-w-2xl px-6 py-10 md:px-10 text-center">
+                <p className="wedding-lead text-stone-400 text-lg">No photos shared yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-8 md:space-y-12">
+                {chunkPhotos(photos, 6).map((row, rowIndex) => (
+                  <div
+                    key={`row-${rowIndex}`}
+                    className="flex w-full snap-x snap-mandatory gap-5 overflow-x-auto px-1 pb-3 md:gap-6"
+                    style={{ scrollbarWidth: "none", msOverflowStyle: "none", WebkitOverflowScrolling: "touch" }}
+                  >
+                    {row.map((photo) => {
+                      const imageSrc = photo.thumbnailLink ? photo.thumbnailLink.replace("=s220", "=s1000") : null;
+
+                      return (
+                        <div key={photo.id} className="w-[72vw] max-w-[280px] shrink-0 snap-center md:w-[250px]">
+                          <div className="wedding-subpanel overflow-hidden p-2 transition-all duration-200 active:scale-95">
+                            <a
+                              href={photo.webViewLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block relative aspect-[4/5] overflow-hidden rounded-[20px] bg-stone-100"
+                            >
+                              {imageSrc ? (
+                                <img
+                                  src={imageSrc}
+                                  alt={photo.name}
+                                  className="h-full w-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                  onError={(e) => {
+                                    e.currentTarget.style.display = "none";
+                                  }}
+                                />
+                              ) : (
+                                <div className="flex h-full w-full flex-col items-center justify-center p-4">
+                                  <div className="mb-2 h-full w-full animate-pulse rounded-sm bg-stone-200" />
+                                  <p className="text-[10px] italic text-stone-400">Processing HD...</p>
+                                </div>
+                              )}
+                            </a>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
       </main>
     </div>
   );

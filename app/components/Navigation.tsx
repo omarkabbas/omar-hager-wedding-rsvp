@@ -13,7 +13,7 @@ export default function Navigation() {
   const pathname = usePathname();
 
   return (
-    <nav className="wedding-nav-shell animate-in fade-in duration-1000">
+    <nav className="wedding-nav-shell wedding-animate-fade">
       <div className="wedding-nav-inner">
         {links.map((link) => {
           const active = pathname === link.href;

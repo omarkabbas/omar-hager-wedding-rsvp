@@ -10,7 +10,7 @@ export default function RegistryPage() {
       <Navigation />
 
       <main className="wedding-main wedding-center text-center">
-        <section className="wedding-page-panel text-center animate-in zoom-in duration-1000">
+        <section className="wedding-page-panel wedding-animate-up text-center">
           <div className="flex justify-center mb-6">
             <img src="/logo.png" alt="Omar & Hager logo" className="w-20 md:w-24 h-auto" />
           </div>
@@ -25,9 +25,10 @@ export default function RegistryPage() {
             </p>
             <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8">
               <p className="wedding-copy italic">
-                &ldquo;As we already have a home filled with everything we need, we kindly request no boxed
-                or bagged gifts. Should you wish to honor us with a gift toward our future together,
-                it would be most sincerely appreciated.&rdquo;
+                &ldquo;As we are fortunate to have a home already filled with everything we need, we kindly
+                request no boxed or bagged gifts. If you&apos;d like to honor us with a gift, a
+                contribution toward our future would be deeply appreciated and will help us create
+                cherished memories together.&rdquo;
               </p>
             </div>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Navigation from "@/app/components/Navigation";
@@ -14,6 +14,8 @@ type GuestData = {
   confirmed_guests: number | null;
 };
 
+const RSVP_BY_DATE = process.env.NEXT_PUBLIC_RSVP_BY_DATE || "May 1, 2026";
+
 export default function GuestRSVP() {
   const params = useParams();
   const router = useRouter();
@@ -23,6 +25,18 @@ export default function GuestRSVP() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isAttending, setIsAttending] = useState("true");
+  const [showConfetti, setShowConfetti] = useState(false);
+  const confettiPieces = useMemo(() => Array.from({ length: 26 }, (_, i) => i), []);
+  const rsvpByLabel = useMemo(() => {
+    const parsed = new Date(RSVP_BY_DATE);
+    if (Number.isNaN(parsed.getTime())) return RSVP_BY_DATE;
+    return parsed.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  }, []);
+
+  const mapLink =
+    "https://maps.google.com/maps?q=Reflections+Venue+and+Gardens+Plano";
+  const calendarLink =
+    "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Omar+%26+Hager+Wedding&dates=20260606/20260607&location=Reflections+Venue+%26+Gardens,+1901+E+Spring+Creek+Pkwy,+Plano,+TX+75074&details=We+can%E2%80%99t+wait+to+celebrate+together.";
 
   useEffect(() => {
     async function fetchGuest() {
@@ -61,7 +75,11 @@ export default function GuestRSVP() {
 
     const formData = new FormData(e.currentTarget);
     const attendingValue = formData.get("attending") === "true";
-    const countValue = attendingValue ? parseInt(formData.get("count") as string, 10) : 0;
+    const countValue = attendingValue
+      ? guestData.max_guests === 1
+        ? 1
+        : parseInt(formData.get("count") as string, 10)
+      : 0;
 
     const { error } = await supabase
       .from("rsvp_list")
@@ -74,6 +92,10 @@ export default function GuestRSVP() {
     if (!error) {
       setGuestData({ ...guestData, attending: attendingValue, confirmed_guests: countValue });
       setSubmitted(true);
+      if (attendingValue) {
+        setShowConfetti(true);
+        window.setTimeout(() => setShowConfetti(false), 2800);
+      }
     }
   }
 
@@ -96,6 +118,19 @@ export default function GuestRSVP() {
           color: #1c1917;
           padding: 10px;
         }
+        @keyframes weddingConfettiFall {
+          0% {
+            transform: translate3d(0, -20vh, 0) rotate(0deg);
+            opacity: 0;
+          }
+          12% {
+            opacity: 1;
+          }
+          100% {
+            transform: translate3d(var(--x-shift, 0px), 95vh, 0) rotate(520deg);
+            opacity: 0;
+          }
+        }
       `}</style>
 
       <main className="wedding-main wedding-center">
@@ -104,7 +139,7 @@ export default function GuestRSVP() {
             Finding your invitation...
           </div>
         ) : (
-          <section className="wedding-page-panel animate-in zoom-in duration-1000">
+          <section className="wedding-page-panel wedding-animate-up relative overflow-hidden">
             <div className="flex justify-center mb-6">
               <img src="/logo.png" alt="Omar & Hager logo" className="w-20 md:w-24 h-auto" />
             </div>
@@ -121,7 +156,27 @@ export default function GuestRSVP() {
                 </Link>
               </div>
             ) : submitted ? (
-              <div className="py-2 animate-in fade-in duration-1000 text-center">
+              <div className="wedding-animate-fade py-2 text-center">
+                {guestData.attending && showConfetti && (
+                  <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                    {confettiPieces.map((piece) => (
+                      <span
+                        key={piece}
+                        className="absolute top-0 h-2.5 w-2 rounded-sm"
+                        style={
+                          {
+                            left: `${(piece * 97) % 100}%`,
+                            background:
+                              piece % 3 === 0 ? "#86efac" : piece % 3 === 1 ? "#c4b5fd" : "#f9a8d4",
+                            animation: `weddingConfettiFall ${1.8 + (piece % 5) * 0.25}s ease-out ${piece * 0.05}s both`,
+                            "--x-shift": `${(piece % 2 === 0 ? 1 : -1) * (24 + (piece % 7) * 7)}px`,
+                          } as CSSProperties
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+
                 <p className="wedding-kicker mb-3">Response Received</p>
                 <h2 className="wedding-page-title mb-5">
                   {guestData.attending ? "You’re RSVP’d!" : "We’ve received your response"}
@@ -136,21 +191,33 @@ export default function GuestRSVP() {
                 {guestData.attending && (
                   <div className="space-y-5 text-left max-w-xl mx-auto">
                     <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8 text-center">
-                      <p className="wedding-kicker mb-3">The Venue</p>
-                      <p className="wedding-card-title">
-                        Reflections Venue & Gardens
+                      <p className="wedding-kicker mb-3">Wedding Details</p>
+                      <p className="wedding-card-title">Reflections Venue & Gardens</p>
+                      <p className="mt-3 text-sm md:text-base text-stone-600 leading-relaxed">
+                        Saturday, June 6, 2026
+                      </p>
+                      <p className="text-sm md:text-base text-stone-500 leading-relaxed">
+                        We kindly invite guests to begin arriving at 6:00 PM.
                       </p>
                       <p className="mt-4 text-sm md:text-base text-stone-500 leading-relaxed">
                         1901 E Spring Creek Pkwy, Plano, TX 75074
                       </p>
-                      <div className="mt-6 flex justify-center">
+                      <div className="mt-6 flex flex-col sm:flex-row gap-2 justify-center">
                         <a
-                          href="https://maps.google.com/maps?q=Reflections+Venue+and+Gardens+Plano"
+                          href={mapLink}
                           target="_blank"
                           rel="noreferrer"
                           className="wedding-button-secondary"
                         >
-                          Get Directions
+                          View Map
+                        </a>
+                        <a
+                          href={calendarLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="wedding-button-secondary"
+                        >
+                          Add to Calendar
                         </a>
                       </div>
                     </div>
@@ -158,9 +225,10 @@ export default function GuestRSVP() {
                     <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8 text-center">
                       <p className="wedding-kicker mb-3">A Note On Gifts</p>
                       <p className="wedding-copy italic">
-                        As we already have a home filled with everything we need, we kindly request no boxed
-                        or bagged gifts. Should you wish to honor us with a gift toward our future together,
-                        it would be most sincerely appreciated.
+                        As we are fortunate to have a home already filled with everything we need, we kindly
+                        request no boxed or bagged gifts. If you&apos;d like to honor us with a gift, a
+                        contribution toward our future would be deeply appreciated and will help us create
+                        cherished memories together.
                       </p>
                     </div>
                   </div>
@@ -178,10 +246,16 @@ export default function GuestRSVP() {
                   <p className="wedding-kicker mb-3">RSVP</p>
                   <p className="wedding-lead text-stone-400 text-xl mb-1">Welcome,</p>
                   <h2 className="wedding-title text-4xl md:text-5xl">{guestData.guest_name}</h2>
+                  <p className="mt-3 text-[13px] italic tracking-[0.01em] text-stone-500 md:text-sm">
+                    We have reserved {guestData.max_guests} {guestData.max_guests === 1 ? "seat" : "seats"} in your honor.
+                  </p>
                 </div>
 
                 <div className="space-y-2 text-left">
-                  <label className="wedding-kicker block ml-2">Will You Join Us?</label>
+                  <p className="text-center text-[13px] italic tracking-[0.01em] text-stone-500 md:text-sm">
+                    Kindly reply by {rsvpByLabel}.
+                  </p>
+                  <label className="wedding-kicker block ml-2">Will you be attending?</label>
                   <select
                     name="attending"
                     value={isAttending}
@@ -189,14 +263,14 @@ export default function GuestRSVP() {
                     required
                     className="wedding-select"
                   >
-                    <option value="true">Happily Accepts</option>
+                    <option value="true">Joyfully Accepts</option>
                     <option value="false">Regretfully Declines</option>
                   </select>
                 </div>
 
-                {isAttending === "true" && (
-                  <div className="space-y-2 text-left animate-in slide-in-from-top-4 duration-500">
-                    <label className="wedding-kicker block ml-2">Your Party Size</label>
+                {isAttending === "true" && guestData.max_guests > 1 && (
+                  <div className="wedding-animate-up space-y-2 text-left">
+                    <label className="wedding-kicker block ml-2">Number of Guests Attending</label>
                     <select name="count" required className="wedding-select">
                       {Array.from({ length: guestData.max_guests }, (_, i) => i + 1).map((count) => (
                         <option key={count} value={count}>
@@ -204,11 +278,14 @@ export default function GuestRSVP() {
                         </option>
                       ))}
                     </select>
+                    <p className="ml-2 text-xs text-stone-500">
+                      Please include children in your total.
+                    </p>
                   </div>
                 )}
 
                 <button type="submit" className="wedding-button-primary w-full">
-                  Confirm RSVP
+                  Submit RSVP
                 </button>
               </form>
             )}

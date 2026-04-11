@@ -28,7 +28,35 @@ export default function HomePage() {
       if (gallerySetting) setIsGalleryEnabled(gallerySetting.value === "true");
     };
 
-    fetchSettings();
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === "visible") {
+        void fetchSettings();
+      }
+    };
+
+    void fetchSettings();
+
+    const channel = supabase
+      .channel("home_live_settings")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "settings", filter: "key=eq.is_seating_chart_enabled" },
+        (payload) => {
+          if (!payload.new) return;
+          setIsSeatingChartEnabled(payload.new.value === "true");
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "settings", filter: "key=eq.is_gallery_enabled" },
+        (payload) => {
+          if (!payload.new) return;
+          setIsGalleryEnabled(payload.new.value === "true");
+        },
+      )
+      .subscribe();
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
 
     const target = new Date("June 6, 2026 00:00:00").getTime();
     const interval = setInterval(() => {
@@ -45,7 +73,12 @@ export default function HomePage() {
       }
     }, 1000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+    };
   }, []);
 
   return (
@@ -54,7 +87,7 @@ export default function HomePage() {
       <Navigation />
 
       <main className="wedding-main wedding-center pt-2 md:pt-4">
-        <section className="wedding-panel w-full max-w-5xl px-6 py-10 md:px-12 md:py-14 text-center animate-in fade-in zoom-in duration-1000">
+        <section className="wedding-panel wedding-animate-up w-full max-w-5xl px-6 py-10 text-center md:px-12 md:py-14">
           <div className="flex justify-center mb-8 md:mb-10">
             <img src="/logo.png" alt="Omar & Hager Logo" className="w-28 md:w-36 h-auto" />
           </div>

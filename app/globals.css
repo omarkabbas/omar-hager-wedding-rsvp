@@ -35,6 +35,31 @@ body {
 
 :root {
   --font-editorial: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  --motion-fast: 180ms;
+  --motion-base: 300ms;
+  --motion-slow: 560ms;
+  --easing-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --easing-gentle: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes weddingFadeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes weddingFadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 @layer components {
@@ -56,14 +81,26 @@ body {
 
   .wedding-panel {
     @apply bg-white rounded-[40px] md:rounded-[50px] shadow-2xl border border-stone-100;
+    transition:
+      transform var(--motion-base) var(--easing-standard),
+      box-shadow var(--motion-base) var(--easing-standard),
+      border-color var(--motion-fast) ease;
   }
 
   .wedding-page-panel {
     @apply mx-auto w-full max-w-xl rounded-[40px] border border-stone-100 bg-white px-6 py-10 shadow-2xl md:rounded-[50px] md:px-12 md:py-14;
+    transition:
+      transform var(--motion-base) var(--easing-standard),
+      box-shadow var(--motion-base) var(--easing-standard),
+      border-color var(--motion-fast) ease;
   }
 
   .wedding-section {
     @apply bg-white rounded-[32px] md:rounded-[40px] shadow-xl border border-stone-100;
+    transition:
+      transform var(--motion-base) var(--easing-standard),
+      box-shadow var(--motion-base) var(--easing-standard),
+      border-color var(--motion-fast) ease;
   }
 
   .wedding-kicker {
@@ -135,11 +172,20 @@ body {
   }
 
   .wedding-button-primary {
-    @apply inline-flex items-center justify-center rounded-full bg-stone-900 px-8 py-4 text-[11px] uppercase tracking-[0.25em] font-bold text-white shadow-xl transition-all hover:bg-stone-800 active:scale-[0.98];
+    @apply inline-flex items-center justify-center rounded-full bg-stone-900 px-6 py-3 text-[10px] uppercase tracking-[0.22em] font-bold text-white shadow-xl hover:bg-stone-800 active:scale-[0.98] md:px-8 md:py-4 md:text-[11px] md:tracking-[0.25em];
+    transition:
+      transform var(--motion-fast) var(--easing-gentle),
+      box-shadow var(--motion-base) var(--easing-standard),
+      background-color var(--motion-fast) ease;
   }
 
   .wedding-button-secondary {
-    @apply inline-flex items-center justify-center rounded-full bg-white px-8 py-4 text-[11px] uppercase tracking-[0.25em] font-bold text-stone-700 shadow-xl ring-1 ring-stone-200 transition-all hover:text-stone-900 hover:ring-stone-300 active:scale-[0.98];
+    @apply inline-flex items-center justify-center rounded-full bg-white px-6 py-3 text-[10px] uppercase tracking-[0.22em] font-bold text-stone-700 shadow-xl ring-1 ring-stone-200 hover:text-stone-900 hover:ring-stone-300 active:scale-[0.98] md:px-8 md:py-4 md:text-[11px] md:tracking-[0.25em];
+    transition:
+      transform var(--motion-fast) var(--easing-gentle),
+      box-shadow var(--motion-base) var(--easing-standard),
+      color var(--motion-fast) ease,
+      border-color var(--motion-fast) ease;
   }
 
   .wedding-nav-shell {
@@ -148,13 +194,29 @@ body {
 
   .wedding-nav-inner {
     @apply mx-auto flex w-full max-w-3xl items-center justify-center gap-2 rounded-full border border-white/55 bg-[#D0E0F0]/82 px-2 py-2 shadow-[0_15px_40px_rgba(120,113,108,0.12)] backdrop-blur-md md:gap-4;
+    transition:
+      transform var(--motion-base) var(--easing-standard),
+      box-shadow var(--motion-base) var(--easing-standard),
+      background-color var(--motion-fast) ease;
   }
 
   .wedding-nav-link {
-    @apply inline-flex min-w-0 items-center justify-center rounded-full px-4 py-2 text-[10px] font-bold uppercase tracking-[0.24em] text-stone-600 transition-all md:px-6 md:py-3 md:text-xs;
+    @apply inline-flex min-w-0 items-center justify-center rounded-full px-4 py-2 text-[10px] font-bold uppercase tracking-[0.24em] text-stone-600 md:px-6 md:py-3 md:text-xs;
+    transition:
+      color var(--motion-fast) ease,
+      background-color var(--motion-fast) ease,
+      transform var(--motion-fast) var(--easing-gentle);
   }
 
   .wedding-nav-link-active {
     @apply bg-white text-stone-900 shadow-sm;
+  }
+
+  .wedding-animate-up {
+    animation: weddingFadeUp var(--motion-slow) var(--easing-standard) both;
+  }
+
+  .wedding-animate-fade {
+    animation: weddingFadeIn var(--motion-base) var(--easing-standard) both;
   }
 }
