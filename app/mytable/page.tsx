@@ -89,8 +89,8 @@ export default function MyTablePage() {
               <img src="/logo.png" alt="Omar & Hager logo" className="w-20 h-auto opacity-50" />
             </div>
             <p className="wedding-kicker mb-3">Seating</p>
-            <h1 className="wedding-title text-3xl md:text-5xl mb-4">Coming Soon</h1>
-            <p className="font-serif italic text-stone-500 text-base md:text-lg">
+            <h1 className="wedding-state-title mb-4">Coming Soon</h1>
+            <p className="wedding-lead">
               The seating chart is not yet available. Please check back later.
             </p>
           </section>
@@ -111,8 +111,8 @@ export default function MyTablePage() {
           </div>
 
           <p className="wedding-kicker mb-3">Seating</p>
-          <h1 className="wedding-title text-4xl md:text-6xl mb-4">Find Your Table</h1>
-          <p className="text-stone-500 italic font-serif text-base md:text-lg mb-8 md:mb-10">
+          <h1 className="wedding-page-title mb-4">Find Your Table</h1>
+          <p className="wedding-lead mb-8 md:mb-10">
             Start typing your name to find your table.
           </p>
 
@@ -155,7 +155,7 @@ export default function MyTablePage() {
             <div className="animate-in slide-in-from-bottom-4 duration-500 mt-8 md:mt-10">
               <div className="wedding-divider mb-8" />
               <div className="wedding-subpanel px-6 py-7 md:px-8 md:py-8">
-                <p className="font-serif italic text-stone-500 text-lg mb-2">Welcome, {searchResult.name}!</p>
+                <p className="wedding-lead text-lg mb-2">Welcome, {searchResult.name}!</p>
                 <h2 className="wedding-title text-2xl md:text-4xl leading-tight">
                   Please find your seat at
                   <span className="block mt-3 text-4xl md:text-5xl underline underline-offset-8 decoration-stone-200">

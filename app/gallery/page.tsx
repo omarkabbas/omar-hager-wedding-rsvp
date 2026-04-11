@@ -151,8 +151,8 @@ export default function GalleryPage() {
               <img src="/logo.png" alt="Omar & Hager logo" className="w-20 h-auto opacity-50" />
             </div>
             <p className="wedding-kicker mb-3">Guest Gallery</p>
-            <h1 className="wedding-title text-3xl md:text-5xl mb-4">Gallery is not available yet</h1>
-            <p className="text-stone-500 italic font-serif text-base md:text-lg">Check back later!</p>
+            <h1 className="wedding-state-title mb-4">Gallery is not available yet</h1>
+            <p className="wedding-lead">Check back later!</p>
           </section>
         </main>
       </div>
@@ -172,8 +172,8 @@ export default function GalleryPage() {
             </div>
 
             <p className="wedding-kicker mb-3">Guest Gallery</p>
-            <h1 className="wedding-title text-4xl md:text-6xl mb-3">Guest Gallery</h1>
-            <p className="font-serif italic text-stone-500 text-base md:text-xl mb-8 md:mb-10">
+            <h1 className="wedding-page-title mb-3">Guest Gallery</h1>
+            <p className="wedding-lead md:text-xl mb-8 md:mb-10">
               Share memories with us
             </p>
 
@@ -202,8 +202,8 @@ export default function GalleryPage() {
           </div>
 
           <p className="wedding-kicker mb-3">Guest Gallery</p>
-          <h1 className="wedding-title text-4xl md:text-6xl mb-3">Guest Gallery</h1>
-          <p className="font-serif italic text-stone-500 text-base md:text-xl mb-8 md:mb-10">
+          <h1 className="wedding-page-title mb-3">Guest Gallery</h1>
+          <p className="wedding-lead md:text-xl mb-8 md:mb-10">
             Share memories with us
           </p>
 
@@ -250,7 +250,7 @@ export default function GalleryPage() {
 
             {status && (
               <p
-                className={`text-center text-sm italic font-serif min-h-5 ${
+                className={`text-center wedding-copy italic min-h-5 ${
                   status.includes("Success") ? "text-emerald-600" : "text-stone-500"
                 }`}
               >
@@ -263,12 +263,12 @@ export default function GalleryPage() {
         <section className="mx-auto mt-12 md:mt-16 w-full max-w-7xl">
           <div className="text-center mb-8 md:mb-10">
             <p className="wedding-kicker mb-3">Shared Photos</p>
-            <h2 className="wedding-title text-3xl md:text-5xl">Guest Moments</h2>
+            <h2 className="wedding-state-title">Guest Moments</h2>
           </div>
 
           {photos.length === 0 ? (
             <div className="wedding-panel mx-auto max-w-2xl px-6 py-10 md:px-10 text-center">
-              <p className="font-serif italic text-stone-400 text-lg">No photos shared yet.</p>
+              <p className="wedding-lead text-stone-400 text-lg">No photos shared yet.</p>
             </div>
           ) : (
             <div className="space-y-8 md:space-y-12">

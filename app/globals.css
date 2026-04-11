@@ -10,6 +10,8 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-editorial);
+  --font-display: var(--font-virust);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -29,6 +31,10 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:root {
+  --font-editorial: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
 }
 
 @layer components {
@@ -61,11 +67,52 @@ body {
   }
 
   .wedding-kicker {
-    @apply text-[10px] md:text-[11px] uppercase tracking-[0.35em] text-stone-400 font-bold;
+    @apply text-[10px] md:text-[11px] uppercase tracking-[0.32em] text-stone-400 font-bold;
   }
 
   .wedding-title {
     @apply font-serif text-stone-900 tracking-tight;
+  }
+
+  .wedding-page-title {
+    @apply font-serif text-stone-900 tracking-tight text-4xl md:text-6xl;
+  }
+
+  .wedding-state-title {
+    @apply font-serif text-stone-900 tracking-tight text-3xl md:text-5xl;
+  }
+
+  .wedding-display {
+    font-family: var(--font-display), var(--font-editorial), serif;
+    letter-spacing: -0.02em;
+  }
+
+  .wedding-lead {
+    @apply font-serif italic text-stone-500 text-base md:text-lg leading-relaxed;
+  }
+
+  .wedding-copy {
+    @apply text-sm md:text-base text-stone-600 leading-relaxed;
+  }
+
+  .wedding-date {
+    @apply font-serif text-3xl md:text-5xl text-stone-700;
+  }
+
+  .wedding-metric {
+    @apply font-serif text-4xl md:text-5xl text-stone-900;
+  }
+
+  .wedding-card-title {
+    @apply font-serif text-xl md:text-3xl text-stone-900;
+  }
+
+  .wedding-subtitle {
+    @apply font-serif text-lg md:text-2xl text-stone-900;
+  }
+
+  .wedding-code {
+    @apply text-xs uppercase tracking-[0.2em] text-stone-500;
   }
 
   .wedding-divider {

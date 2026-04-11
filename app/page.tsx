@@ -5,6 +5,7 @@ import Link from "next/link";
 import Navigation from "@/app/components/Navigation";
 import HeroCarousel from "@/app/components/HeroCarousel";
 import { supabase } from "@/lib/supabase";
+import { virust } from "@/app/fonts";
 
 export default function HomePage() {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
@@ -59,8 +60,10 @@ export default function HomePage() {
           </div>
 
           <p className="wedding-kicker mb-4">The Wedding Of</p>
-          <h1 className="wedding-title text-5xl leading-none md:text-8xl mb-6 md:mb-8">Omar & Hager</h1>
-          <p className="font-serif text-3xl md:text-5xl text-stone-700 mb-8 md:mb-10">June 06, 2026</p>
+          <h1 className={`${virust.className} wedding-display text-5xl leading-none text-stone-900 md:text-8xl mb-6 md:mb-8`}>
+            Omar & Hager
+          </h1>
+          <p className="wedding-date mb-8 md:mb-10">June 06, 2026</p>
 
           <div className="wedding-divider mb-8 md:mb-10" />
 
@@ -72,7 +75,7 @@ export default function HomePage() {
               { val: timeLeft.seconds, label: "Seconds", accent: "text-pink-900" },
             ].map((item) => (
               <div key={item.label} className="wedding-subpanel px-4 py-5 md:px-6 md:py-6">
-                <div className={`font-serif text-4xl md:text-5xl ${item.accent || "text-stone-900"}`}>
+                <div className={`wedding-metric ${item.accent || "text-stone-900"}`}>
                   {String(item.val).padStart(2, "0")}
                 </div>
                 <div className="wedding-kicker mt-3">{item.label}</div>

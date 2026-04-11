@@ -57,8 +57,8 @@ function InviteContent() {
     if (step !== 0) return;
 
     setStep(1);
-    setTimeout(() => setStep(2), 600);
-    setTimeout(() => setShowButton(true), 2000);
+    setTimeout(() => setStep(2), 760);
+    setTimeout(() => setShowButton(true), 1850);
   };
 
   const handleProceed = () => {
@@ -82,8 +82,8 @@ function InviteContent() {
         <div className="wedding-backdrop" />
         <div className="wedding-panel relative z-10 w-full max-w-lg px-8 py-10 md:px-12 text-center">
           <p className="wedding-kicker mb-3">Invitation</p>
-          <h1 className="wedding-title text-3xl md:text-5xl mb-4">Invite Not Found</h1>
-          <p className="text-stone-600 italic mb-8 font-serif text-base md:text-lg">
+          <h1 className="wedding-state-title mb-4">Invite Not Found</h1>
+          <p className="wedding-lead text-stone-600 mb-8">
             The invite code is missing or incorrect.
           </p>
           <button onClick={() => router.push("/")} className="wedding-button-primary w-full md:w-auto">
@@ -98,10 +98,10 @@ function InviteContent() {
     <div className="wedding-shell wedding-center px-4 py-8 md:px-8 md:py-12">
       <div className="wedding-backdrop" />
 
-      <div className="wedding-panel relative z-10 mt-4 mb-8 flex w-full max-w-md md:max-w-3xl flex-col items-center px-5 py-8 pt-28 pb-14 md:px-10 md:py-12 md:pt-36 md:pb-20 animate-in zoom-in duration-1000">
+      <div className="wedding-panel relative z-10 mt-4 mb-8 flex w-full max-w-md md:max-w-2xl flex-col items-center px-5 py-8 pt-28 pb-12 md:px-8 md:py-10 md:pt-34 md:pb-16 animate-in zoom-in duration-1000">
         <div className="absolute top-10 md:top-14 w-full px-4 text-center">
           <p className="wedding-kicker mb-3">You’re invited,</p>
-          <h1 className="wedding-title text-4xl md:text-6xl italic leading-tight">{guestName}</h1>
+          <h1 className="wedding-page-title italic leading-tight">{guestName}</h1>
         </div>
 
         <style>{`
@@ -126,23 +126,13 @@ function InviteContent() {
             justify-content: center;
             margin-bottom: 2rem;
             margin-top: 8rem;
-            transition: all 0.8s ease;
             z-index: 10;
-          }
-
-          .cssletter.step-2 {
-            margin-top: 13rem;
-            margin-bottom: 4rem;
+            isolation: isolate;
           }
 
           @media (min-width: 768px) {
             .cssletter {
               margin-top: 10rem;
-            }
-
-            .cssletter.step-2 {
-              margin-top: 16rem;
-              margin-bottom: 5rem;
             }
           }
 
@@ -151,12 +141,6 @@ function InviteContent() {
             top: -56px;
             width: 100%;
             text-align: center;
-            font-family: serif;
-            font-style: italic;
-            font-size: 0.95rem;
-            font-weight: 600;
-            letter-spacing: 0.15em;
-            color: #78716c;
             text-shadow: 0 1px 2px rgba(255,255,255,0.8);
             transition: opacity 0.3s ease;
             z-index: 4;
@@ -166,9 +150,38 @@ function InviteContent() {
             position: relative;
             width: var(--env-w);
             height: var(--env-h);
-            background: #c3af7d;
-            box-shadow: inset 0 0 40px rgba(0,0,0,0.15), 0 15px 30px rgba(0,0,0,0.1);
+            background: linear-gradient(180deg, #eef7fd 0%, #d8e9f5 42%, #c5dced 100%);
+            box-shadow:
+              inset 0 1px 0 rgba(255,255,255,0.72),
+              inset 0 0 38px rgba(110, 146, 176, 0.12),
+              0 15px 30px rgba(108, 132, 154, 0.16);
             border-radius: 10px;
+          }
+
+          .envelope::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: 10px;
+            background:
+              linear-gradient(135deg, rgba(255,255,255,0.58) 0%, rgba(255,255,255,0.24) 18%, rgba(255,255,255,0) 42%),
+              linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0));
+            pointer-events: none;
+            z-index: 1;
+          }
+
+          .envelope::after {
+            content: "";
+            position: absolute;
+            left: 8%;
+            right: 8%;
+            top: 9%;
+            height: 20%;
+            border-radius: 999px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.34), rgba(255,255,255,0));
+            filter: blur(8px);
+            pointer-events: none;
+            z-index: 1;
           }
 
           .invite-card {
@@ -179,14 +192,22 @@ function InviteContent() {
             bottom: 2%;
             background: white;
             z-index: 2;
-            transition: all 1.2s cubic-bezier(0.25, 1, 0.5, 1), z-index 0s;
+            transition:
+              transform 1s cubic-bezier(0.22, 1, 0.36, 1),
+              width 1s cubic-bezier(0.22, 1, 0.36, 1),
+              height 1s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 1s ease,
+              border-radius 1s ease,
+              z-index 0s linear;
             border-radius: 10px;
             box-shadow: 0 0 20px rgba(0,0,0,0.15);
             padding: 4px;
             cursor: pointer;
             overflow-y: auto;
             scrollbar-width: none;
-            transform: translateX(-50%);
+            transform: translate3d(-50%, 0, 0);
+            will-change: transform, width, height;
+            backface-visibility: hidden;
           }
 
           .invite-card::-webkit-scrollbar {
@@ -213,7 +234,9 @@ function InviteContent() {
             overflow: hidden;
             transform-origin: top;
             pointer-events: none;
-            transition: transform 0.6s linear, z-index 0s 0s;
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            transition: transform 0.72s cubic-bezier(0.22, 1, 0.36, 1), z-index 0s 0s;
           }
 
           .envelope-flap::before,
@@ -229,58 +252,58 @@ function InviteContent() {
           }
 
           .envelope-flap::before {
-            background: linear-gradient(135deg, #fdf5d3 0%, #f5e8b7 50%, #fdf5d3 100%);
+            background: linear-gradient(135deg, #f8fcff 0%, #e7f1f9 46%, #eef6fc 100%);
             bottom: 26%;
             border-radius: 1.5rem;
           }
 
           .envelope-left::before {
-            background: linear-gradient(135deg, #f3e3ac 0%, #eddba1 100%);
+            background: linear-gradient(135deg, #edf6fd 0%, #d9e9f6 100%);
             top: 5%;
             left: -60%;
           }
 
           .envelope-right::before {
-            background: linear-gradient(135deg, #ead99f 0%, #e3d194 100%);
+            background: linear-gradient(135deg, #e6f2fb 0%, #d2e4f3 100%);
             top: 5%;
             right: -60%;
           }
 
           .envelope-bottom::before {
-            background: linear-gradient(135deg, #f6e8b6 0%, #f1dea6 100%);
+            background: linear-gradient(135deg, #f5fbff 0%, #e2eef8 100%);
             top: 45%;
             left: 0;
             border-radius: 2rem;
-            box-shadow: 0 -5px 20px rgba(0,0,0,0.05);
+            box-shadow: 0 -5px 20px rgba(103, 132, 156, 0.08);
           }
 
           .cssletter.step-1 .envelope-flap,
           .cssletter.step-2 .envelope-flap {
             transform: rotateX(180deg) translateY(0);
             z-index: 1;
-            transition: transform 0.6s linear, z-index 0s 0.3s;
+            transition: transform 0.72s cubic-bezier(0.22, 1, 0.36, 1), z-index 0s 0.34s;
           }
 
           .cssletter.step-1 .invite-card {
-            transform: translate(-50%, -50%);
+            transform: translate3d(-50%, -34%, 0);
             z-index: 2;
           }
 
           .cssletter.step-2 .invite-card {
-            transform: translate(-50%, 12%) scale(1);
+            transform: translate3d(-50%, 6%, 0);
             z-index: 20;
-            width: 126%;
+            width: 122%;
             max-width: 92vw;
-            height: 220%;
-            max-height: min(88vh, 980px);
+            height: 210%;
+            max-height: min(86vh, 940px);
             padding: 8px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.2);
+            box-shadow: 0 24px 54px rgba(0,0,0,0.18);
             border-radius: 14px;
           }
 
           .scroll-instruction {
             position: absolute;
-            bottom: 3%;
+            bottom: 0;
             left: 50%;
             width: 100%;
             text-align: center;
@@ -288,9 +311,9 @@ function InviteContent() {
             z-index: 30;
             transition: opacity 0.5s ease;
             background: linear-gradient(to top, rgba(255,255,255,0.95) 10%, rgba(255,255,255,0) 100%);
-            padding: 40px 10px 15px;
-            border-bottom-left-radius: 14px;
-            border-bottom-right-radius: 14px;
+            padding: 52px 10px 14px;
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
             transform: translateX(-50%);
           }
 
@@ -323,13 +346,31 @@ function InviteContent() {
             transition: 0.3s opacity;
             pointer-events: none;
           }
+
+          .monogram-logo img {
+            width: clamp(42px, 14vw, 82px);
+            height: auto;
+            filter: brightness(0) contrast(100%);
+            transform: rotate(0deg);
+          }
+
+          .seal-container img {
+            width: clamp(40px, 14vw, 80px);
+            height: auto;
+            object-fit: contain;
+            filter: drop-shadow(0 4px 8px rgba(96, 124, 150, 0.18)) saturate(1.08);
+          }
         `}</style>
 
         <div
           className={`cssletter ${step === 1 ? "step-1" : step === 2 ? "step-2" : ""} ${step === 0 ? "cursor-pointer" : ""}`}
           onClick={step === 0 ? handleInteraction : undefined}
         >
-          {step === 0 && <div className="tap-top-instruction animate-pulse">Tap envelope to open</div>}
+          {step === 0 && (
+            <div className="tap-top-instruction wedding-lead animate-pulse text-sm md:text-base">
+              Tap envelope to open
+            </div>
+          )}
 
           <div className="envelope">
             <div className="envelope-flap" />
@@ -347,8 +388,8 @@ function InviteContent() {
               className="w-full h-auto object-contain rounded-[10px] border border-stone-50"
             />
             <div className={`scroll-instruction ${step === 2 && isAtTop ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
-              <p className="text-stone-500 font-sans text-[10px] font-bold uppercase tracking-widest animate-bounce">
-                Scroll to view
+              <p className="animate-bounce text-stone-500 text-[10px] font-bold uppercase tracking-widest">
+                Scroll to view ↓
               </p>
             </div>
           </div>
@@ -357,7 +398,6 @@ function InviteContent() {
             <img
               src="/logo.png"
               alt="Omar & Hager logo"
-              style={{ width: "75px", height: "auto", filter: "brightness(0) contrast(100%)", transform: "rotate(-2deg)" }}
               className="opacity-90"
             />
           </div>
@@ -366,12 +406,6 @@ function InviteContent() {
             <img
               src="/seal.png"
               alt="Wax seal"
-              style={{
-                width: "75px",
-                height: "75px",
-                objectFit: "contain",
-                filter: "drop-shadow(0 3px 5px rgba(0,0,0,0.15)) saturate(1.15)",
-              }}
               className="z-10"
             />
           </div>

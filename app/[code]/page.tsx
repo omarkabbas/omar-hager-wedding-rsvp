@@ -100,7 +100,7 @@ export default function GuestRSVP() {
 
       <main className="wedding-main wedding-center">
         {loading ? (
-          <div className="py-10 font-serif italic text-stone-500 animate-pulse text-lg">
+          <div className="py-10 wedding-lead animate-pulse text-lg">
             Finding your invitation...
           </div>
         ) : (
@@ -112,8 +112,8 @@ export default function GuestRSVP() {
             {!guestData ? (
               <div className="text-center py-2">
                 <p className="wedding-kicker mb-3">Invitation</p>
-                <h2 className="wedding-title text-3xl md:text-5xl mb-4">Invite Not Found</h2>
-                <p className="text-stone-500 italic mb-8 leading-relaxed font-serif text-base md:text-lg">
+                <h2 className="wedding-state-title mb-4">Invite Not Found</h2>
+                <p className="wedding-lead mb-8">
                   Please check your invite link or contact Omar & Hager.
                 </p>
                 <Link href="/" className="wedding-button-primary w-full md:w-auto">
@@ -123,11 +123,11 @@ export default function GuestRSVP() {
             ) : submitted ? (
               <div className="py-2 animate-in fade-in duration-1000 text-center">
                 <p className="wedding-kicker mb-3">Response Received</p>
-                <h2 className="wedding-title text-4xl md:text-6xl mb-5">
+                <h2 className="wedding-page-title mb-5">
                   {guestData.attending ? "You’re RSVP’d!" : "We’ve received your response"}
                 </h2>
                 <div className="wedding-divider mb-8" />
-                <p className="text-stone-600 italic mb-8 md:mb-10 text-lg md:text-xl leading-relaxed font-serif">
+                <p className="wedding-lead text-stone-600 text-lg md:text-xl mb-8 md:mb-10">
                   {guestData.attending
                     ? "We can’t wait to celebrate with you!"
                     : "Thanks for letting us know you can’t make it ☹️"}
@@ -137,7 +137,7 @@ export default function GuestRSVP() {
                   <div className="space-y-5 text-left max-w-xl mx-auto">
                     <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8 text-center">
                       <p className="wedding-kicker mb-3">The Venue</p>
-                      <p className="font-serif text-xl md:text-3xl text-stone-900">
+                      <p className="wedding-card-title">
                         Reflections Venue & Gardens
                       </p>
                       <p className="mt-4 text-sm md:text-base text-stone-500 leading-relaxed">
@@ -157,7 +157,7 @@ export default function GuestRSVP() {
 
                     <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8 text-center">
                       <p className="wedding-kicker mb-3">A Note On Gifts</p>
-                      <p className="text-sm md:text-base text-stone-600 italic leading-relaxed">
+                      <p className="wedding-copy italic">
                         As we already have a home filled with everything we need, we kindly request no boxed
                         or bagged gifts. Should you wish to honor us with a gift toward our future together,
                         it would be most sincerely appreciated.
@@ -176,7 +176,7 @@ export default function GuestRSVP() {
               <form onSubmit={handleSubmit} className="space-y-7">
                 <div className="text-center">
                   <p className="wedding-kicker mb-3">RSVP</p>
-                  <p className="font-serif italic text-stone-400 text-xl mb-1">Welcome,</p>
+                  <p className="wedding-lead text-stone-400 text-xl mb-1">Welcome,</p>
                   <h2 className="wedding-title text-4xl md:text-5xl">{guestData.guest_name}</h2>
                 </div>
 

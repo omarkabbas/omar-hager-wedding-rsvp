@@ -16,15 +16,15 @@ export default function RegistryPage() {
           </div>
 
           <p className="wedding-kicker mb-3">Registry</p>
-          <h1 className="wedding-title text-4xl md:text-6xl mb-4">Registry</h1>
+          <h1 className="wedding-page-title mb-4">Registry</h1>
           <div className="wedding-divider mb-8" />
 
           <div className="space-y-5 max-w-xl mx-auto">
-            <p className="font-serif italic text-stone-700 text-base md:text-xl leading-relaxed">
+            <p className="wedding-lead text-stone-700 md:text-xl">
               Your presence at our wedding is the greatest gift of all.
             </p>
             <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8">
-              <p className="text-sm md:text-base text-stone-600 leading-relaxed italic">
+              <p className="wedding-copy italic">
                 &ldquo;As we already have a home filled with everything we need, we kindly request no boxed
                 or bagged gifts. Should you wish to honor us with a gift toward our future together,
                 it would be most sincerely appreciated.&rdquo;

@@ -289,11 +289,11 @@ export default function AdminDashboard() {
             <img src="/logo.png" alt="Omar & Hager logo" className="w-20 h-auto" />
           </div>
           <p className="wedding-kicker mb-3">Private Access</p>
-          <h1 className="text-4xl md:text-5xl font-serif text-stone-900 tracking-tight mb-4">
+          <h1 className="wedding-state-title mb-4">
             Admin Login
           </h1>
           <div className="wedding-divider mb-8" />
-          <p className="text-stone-500 italic font-serif text-base md:text-lg mb-8">
+          <p className="wedding-lead mb-8">
             Manage invitations, guest counts, and live wedding settings.
           </p>
 
@@ -323,7 +323,7 @@ export default function AdminDashboard() {
             <img src="/logo.png" alt="Omar & Hager logo" className="w-14 md:w-16 h-auto" />
             <div>
               <p className="wedding-kicker mb-2">Omar & Hager 2026</p>
-              <h1 className="text-4xl md:text-6xl font-serif text-stone-900 tracking-tight">
+              <h1 className="wedding-page-title">
                 Guest Management
               </h1>
             </div>
@@ -349,7 +349,7 @@ export default function AdminDashboard() {
           <section className="wedding-section p-6 md:p-8">
             <div className="mb-8 text-center md:text-left">
               <p className="wedding-kicker mb-2">Live Controls</p>
-              <h2 className="text-3xl md:text-4xl font-serif text-stone-900">Site Settings</h2>
+              <h2 className="wedding-title text-3xl md:text-4xl">Site Settings</h2>
             </div>
 
             <div className="space-y-4">
@@ -369,132 +369,10 @@ export default function AdminDashboard() {
           </section>
         </div>
 
-        <div className="grid gap-8 xl:grid-cols-[0.9fr_1.1fr] mb-8">
-          <section className="wedding-section p-6 md:p-8">
-            <div className="mb-8 text-center md:text-left">
-              <p className="wedding-kicker mb-2">Table Management</p>
-              <h2 className="text-3xl md:text-4xl font-serif text-stone-900">
-                {editingSeatingId !== null ? "Edit Seating Assignment" : "Add Seating Assignment"}
-              </h2>
-            </div>
-
-            <form onSubmit={addSeatingAssignment} className="space-y-4">
-              <div>
-                <label className="wedding-kicker block ml-2 mb-2">Guest Name</label>
-                <input
-                  value={seatingName}
-                  onChange={(e) => setSeatingName(e.target.value)}
-                  required
-                  className="wedding-input"
-                  placeholder="Guest full name"
-                />
-              </div>
-
-              <div>
-                <label className="wedding-kicker block ml-2 mb-2">Table Number</label>
-                <input
-                  type="number"
-                  value={tableNumber}
-                  onChange={(e) => setTableNumber(parseInt(e.target.value, 10) || 1)}
-                  required
-                  min="1"
-                  className="wedding-input"
-                />
-              </div>
-
-              <div className="flex flex-col md:flex-row gap-3">
-                <button className="wedding-button-primary w-full md:w-auto">
-                  {editingSeatingId !== null ? "Save Assignment" : "Add to Seating Chart"}
-                </button>
-                {editingSeatingId !== null && (
-                  <button
-                    type="button"
-                    onClick={resetSeatingForm}
-                    className="wedding-button-secondary w-full md:w-auto"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            </form>
-          </section>
-
-          <section className="wedding-section overflow-hidden">
-            <div className="px-6 pt-6 pb-4 md:px-8 md:pt-8">
-              <p className="wedding-kicker mb-2">Table Management</p>
-              <h2 className="text-3xl md:text-4xl font-serif text-stone-900">Current Assignments</h2>
-              <div className="mt-5">
-                <input
-                  value={seatingSearch}
-                  onChange={(e) => setSeatingSearch(e.target.value)}
-                  className="wedding-input"
-                  placeholder="Search by guest or table number"
-                />
-              </div>
-            </div>
-
-            {filteredSeatingAssignments.length === 0 ? (
-              <div className="px-6 pb-8 md:px-8">
-                <div className="wedding-subpanel px-6 py-8 text-center">
-                  <p className="font-serif italic text-stone-500 text-lg">No matching table assignments.</p>
-                </div>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[620px] text-left">
-                  <thead className="text-[10px] uppercase tracking-[0.25em] text-stone-400 border-y border-stone-100 bg-white/70">
-                    <tr>
-                      <th className="px-6 md:px-8 py-4">Guest</th>
-                      <th className="px-4 py-4 text-center">Table</th>
-                      <th className="px-6 md:px-8 py-4 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100 bg-stone-50/40">
-                    {filteredSeatingAssignments.map((assignment) => (
-                      <tr key={assignment.id} className="align-middle">
-                        <td className="px-6 md:px-8 py-5">
-                          <p className="font-serif text-xl md:text-2xl text-stone-900">{assignment.name}</p>
-                        </td>
-                        <td className="px-4 py-5 text-center">
-                          <span className="inline-flex rounded-full bg-stone-100 px-4 py-2 text-sm font-bold text-stone-700">
-                            Table {assignment.table_number}
-                          </span>
-                        </td>
-                        <td className="px-6 md:px-8 py-5 text-right">
-                          <button
-                            onClick={() => {
-                              setEditingSeatingId(assignment.id);
-                              setSeatingName(assignment.name);
-                              setTableNumber(assignment.table_number);
-                            }}
-                            className="text-[10px] uppercase tracking-[0.22em] font-bold text-stone-500 transition-colors hover:text-stone-900 mr-4"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={async () => {
-                              if (confirm("Remove this seating assignment?")) {
-                                await supabase.from("seating").delete().eq("id", assignment.id);
-                              }
-                            }}
-                            className="text-[10px] uppercase tracking-[0.22em] font-bold text-rose-400 transition-colors hover:text-rose-700"
-                          >
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </div>
-
         <section className="wedding-section p-6 md:p-8 mb-8">
           <div className="mb-8 text-center md:text-left">
             <p className="wedding-kicker mb-2">Invitation Tools</p>
-            <h2 className="text-3xl md:text-4xl font-serif text-stone-900">
+            <h2 className="wedding-title text-3xl md:text-4xl">
               {editingGuestId !== null ? "Edit Invitation" : "Add New Invitation"}
             </h2>
           </div>
@@ -585,7 +463,7 @@ export default function AdminDashboard() {
         <section className="wedding-section overflow-hidden">
           <div className="px-6 pt-6 pb-4 md:px-8 md:pt-8">
             <p className="wedding-kicker mb-2">Responses</p>
-            <h2 className="text-3xl md:text-4xl font-serif text-stone-900">Guest List</h2>
+            <h2 className="wedding-title text-3xl md:text-4xl">Guest List</h2>
             <div className="mt-5">
               <input
                 value={guestSearch}
@@ -612,12 +490,12 @@ export default function AdminDashboard() {
                 {filteredResponses.map((guest) => (
                   <tr key={guest.id} className="align-middle">
                     <td className="px-6 md:px-8 py-6">
-                      <p className="font-serif text-2xl text-stone-900">{guest.guest_name}</p>
+                      <p className="wedding-subtitle text-2xl">{guest.guest_name}</p>
                     </td>
                     <td className="px-4 py-6 text-center">
                       <StatusBadge attending={guest.attending} />
                     </td>
-                    <td className="px-4 py-6 text-center font-serif text-2xl text-stone-900">
+                    <td className="px-4 py-6 text-center wedding-subtitle text-2xl">
                       <span className="text-stone-300">{guest.max_guests}</span>
                       <span className="mx-2 text-stone-200">/</span>
                       {guest.attending ? guest.confirmed_guests || 0 : 0}
@@ -635,7 +513,7 @@ export default function AdminDashboard() {
                         Copy Invitation
                       </button>
                     </td>
-                    <td className="px-4 py-6 text-center font-mono text-xs uppercase tracking-[0.2em] text-stone-500">
+                    <td className="px-4 py-6 text-center wedding-code">
                       {guest.invite_code}
                     </td>
                     <td className="px-6 md:px-8 py-6 text-right">
@@ -675,6 +553,126 @@ export default function AdminDashboard() {
             </table>
           </div>
         </section>
+
+        <section className="wedding-section p-6 md:p-8 mt-8 mb-8">
+          <div className="mb-8 text-center md:text-left">
+            <p className="wedding-kicker mb-2">Table Management</p>
+            <h2 className="wedding-title text-3xl md:text-4xl">
+              {editingSeatingId !== null ? "Edit Seating Assignment" : "Add Seating Assignment"}
+            </h2>
+          </div>
+
+          <form onSubmit={addSeatingAssignment} className="space-y-4">
+            <div>
+              <label className="wedding-kicker block ml-2 mb-2">Guest Name</label>
+              <input
+                value={seatingName}
+                onChange={(e) => setSeatingName(e.target.value)}
+                required
+                className="wedding-input"
+                placeholder="Guest full name"
+              />
+            </div>
+
+            <div className="max-w-sm">
+              <label className="wedding-kicker block ml-2 mb-2">Table Number</label>
+              <input
+                type="number"
+                value={tableNumber}
+                onChange={(e) => setTableNumber(parseInt(e.target.value, 10) || 1)}
+                required
+                min="1"
+                className="wedding-input"
+              />
+            </div>
+
+            <div className="flex flex-col md:flex-row gap-3">
+              <button className="wedding-button-primary w-full md:w-auto">
+                {editingSeatingId !== null ? "Save Assignment" : "Add to Seating Chart"}
+              </button>
+              {editingSeatingId !== null && (
+                <button
+                  type="button"
+                  onClick={resetSeatingForm}
+                  className="wedding-button-secondary w-full md:w-auto"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          </form>
+        </section>
+
+        <section className="wedding-section overflow-hidden">
+          <div className="px-6 pt-6 pb-4 md:px-8 md:pt-8">
+            <p className="wedding-kicker mb-2">Table Management</p>
+            <h2 className="wedding-title text-3xl md:text-4xl">Current Assignments</h2>
+            <div className="mt-5">
+              <input
+                value={seatingSearch}
+                onChange={(e) => setSeatingSearch(e.target.value)}
+                className="wedding-input"
+                placeholder="Search by guest or table number"
+              />
+            </div>
+          </div>
+
+          {filteredSeatingAssignments.length === 0 ? (
+            <div className="px-6 pb-8 md:px-8">
+              <div className="wedding-subpanel px-6 py-8 text-center">
+                <p className="wedding-lead text-lg">No matching table assignments.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[620px] text-left">
+                <thead className="text-[10px] uppercase tracking-[0.25em] text-stone-400 border-y border-stone-100 bg-white/70">
+                  <tr>
+                    <th className="px-6 md:px-8 py-4">Guest</th>
+                    <th className="px-4 py-4 text-center">Table</th>
+                    <th className="px-6 md:px-8 py-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100 bg-stone-50/40">
+                  {filteredSeatingAssignments.map((assignment) => (
+                    <tr key={assignment.id} className="align-middle">
+                      <td className="px-6 md:px-8 py-5">
+                        <p className="wedding-subtitle text-xl md:text-2xl">{assignment.name}</p>
+                      </td>
+                      <td className="px-4 py-5 text-center">
+                        <span className="inline-flex rounded-full bg-stone-100 px-4 py-2 text-sm font-bold text-stone-700">
+                          Table {assignment.table_number}
+                        </span>
+                      </td>
+                      <td className="px-6 md:px-8 py-5 text-right">
+                        <button
+                          onClick={() => {
+                            setEditingSeatingId(assignment.id);
+                            setSeatingName(assignment.name);
+                            setTableNumber(assignment.table_number);
+                          }}
+                          className="text-[10px] uppercase tracking-[0.22em] font-bold text-stone-500 transition-colors hover:text-stone-900 mr-4"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (confirm("Remove this seating assignment?")) {
+                              await supabase.from("seating").delete().eq("id", assignment.id);
+                            }
+                          }}
+                          className="text-[10px] uppercase tracking-[0.22em] font-bold text-rose-400 transition-colors hover:text-rose-700"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );
@@ -692,7 +690,7 @@ function StatCard({
   return (
     <div className="rounded-[28px] bg-stone-50 px-6 py-6 border border-stone-100 text-center md:text-left">
       <p className="wedding-kicker mb-3">{label}</p>
-      <p className={`font-serif text-5xl md:text-6xl ${accent}`}>{value}</p>
+      <p className={`wedding-metric ${accent}`}>{value}</p>
     </div>
   );
 }
@@ -711,7 +709,7 @@ function ToggleRow({
   return (
     <div className="rounded-[28px] border border-stone-100 bg-stone-50 px-5 py-5 md:px-6 flex items-center justify-between gap-5">
       <div>
-        <p className="text-lg font-serif text-stone-900">{label}</p>
+        <p className="wedding-subtitle text-lg">{label}</p>
         <p className="text-sm text-stone-500">{description}</p>
       </div>
       <button
