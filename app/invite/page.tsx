@@ -290,12 +290,12 @@ function InviteContent() {
           }
 
           .cssletter.step-2 .invite-card {
-            transform: translate3d(-50%, 6%, 0);
+            transform: translate3d(-50%, 12%, 0);
             z-index: 20;
             width: 122%;
             max-width: 92vw;
-            height: 210%;
-            max-height: min(86vh, 940px);
+            height: 226%;
+            max-height: min(90vh, 980px);
             padding: 8px;
             box-shadow: 0 24px 54px rgba(0,0,0,0.18);
             border-radius: 14px;
