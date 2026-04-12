@@ -5,6 +5,11 @@ import { virust } from "./fonts";
 export const metadata: Metadata = {
   title: 'Omar & Hager’s Wedding RSVP',
   description: 'June 6, 2026 • Plano, Texas',
+  icons: {
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/icon.png",
+  },
 };
 
 export default function RootLayout({
