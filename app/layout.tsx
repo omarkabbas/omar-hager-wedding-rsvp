@@ -1,23 +1,14 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import { virust } from "./fonts";
 
 export const metadata: Metadata = {
   title: 'Omar & Hager’s Wedding RSVP',
   description: 'June 6, 2026 • Plano, Texas',
-  // This line adds the logo to your browser tab thumbnail
   icons: {
-    icon: "/logo.png",
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/icon.png",
   },
 };
 
@@ -28,9 +19,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className={`${virust.variable} antialiased`}>
         {children}
       </body>
     </html>

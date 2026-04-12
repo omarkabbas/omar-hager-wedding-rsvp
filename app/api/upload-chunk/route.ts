@@ -38,7 +38,7 @@ export async function POST(req: Request) {
     const start = chunkIndex * (1024 * 1024);
     const end = start + buffer.length - 1;
 
-    const uploadRes = await fetch(sessionUrl!, {
+    await fetch(sessionUrl!, {
       method: 'PUT',
       headers: {
         'Content-Length': buffer.length.toString(),
@@ -53,8 +53,9 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error(error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Upload failed';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
