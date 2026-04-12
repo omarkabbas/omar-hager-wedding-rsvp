@@ -7,12 +7,7 @@ import Navigation from "@/app/components/Navigation";
 import HeroCarousel from "@/app/components/HeroCarousel";
 import { supabase } from "@/lib/supabase";
 import { virust } from "@/app/fonts";
-
-const VENUE_NAME = "Reflections Venue & Gardens";
-const VENUE_ADDRESS = "1901 E Spring Creek Pkwy, Plano, TX 75074";
-const VENUE_MAP_LINK = "https://maps.google.com/maps?q=Reflections+Venue+and+Gardens+Plano";
-const VENUE_MAP_EMBED =
-  "https://www.google.com/maps?q=Reflections%20Venue%20%26%20Gardens%2C%201901%20E%20Spring%20Creek%20Pkwy%2C%20Plano%2C%20TX%2075074&output=embed";
+import { VENUE_ADDRESS, VENUE_MAP_EMBED, VENUE_MAP_LINK, VENUE_NAME } from "@/lib/wedding";
 
 export default function HomePage() {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });

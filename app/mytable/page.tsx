@@ -11,6 +11,7 @@ export default function MyTablePage() {
   const [suggestions, setSuggestions] = useState<{ name: string }[]>([]);
   const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [searchAttempted, setSearchAttempted] = useState(false);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -55,13 +56,17 @@ export default function MyTablePage() {
   }, []);
 
   const performSearch = async (name: string) => {
-    if (name.trim() === "") return;
+    const trimmedName = name.trim();
+    if (trimmedName === "") return;
+
+    setSearchAttempted(true);
 
     const { data } = await supabase
       .from("seating")
       .select("name, table_number")
-      .ilike("name", name)
-      .single();
+      .ilike("name", trimmedName)
+      .limit(1)
+      .maybeSingle();
 
     setSearchResult(data || null);
     setSuggestions([]);
@@ -75,6 +80,11 @@ export default function MyTablePage() {
   const handleSearchQueryChange = async (query: string) => {
     setSearchQuery(query);
     setActiveSuggestionIndex(0);
+    setSearchResult(null);
+
+    if (query.trim().length === 0) {
+      setSearchAttempted(false);
+    }
 
     if (query.length > 2) {
       const { data } = await supabase
@@ -168,6 +178,7 @@ export default function MyTablePage() {
                   onKeyDown={handleKeyDown}
                   placeholder="Enter your full name"
                   className="wedding-input"
+                  enterKeyHint="search"
                 />
 
                 {suggestions.length > 0 && (
@@ -190,6 +201,10 @@ export default function MyTablePage() {
                 )}
               </div>
             </div>
+
+            <button type="submit" className="wedding-button-primary w-full">
+              Find My Table
+            </button>
           </form>
 
           {searchResult && (
@@ -203,6 +218,20 @@ export default function MyTablePage() {
                     Table {searchResult.table_number}
                   </span>
                 </h2>
+              </div>
+            </div>
+          )}
+
+          {searchAttempted && !searchResult && suggestions.length === 0 && searchQuery.trim().length > 0 && (
+            <div className="wedding-animate-up mt-8 md:mt-10">
+              <div className="wedding-divider mb-8" />
+              <div className="wedding-subpanel px-6 py-7 text-center md:px-8 md:py-8">
+                <p className="wedding-kicker mb-3">Need Help?</p>
+                <h2 className="wedding-subtitle mb-3">We couldn&apos;t find a table under that name just yet.</h2>
+                <p className="wedding-copy mx-auto max-w-lg">
+                  Please try the name as it appears on your invitation. If you still need help when you arrive, a
+                  member of our family will be happy to assist you.
+                </p>
               </div>
             </div>
           )}

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import Navigation from "@/app/components/Navigation";
+import { GIFT_NOTE } from "@/lib/wedding";
 
 export default function RegistryPage() {
   return (
@@ -32,10 +33,9 @@ export default function RegistryPage() {
             </p>
             <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8">
               <p className="wedding-copy italic">
-                &ldquo;As we are fortunate to have a home already filled with everything we need, we kindly
-                request no boxed or bagged gifts. If you&apos;d like to honor us with a gift, a
-                contribution toward our future would be deeply appreciated and will help us create
-                cherished memories together.&rdquo;
+                {"\u201c"}
+                {GIFT_NOTE}
+                {"\u201d"}
               </p>
             </div>
           </div>

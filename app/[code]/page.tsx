@@ -6,6 +6,16 @@ import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import Navigation from "@/app/components/Navigation";
 import { supabase } from "@/lib/supabase";
+import {
+  CALENDAR_FILE_PATH,
+  GIFT_NOTE,
+  VENUE_ADDRESS,
+  VENUE_MAP_EMBED,
+  VENUE_MAP_LINK,
+  VENUE_NAME,
+  WEDDING_ARRIVAL_NOTE,
+  WEDDING_DATE_LABEL,
+} from "@/lib/wedding";
 
 type GuestData = {
   id: number;
@@ -34,11 +44,9 @@ export default function GuestRSVP() {
     return parsed.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   }, []);
 
-  const mapLink =
-    "https://maps.google.com/maps?q=Reflections+Venue+and+Gardens+Plano";
-  const mapEmbedLink =
-    "https://www.google.com/maps?q=Reflections%20Venue%20%26%20Gardens%2C%201901%20E%20Spring%20Creek%20Pkwy%2C%20Plano%2C%20TX%2075074&output=embed";
-  const calendarLink = "/omar-hager-wedding.ics";
+  const mapLink = VENUE_MAP_LINK;
+  const mapEmbedLink = VENUE_MAP_EMBED;
+  const calendarLink = CALENDAR_FILE_PATH;
 
   useEffect(() => {
     async function fetchGuest() {
@@ -88,6 +96,7 @@ export default function GuestRSVP() {
       .update({
         attending: attendingValue,
         confirmed_guests: countValue,
+        responded_at: new Date().toISOString(),
       })
       .eq("id", guestData.id);
 
@@ -214,15 +223,15 @@ export default function GuestRSVP() {
                   <div className="space-y-5 text-left max-w-xl mx-auto">
                     <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8 text-center">
                       <p className="wedding-kicker mb-3">Wedding Details</p>
-                      <p className="wedding-card-title">Reflections Venue & Gardens</p>
+                      <p className="wedding-card-title">{VENUE_NAME}</p>
                       <p className="mt-3 text-sm md:text-base text-stone-600 leading-relaxed">
-                        Saturday, June 6, 2026
+                        {WEDDING_DATE_LABEL}
                       </p>
                       <p className="text-sm md:text-base text-stone-500 leading-relaxed">
-                        We kindly invite guests to begin arriving at 6:00 PM.
+                        {WEDDING_ARRIVAL_NOTE}
                       </p>
                       <p className="mt-4 text-sm md:text-base text-stone-500 leading-relaxed">
-                        1901 E Spring Creek Pkwy, Plano, TX 75074
+                        {VENUE_ADDRESS}
                       </p>
                       <div className="mt-5 overflow-hidden rounded-[18px] border border-stone-200 bg-white shadow-inner">
                         <iframe
@@ -256,10 +265,7 @@ export default function GuestRSVP() {
                     <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8 text-center">
                       <p className="wedding-kicker mb-3">A Note On Gifts</p>
                       <p className="wedding-copy italic">
-                        As we are fortunate to have a home already filled with everything we need, we kindly
-                        request no boxed or bagged gifts. If you&apos;d like to honor us with a gift, a
-                        contribution toward our future would be deeply appreciated and will help us create
-                        cherished memories together.
+                        {GIFT_NOTE}
                       </p>
                     </div>
                   </div>
@@ -310,7 +316,7 @@ export default function GuestRSVP() {
                       ))}
                     </select>
                     <p className="ml-2 text-xs text-stone-500">
-                      Please include children in your total.
+                      Please include children over 2 in your total.
                     </p>
                   </div>
                 )}
