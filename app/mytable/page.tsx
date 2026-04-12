@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import Navigation from "@/app/components/Navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -114,7 +115,13 @@ export default function MyTablePage() {
         <main className="wedding-main wedding-center text-center">
           <section className="wedding-page-panel wedding-animate-up max-w-lg text-center">
             <div className="flex justify-center mb-6">
-              <img src="/logo.png" alt="Omar & Hager logo" className="w-20 h-auto opacity-50" />
+              <Image
+                src="/logo.png"
+                alt="Omar & Hager logo"
+                width={80}
+                height={80}
+                className="wedding-logo w-20"
+              />
             </div>
             <p className="wedding-kicker mb-3">Seating</p>
             <h1 className="wedding-state-title mb-4">Coming Soon</h1>
@@ -135,11 +142,17 @@ export default function MyTablePage() {
       <main className="wedding-main wedding-center text-center">
         <section className="wedding-page-panel wedding-animate-up text-center">
           <div className="flex justify-center mb-6">
-            <img src="/logo.png" alt="Omar & Hager logo" className="w-20 md:w-24 h-auto" />
+            <Image
+              src="/logo.png"
+              alt="Omar & Hager logo"
+              width={96}
+              height={96}
+              className="wedding-logo w-20 md:w-24"
+            />
           </div>
 
           <p className="wedding-kicker mb-3">Seating</p>
-          <h1 className="wedding-page-title mb-4">Find Your Table</h1>
+          <h1 className="wedding-page-title mb-4">Find your table</h1>
           <p className="wedding-lead mb-8 md:mb-10">
             Start typing your name to find your table.
           </p>

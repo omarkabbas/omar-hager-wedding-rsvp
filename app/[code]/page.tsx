@@ -2,6 +2,7 @@
 
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import Navigation from "@/app/components/Navigation";
 import { supabase } from "@/lib/supabase";
@@ -26,7 +27,7 @@ export default function GuestRSVP() {
   const [loading, setLoading] = useState(true);
   const [isAttending, setIsAttending] = useState("true");
   const [showConfetti, setShowConfetti] = useState(false);
-  const confettiPieces = useMemo(() => Array.from({ length: 26 }, (_, i) => i), []);
+  const confettiPieces = useMemo(() => Array.from({ length: 240 }, (_, i) => i), []);
   const rsvpByLabel = useMemo(() => {
     const parsed = new Date(RSVP_BY_DATE);
     if (Number.isNaN(parsed.getTime())) return RSVP_BY_DATE;
@@ -94,7 +95,7 @@ export default function GuestRSVP() {
       setSubmitted(true);
       if (attendingValue) {
         setShowConfetti(true);
-        window.setTimeout(() => setShowConfetti(false), 2800);
+        window.setTimeout(() => setShowConfetti(false), 5600);
       }
     }
   }
@@ -120,14 +121,14 @@ export default function GuestRSVP() {
         }
         @keyframes weddingConfettiFall {
           0% {
-            transform: translate3d(0, -20vh, 0) rotate(0deg);
+            transform: translate3d(0, -30vh, 0) rotate(0deg);
             opacity: 0;
           }
           12% {
             opacity: 1;
           }
           100% {
-            transform: translate3d(var(--x-shift, 0px), 95vh, 0) rotate(520deg);
+            transform: translate3d(var(--x-shift, 0px), 110vh, 0) rotate(720deg);
             opacity: 0;
           }
         }
@@ -141,7 +142,13 @@ export default function GuestRSVP() {
         ) : (
           <section className="wedding-page-panel wedding-animate-up relative overflow-hidden">
             <div className="flex justify-center mb-6">
-              <img src="/logo.png" alt="Omar & Hager logo" className="w-20 md:w-24 h-auto" />
+              <Image
+                src="/logo.png"
+                alt="Omar & Hager logo"
+                width={96}
+                height={96}
+                className="wedding-logo w-20 md:w-24"
+              />
             </div>
 
             {!guestData ? (
@@ -158,18 +165,32 @@ export default function GuestRSVP() {
             ) : submitted ? (
               <div className="wedding-animate-fade py-2 text-center">
                 {guestData.attending && showConfetti && (
-                  <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                  <div className="pointer-events-none fixed inset-0 z-[120] overflow-hidden">
                     {confettiPieces.map((piece) => (
                       <span
                         key={piece}
-                        className="absolute top-0 h-2.5 w-2 rounded-sm"
+                        className="absolute top-0"
                         style={
                           {
-                            left: `${(piece * 97) % 100}%`,
+                            left: `${(piece * 37) % 100}%`,
                             background:
-                              piece % 3 === 0 ? "#86efac" : piece % 3 === 1 ? "#c4b5fd" : "#f9a8d4",
-                            animation: `weddingConfettiFall ${1.8 + (piece % 5) * 0.25}s ease-out ${piece * 0.05}s both`,
-                            "--x-shift": `${(piece % 2 === 0 ? 1 : -1) * (24 + (piece % 7) * 7)}px`,
+                              piece % 5 === 0
+                                ? "#86efac"
+                                : piece % 5 === 1
+                                  ? "#c4b5fd"
+                                  : piece % 5 === 2
+                                    ? "#f9a8d4"
+                                    : piece % 5 === 3
+                                      ? "#fcd34d"
+                                      : "#7dd3fc",
+                            width: `${8 + (piece % 6)}px`,
+                            height: `${10 + (piece % 7)}px`,
+                            borderRadius: piece % 3 === 0 ? "999px" : "2px",
+                            boxShadow: "0 0 14px rgba(255,255,255,0.42)",
+                            backgroundImage:
+                              "linear-gradient(130deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.08) 36%, rgba(255,255,255,0) 70%)",
+                            animation: `weddingConfettiFall ${2.4 + (piece % 8) * 0.22}s ease-out ${piece * 0.012}s both`,
+                            "--x-shift": `${(piece % 2 === 0 ? 1 : -1) * (40 + (piece % 11) * 11)}px`,
                           } as CSSProperties
                         }
                       />

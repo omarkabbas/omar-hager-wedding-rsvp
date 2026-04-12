@@ -2,6 +2,7 @@
 
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { supabase } from "@/lib/supabase";
 
 type GuestResponse = {
@@ -90,6 +91,8 @@ export default function AdminDashboard() {
   const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState(false);
   const [isGalleryEnabled, setIsGalleryEnabled] = useState(false);
   const [isGalleryFeedEnabled, setIsGalleryFeedEnabled] = useState(true);
+  const [isHomeVenueEnabled, setIsHomeVenueEnabled] = useState(false);
+  const [isHomeCarouselEnabled, setIsHomeCarouselEnabled] = useState(true);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
@@ -137,7 +140,13 @@ export default function AdminDashboard() {
     const { data, error: fetchError } = await supabase
       .from("settings")
       .select("key, value")
-      .in("key", ["is_seating_chart_enabled", "is_gallery_enabled", "is_gallery_feed_enabled"]);
+      .in("key", [
+        "is_seating_chart_enabled",
+        "is_gallery_enabled",
+        "is_gallery_feed_enabled",
+        "is_home_venue_enabled",
+        "is_home_carousel_enabled",
+      ]);
 
     if (fetchError) {
       showToast(fetchError.message, "error");
@@ -149,11 +158,15 @@ export default function AdminDashboard() {
     const seatingSetting = data.find((setting) => setting.key === "is_seating_chart_enabled");
     const gallerySetting = data.find((setting) => setting.key === "is_gallery_enabled");
     const galleryFeedSetting = data.find((setting) => setting.key === "is_gallery_feed_enabled");
+    const homeVenueSetting = data.find((setting) => setting.key === "is_home_venue_enabled");
+    const homeCarouselSetting = data.find((setting) => setting.key === "is_home_carousel_enabled");
 
     startTransition(() => {
       setIsSeatingChartEnabled(seatingSetting?.value === "true");
       setIsGalleryEnabled(gallerySetting?.value === "true");
       setIsGalleryFeedEnabled(galleryFeedSetting ? galleryFeedSetting.value === "true" : true);
+      setIsHomeVenueEnabled(homeVenueSetting?.value === "true");
+      setIsHomeCarouselEnabled(homeCarouselSetting ? homeCarouselSetting.value === "true" : true);
     });
   }, []);
 
@@ -299,6 +312,38 @@ export default function AdminDashboard() {
 
     setIsGalleryFeedEnabled(nextValue);
     showToast(`Shared photos section ${nextValue ? "enabled" : "hidden"}.`, "success");
+  };
+
+  const toggleHomeVenue = async () => {
+    const nextValue = !isHomeVenueEnabled;
+    const { error: updateError } = await supabase
+      .from("settings")
+      .update({ value: nextValue.toString() })
+      .eq("key", "is_home_venue_enabled");
+
+    if (updateError) {
+      showToast(updateError.message, "error");
+      return;
+    }
+
+    setIsHomeVenueEnabled(nextValue);
+    showToast(`Homepage venue section ${nextValue ? "enabled" : "hidden"}.`, "success");
+  };
+
+  const toggleHomeCarousel = async () => {
+    const nextValue = !isHomeCarouselEnabled;
+    const { error: updateError } = await supabase
+      .from("settings")
+      .update({ value: nextValue.toString() })
+      .eq("key", "is_home_carousel_enabled");
+
+    if (updateError) {
+      showToast(updateError.message, "error");
+      return;
+    }
+
+    setIsHomeCarouselEnabled(nextValue);
+    showToast(`Homepage carousel ${nextValue ? "enabled" : "hidden"}.`, "success");
   };
 
   const addSeatingAssignment = async (e: React.FormEvent) => {
@@ -525,7 +570,13 @@ export default function AdminDashboard() {
           className="wedding-panel wedding-animate-up relative z-10 w-full max-w-md px-8 py-10 text-center md:px-12 md:py-14"
         >
           <div className="mb-6 flex justify-center">
-            <img src="/logo.png" alt="Omar & Hager logo" className="h-auto w-20" />
+            <Image
+              src="/logo.png"
+              alt="Omar & Hager logo"
+              width={80}
+              height={80}
+              className="wedding-logo w-20"
+            />
           </div>
           <p className="wedding-kicker mb-3">Private Access</p>
           <h1 className="wedding-state-title mb-4">Admin Login</h1>
@@ -556,7 +607,13 @@ export default function AdminDashboard() {
       <div className="relative z-10 mx-auto max-w-7xl">
         <div className="mb-8 flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
           <div className="flex items-center gap-4">
-            <img src="/logo.png" alt="Omar & Hager logo" className="h-auto w-14 md:w-16" />
+            <Image
+              src="/logo.png"
+              alt="Omar & Hager logo"
+              width={64}
+              height={64}
+              className="wedding-logo w-14 md:w-16"
+            />
             <div>
               <p className="wedding-kicker mb-2">Omar & Hager 2026</p>
               <h1 className="wedding-page-title">Guest Management</h1>
@@ -628,6 +685,18 @@ export default function AdminDashboard() {
             </div>
 
             <div className="space-y-3">
+              <ToggleRow
+                label="Homepage Carousel"
+                description="Show or hide the photo carousel on the home page."
+                enabled={isHomeCarouselEnabled}
+                onToggle={toggleHomeCarousel}
+              />              
+              <ToggleRow
+                label="Homepage Venue Section"
+                description="Show or hide venue details and map on the home page."
+                enabled={isHomeVenueEnabled}
+                onToggle={toggleHomeVenue}
+              />
               <ToggleRow
                 label="Find Your Table"
                 description="Show or hide the seating lookup page."

@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from 'react';
+import Image from "next/image";
 
 const images = [
   '/oh1.JPG',
@@ -28,7 +29,14 @@ export default function HeroCarousel() {
             index === currentIndex ? 'opacity-100' : 'opacity-0'
           }`}
         >
-          <img src={src} alt={`Omar and Hager ${index + 1}`} className="object-cover w-full h-full" />
+          <Image
+            src={src}
+            alt={`Omar and Hager ${index + 1}`}
+            fill
+            sizes="(max-width: 768px) 92vw, 640px"
+            className="h-full w-full object-cover"
+            priority={index === 0}
+          />
         </div>
       ))}
     </div>

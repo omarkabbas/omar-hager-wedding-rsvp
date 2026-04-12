@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import Navigation from "@/app/components/Navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -165,7 +166,13 @@ export default function GalleryPage() {
         <main className="wedding-main wedding-center text-center">
           <section className="wedding-page-panel max-w-2xl text-center">
             <div className="flex justify-center mb-6">
-              <img src="/logo.png" alt="Omar & Hager logo" className="w-20 h-auto opacity-50" />
+              <Image
+                src="/logo.png"
+                alt="Omar & Hager logo"
+                width={80}
+                height={80}
+                className="wedding-logo w-20"
+              />
             </div>
             <p className="wedding-kicker mb-3">Guest Gallery</p>
             <h1 className="wedding-state-title mb-4">Gallery is not available yet</h1>
@@ -185,7 +192,13 @@ export default function GalleryPage() {
         <main className="wedding-main pt-2 md:pt-4">
           <section className="wedding-page-panel max-w-2xl text-center">
             <div className="flex justify-center mb-6">
-              <img src="/logo.png" alt="Omar & Hager logo" className="w-20 md:w-24 h-auto opacity-70" />
+              <Image
+                src="/logo.png"
+                alt="Omar & Hager logo"
+                width={96}
+                height={96}
+                className="wedding-logo w-20 md:w-24"
+              />
             </div>
 
             <p className="wedding-kicker mb-3">Guest Gallery</p>
@@ -215,7 +228,13 @@ export default function GalleryPage() {
       <main className="wedding-main pt-2 md:pt-4">
         <section className="wedding-page-panel wedding-animate-up max-w-2xl text-center">
           <div className="flex justify-center mb-6">
-            <img src="/logo.png" alt="Omar & Hager logo" className="w-20 md:w-24 h-auto" />
+            <Image
+              src="/logo.png"
+              alt="Omar & Hager logo"
+              width={96}
+              height={96}
+              className="wedding-logo w-20 md:w-24"
+            />
           </div>
 
           <p className="wedding-kicker mb-3">Guest Gallery</p>
@@ -309,13 +328,16 @@ export default function GalleryPage() {
                               className="block relative aspect-[4/5] overflow-hidden rounded-[20px] bg-stone-100"
                             >
                               {imageSrc ? (
-                                <img
+                                <Image
                                   src={imageSrc}
                                   alt={photo.name}
+                                  fill
+                                  unoptimized
+                                  sizes="(max-width: 768px) 72vw, 250px"
                                   className="h-full w-full object-cover"
                                   referrerPolicy="no-referrer"
                                   onError={(e) => {
-                                    e.currentTarget.style.display = "none";
+                                    (e.currentTarget as HTMLImageElement).style.display = "none";
                                   }}
                                 />
                               ) : (

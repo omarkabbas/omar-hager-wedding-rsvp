@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import Navigation from "@/app/components/Navigation";
 
 export default function RegistryPage() {
@@ -12,7 +13,13 @@ export default function RegistryPage() {
       <main className="wedding-main wedding-center text-center">
         <section className="wedding-page-panel wedding-animate-up text-center">
           <div className="flex justify-center mb-6">
-            <img src="/logo.png" alt="Omar & Hager logo" className="w-20 md:w-24 h-auto" />
+            <Image
+              src="/logo.png"
+              alt="Omar & Hager logo"
+              width={96}
+              height={96}
+              className="wedding-logo w-20 md:w-24"
+            />
           </div>
 
           <p className="wedding-kicker mb-3">Registry</p>

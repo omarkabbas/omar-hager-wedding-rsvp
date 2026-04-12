@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -115,6 +116,8 @@ function InviteContent() {
           :root {
             --env-w: 300px;
             --env-h: 205px;
+            --envelope-bg: #d4e8f9;
+            --envelope-shadow: #88a8c3;
           }
 
           @media (min-width: 768px) {
@@ -166,29 +169,11 @@ function InviteContent() {
           }
 
           .envelope::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            border-radius: 10px;
-            background:
-              linear-gradient(135deg, rgba(255,255,255,0.58) 0%, rgba(255,255,255,0.24) 18%, rgba(255,255,255,0) 42%),
-              linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0));
-            pointer-events: none;
-            z-index: 1;
+            content: none;
           }
 
           .envelope::after {
-            content: "";
-            position: absolute;
-            left: 8%;
-            right: 8%;
-            top: 9%;
-            height: 20%;
-            border-radius: 999px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.34), rgba(255,255,255,0));
-            filter: blur(8px);
-            pointer-events: none;
-            z-index: 1;
+            content: none;
           }
 
           .invite-card {
@@ -252,6 +237,8 @@ function InviteContent() {
           .envelope-bottom::before {
             content: "";
             transform: rotate(45deg);
+            background: var(--envelope-bg);
+            box-shadow: 0 0 30px -5px var(--envelope-shadow);
             width: 100%;
             aspect-ratio: 1;
             display: block;
@@ -259,29 +246,31 @@ function InviteContent() {
           }
 
           .envelope-flap::before {
-            background: linear-gradient(135deg, #f8fcff 0%, #e7f1f9 46%, #eef6fc 100%);
-            bottom: 26%;
+            top: auto;
+            bottom: 50px;
             border-radius: 1.5rem;
           }
 
+          @media (min-width: 768px) {
+            .envelope-flap::before {
+              bottom: 100px;
+            }
+          }
+
           .envelope-left::before {
-            background: linear-gradient(135deg, #edf6fd 0%, #d9e9f6 100%);
-            top: 5%;
-            left: -60%;
+            top: 10%;
+            left: -65%;
           }
 
           .envelope-right::before {
-            background: linear-gradient(135deg, #e6f2fb 0%, #d2e4f3 100%);
-            top: 5%;
-            right: -60%;
+            top: 10%;
+            right: -65%;
           }
 
           .envelope-bottom::before {
-            background: linear-gradient(135deg, #f5fbff 0%, #e2eef8 100%);
-            top: 45%;
+            top: 60%;
             left: 0;
-            border-radius: 2rem;
-            box-shadow: 0 -5px 20px rgba(103, 132, 156, 0.08);
+            border-radius: 5rem;
           }
 
           .cssletter.step-1 .envelope-flap,
@@ -389,9 +378,11 @@ function InviteContent() {
           </div>
 
           <div className="invite-card" onScroll={handleScroll} ref={cardRef}>
-            <img
+            <Image
               src="/invitation.jpeg"
               alt="Wedding invitation"
+              width={1200}
+              height={1800}
               className="w-full h-auto object-contain rounded-[10px] border border-stone-50"
             />
             <div className={`scroll-instruction ${step === 2 && isAtTop ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
@@ -402,17 +393,21 @@ function InviteContent() {
           </div>
 
           <div className="monogram-logo">
-            <img
+            <Image
               src="/logo.png"
               alt="Omar & Hager logo"
+              width={82}
+              height={82}
               className="opacity-90"
             />
           </div>
 
           <div className="seal-container">
-            <img
+            <Image
               src="/seal.png"
               alt="Wax seal"
+              width={80}
+              height={80}
               className="z-10"
             />
           </div>
