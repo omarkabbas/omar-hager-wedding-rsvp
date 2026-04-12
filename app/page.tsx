@@ -7,12 +7,7 @@ import Navigation from "@/app/components/Navigation";
 import HeroCarousel from "@/app/components/HeroCarousel";
 import { supabase } from "@/lib/supabase";
 import { virust } from "@/app/fonts";
-
-const VENUE_NAME = "Reflections Venue & Gardens";
-const VENUE_ADDRESS = "1901 E Spring Creek Pkwy, Plano, TX 75074";
-const VENUE_MAP_LINK = "https://maps.google.com/maps?q=Reflections+Venue+and+Gardens+Plano";
-const VENUE_MAP_EMBED =
-  "https://www.google.com/maps?q=Reflections%20Venue%20%26%20Gardens%2C%201901%20E%20Spring%20Creek%20Pkwy%2C%20Plano%2C%20TX%2075074&output=embed";
+import { VENUE_ADDRESS, VENUE_MAP_EMBED, VENUE_MAP_LINK, VENUE_NAME } from "@/lib/wedding";
 
 export default function HomePage() {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
@@ -140,7 +135,11 @@ export default function HomePage() {
           <h1
             className={`${virust.className} wedding-display mb-6 flex w-full items-center justify-center whitespace-nowrap text-[clamp(2.3rem,11vw,3.05rem)] leading-[0.95] text-stone-900 md:mb-8 md:text-8xl`}
           >
-            <span className="inline-block text-center">Omar &amp; Hager</span>
+            <span className="inline-flex items-baseline text-center">
+              <span>Omar</span>
+              <span className="wedding-display-ampersand mx-[0.16em]">&amp;</span>
+              <span>Hager</span>
+            </span>
           </h1>
           <p className="wedding-date mb-8 md:mb-10">June 06, 2026</p>
 

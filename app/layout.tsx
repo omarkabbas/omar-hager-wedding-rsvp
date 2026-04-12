@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { virust } from "./fonts";
+import { bodoniSwashesItalic, virust } from "./fonts";
 
 export const metadata: Metadata = {
   title: 'Omar & Hager’s Wedding RSVP',
@@ -19,7 +19,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${virust.variable} antialiased`}>
+      <body className={`${virust.variable} ${bodoniSwashesItalic.variable} antialiased`}>
         {children}
       </body>
     </html>

@@ -1,9 +1,11 @@
 "use client";
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
+import { SITE_URL } from "@/lib/wedding";
 
 type GuestResponse = {
   id: number;
@@ -12,6 +14,9 @@ type GuestResponse = {
   max_guests: number;
   attending: boolean | null;
   confirmed_guests: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  responded_at?: string | null;
 };
 
 type SeatingAssignment = {
@@ -29,7 +34,7 @@ type Toast = {
 type RsvpFilter = "all" | "pending" | "attending" | "declined";
 type GuestSortKey = "guest_name" | "invite_code" | "attending" | "max_guests" | "confirmed_guests";
 type SortDirection = "asc" | "desc";
-type AdminTab = "all" | "overview" | "invitations" | "seating";
+type AdminTab = "overview" | "settings" | "invitations" | "seating" | "all";
 
 type InlineGuestDraft = {
   guest_name: string;
@@ -47,7 +52,14 @@ type ConfirmDialogState = {
   onConfirm: () => Promise<void> | void;
 };
 
-const INVITE_BASE_URL = "https://omar-hager-rsvp.vercel.app";
+type RowMenuItem = {
+  label: string;
+  onSelect?: () => void;
+  href?: string;
+  tone?: "default" | "danger";
+};
+
+const INVITE_BASE_URL = SITE_URL;
 
 export default function AdminDashboard() {
   const [responses, setResponses] = useState<GuestResponse[]>([]);
@@ -73,7 +85,7 @@ export default function AdminDashboard() {
   const deferredSeatingSearch = useDeferredValue(seatingSearch);
 
   const [rsvpFilter, setRsvpFilter] = useState<RsvpFilter>("all");
-  const [activeTab, setActiveTab] = useState<AdminTab>("all");
+  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
   const [guestSort, setGuestSort] = useState<{ key: GuestSortKey; direction: SortDirection }>({
     key: "guest_name",
     direction: "asc",
@@ -96,6 +108,8 @@ export default function AdminDashboard() {
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const guestFormSectionRef = useRef<HTMLElement | null>(null);
+  const seatingFormSectionRef = useRef<HTMLElement | null>(null);
 
   const showToast = (message: string, tone: Toast["tone"] = "info") => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
@@ -103,6 +117,12 @@ export default function AdminDashboard() {
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, 3200);
+  };
+
+  const scrollToSection = (ref: React.RefObject<HTMLElement | null>) => {
+    window.requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   };
 
   const handleLogin = (e: React.FormEvent) => {
@@ -229,6 +249,7 @@ export default function AdminDashboard() {
     const cleanedName = newName.trim();
     const cleanedCode = newCode.trim();
     if (!cleanedName || !cleanedCode) return;
+    const now = new Date().toISOString();
 
     const attendingValue = attendanceStatus === "pending" ? null : attendanceStatus === "attending";
     const finalConfirmed =
@@ -243,7 +264,22 @@ export default function AdminDashboard() {
     };
 
     if (editingGuestId !== null) {
-      const { error: updateError } = await supabase.from("rsvp_list").update(payload).eq("id", editingGuestId);
+      const existingGuest = responses.find((guest) => guest.id === editingGuestId);
+      const respondedAt =
+        attendingValue === null
+          ? null
+          : existingGuest?.attending !== attendingValue || !existingGuest?.responded_at
+            ? now
+            : existingGuest.responded_at;
+
+      const { error: updateError } = await supabase
+        .from("rsvp_list")
+        .update({
+          ...payload,
+          responded_at: respondedAt,
+          updated_at: now,
+        })
+        .eq("id", editingGuestId);
 
       if (updateError) {
         showToast(updateError.message, "error");
@@ -255,7 +291,15 @@ export default function AdminDashboard() {
       return;
     }
 
-    const { error: insertError } = await supabase.from("rsvp_list").insert([payload]);
+    const { error: insertError } = await supabase
+      .from("rsvp_list")
+      .insert([
+        {
+          ...payload,
+          created_at: now,
+          responded_at: attendingValue === null ? null : now,
+        },
+      ]);
 
     if (insertError) {
       showToast(insertError.message, "error");
@@ -481,6 +525,8 @@ export default function AdminDashboard() {
   const saveInlineGuestEdit = async (guestId: number) => {
     const draft = inlineGuestEdits[guestId];
     if (!draft) return;
+    const now = new Date().toISOString();
+    const existingGuest = responses.find((guest) => guest.id === guestId);
 
     const maxGuests = Math.max(1, draft.max_guests || 1);
     const attending = draft.attending;
@@ -499,6 +545,13 @@ export default function AdminDashboard() {
         max_guests: maxGuests,
         attending,
         confirmed_guests: confirmed,
+        responded_at:
+          attending === null
+            ? null
+            : existingGuest?.attending !== attending || !existingGuest?.responded_at
+              ? now
+              : existingGuest.responded_at,
+        updated_at: now,
       })
       .eq("id", guestId);
 
@@ -547,6 +600,42 @@ export default function AdminDashboard() {
     showToast("Seating row updated.", "success");
   };
 
+  const formatAdminDateTime = (value?: string | null) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+
+    return parsed.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  const getGuestInviteUrl = (guest: GuestResponse) => `${INVITE_BASE_URL}/${guest.invite_code.toLowerCase()}`;
+
+  const getGuestResponseMeta = (guest: GuestResponse) => {
+    if (guest.attending === null) return "Awaiting RSVP";
+    const responseLabel = guest.attending ? "Accepted" : "Declined";
+    const respondedAt = formatAdminDateTime(guest.responded_at);
+    return respondedAt ? `${responseLabel} · ${respondedAt}` : responseLabel;
+  };
+
+  const getGuestEditedMeta = (guest: GuestResponse) => {
+    const editedAt = formatAdminDateTime(guest.updated_at);
+    return editedAt ? `Last edited ${editedAt}` : null;
+  };
+
+  const copyInviteLink = async (guest: GuestResponse) => {
+    try {
+      await navigator.clipboard.writeText(getGuestInviteUrl(guest));
+      showToast("RSVP link copied.", "success");
+    } catch (copyError) {
+      showToast(copyError instanceof Error ? copyError.message : "Could not copy RSVP link.", "error");
+    }
+  };
+
   const copyInvitation = async (guest: GuestResponse) => {
     const message = `Dear ${guest.guest_name}, with great joy, Omar & Hager invite you to celebrate their wedding. Please RSVP here: ${INVITE_BASE_URL}/${guest.invite_code.toLowerCase()}`;
     try {
@@ -555,6 +644,57 @@ export default function AdminDashboard() {
     } catch (copyError) {
       showToast(copyError instanceof Error ? copyError.message : "Could not copy invitation.", "error");
     }
+  };
+
+  const beginGuestFormEdit = (guest: GuestResponse) => {
+    setEditingGuestId(guest.id);
+    setNewName(guest.guest_name);
+    setNewCode(guest.invite_code);
+    setNewLimit(guest.max_guests);
+    setAttendanceStatus(guest.attending === null ? "pending" : guest.attending ? "attending" : "declined");
+    setConfirmedGuests(guest.confirmed_guests || 0);
+    scrollToSection(guestFormSectionRef);
+  };
+
+  const confirmRemoveGuest = (guest: GuestResponse) => {
+    askConfirm({
+      title: "Remove Invitation?",
+      message: `${guest.guest_name} will be deleted from RSVP list.`,
+      actionLabel: "Remove",
+      actionTone: "danger",
+      onConfirm: async () => {
+        const { error: deleteError } = await supabase.from("rsvp_list").delete().eq("id", guest.id);
+        if (deleteError) {
+          showToast(deleteError.message, "error");
+          return;
+        }
+        showToast("Invitation removed.", "success");
+      },
+    });
+  };
+
+  const beginSeatingFormEdit = (assignment: SeatingAssignment) => {
+    setEditingSeatingId(assignment.id);
+    setSeatingName(assignment.name);
+    setTableNumber(assignment.table_number);
+    scrollToSection(seatingFormSectionRef);
+  };
+
+  const confirmRemoveSeatingAssignment = (assignment: SeatingAssignment) => {
+    askConfirm({
+      title: "Remove Seating Assignment?",
+      message: `${assignment.name} will be removed from table ${assignment.table_number}.`,
+      actionLabel: "Remove",
+      actionTone: "danger",
+      onConfirm: async () => {
+        const { error: deleteError } = await supabase.from("seating").delete().eq("id", assignment.id);
+        if (deleteError) {
+          showToast(deleteError.message, "error");
+          return;
+        }
+        showToast("Seating assignment removed.", "success");
+      },
+    });
   };
 
   const askConfirm = (dialog: ConfirmDialogState) => setConfirmDialog(dialog);
@@ -627,20 +767,11 @@ export default function AdminDashboard() {
         </div>
 
         <div className="sticky top-2 z-30 mb-5 rounded-2xl bg-white/88 p-1 shadow-lg ring-1 ring-stone-100 backdrop-blur">
-          <div className="grid grid-cols-4 gap-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab("all")}
-              className={`rounded-xl px-2 py-2 text-[10px] font-bold uppercase tracking-[0.18em] md:text-[11px] ${
-                activeTab === "all" ? "bg-stone-900 text-white" : "text-stone-600"
-              }`}
-            >
-              All
-            </button>
+          <div className="flex gap-1 overflow-x-auto pb-1 md:grid md:grid-cols-5 md:overflow-visible md:pb-0">
             <button
               type="button"
               onClick={() => setActiveTab("overview")}
-              className={`rounded-xl px-2 py-2 text-[10px] font-bold uppercase tracking-[0.18em] md:text-[11px] ${
+              className={`min-w-[92px] flex-none rounded-xl px-3 py-2 text-[9px] font-bold uppercase tracking-[0.12em] md:min-w-0 md:px-2 md:text-[11px] md:tracking-[0.16em] ${
                 activeTab === "overview" ? "bg-stone-900 text-white" : "text-stone-600"
               }`}
             >
@@ -648,8 +779,17 @@ export default function AdminDashboard() {
             </button>
             <button
               type="button"
+              onClick={() => setActiveTab("settings")}
+              className={`min-w-[92px] flex-none rounded-xl px-3 py-2 text-[9px] font-bold uppercase tracking-[0.12em] md:min-w-0 md:px-2 md:text-[11px] md:tracking-[0.16em] ${
+                activeTab === "settings" ? "bg-stone-900 text-white" : "text-stone-600"
+              }`}
+            >
+              Settings
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab("invitations")}
-              className={`rounded-xl px-2 py-2 text-[10px] font-bold uppercase tracking-[0.18em] md:text-[11px] ${
+              className={`min-w-[108px] flex-none rounded-xl px-3 py-2 text-[9px] font-bold uppercase tracking-[0.12em] md:min-w-0 md:px-2 md:text-[11px] md:tracking-[0.16em] ${
                 activeTab === "invitations" ? "bg-stone-900 text-white" : "text-stone-600"
               }`}
             >
@@ -658,11 +798,20 @@ export default function AdminDashboard() {
             <button
               type="button"
               onClick={() => setActiveTab("seating")}
-              className={`rounded-xl px-2 py-2 text-[10px] font-bold uppercase tracking-[0.18em] md:text-[11px] ${
+              className={`min-w-[92px] flex-none rounded-xl px-3 py-2 text-[9px] font-bold uppercase tracking-[0.12em] md:min-w-0 md:px-2 md:text-[11px] md:tracking-[0.16em] ${
                 activeTab === "seating" ? "bg-stone-900 text-white" : "text-stone-600"
               }`}
             >
               Seating
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("all")}
+              className={`min-w-[72px] flex-none rounded-xl px-3 py-2 text-[9px] font-bold uppercase tracking-[0.12em] md:min-w-0 md:px-2 md:text-[11px] md:tracking-[0.16em] ${
+                activeTab === "all" ? "bg-stone-900 text-white" : "text-stone-600"
+              }`}
+            >
+              All
             </button>
           </div>
         </div>
@@ -677,7 +826,7 @@ export default function AdminDashboard() {
           </div>
         </section>
 
-        <div className={`mb-8 grid gap-8 ${tabClass("overview")}`}>
+        <div className={`mb-8 grid gap-8 ${tabClass("settings")}`}>
           <section className="wedding-section wedding-animate-up mx-auto w-full max-w-3xl p-5 md:p-6">
             <div className="mb-6 text-center md:text-left">
               <p className="wedding-kicker mb-2">Live Controls</p>
@@ -719,7 +868,7 @@ export default function AdminDashboard() {
           </section>
         </div>
 
-        <section className={`wedding-section wedding-animate-up mb-8 p-6 md:p-8 ${tabClass("invitations")}`}>
+        <section ref={guestFormSectionRef} className={`wedding-section wedding-animate-up mb-8 p-6 md:p-8 ${tabClass("invitations")}`}>
           <div className="mb-8 text-center md:text-left">
             <p className="wedding-kicker mb-2">Invitation Tools</p>
             <h2 className="wedding-title text-3xl md:text-4xl">
@@ -791,8 +940,8 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            <div className="sticky bottom-3 z-20 -mx-2 rounded-3xl bg-[#D0E0F0]/90 p-2 backdrop-blur md:static md:mx-0 md:bg-transparent md:p-0 md:backdrop-blur-0">
-              <div className="flex flex-col gap-3 md:flex-row">
+            <div className="sticky bottom-3 z-20 -mx-2 rounded-3xl border border-stone-100 bg-white/96 p-2 shadow-lg backdrop-blur md:static md:mx-0 md:rounded-none md:border-0 md:bg-transparent md:p-0 md:shadow-none md:backdrop-blur-0">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
                 <button className="wedding-button-primary w-full md:w-auto">
                   {editingGuestId !== null ? "Save Changes" : "Add to List"}
                 </button>
@@ -806,7 +955,7 @@ export default function AdminDashboard() {
           </form>
         </section>
 
-        <section className={`wedding-section wedding-animate-up overflow-hidden ${tabClass("invitations")}`}>
+        <section className={`wedding-section wedding-animate-up overflow-visible ${tabClass("invitations")}`}>
           <div className="px-6 pb-4 pt-6 md:px-8 md:pt-8">
             <p className="wedding-kicker mb-2">Responses</p>
             <h2 className="wedding-title text-3xl md:text-4xl">Guest List</h2>
@@ -818,7 +967,7 @@ export default function AdminDashboard() {
                 className="wedding-input"
                 placeholder="Search by guest name or invite code"
               />
-              <div className="sticky top-2 z-20 -mx-1 flex gap-2 overflow-x-auto rounded-2xl bg-white/85 p-1 backdrop-blur">
+              <div className="-mx-1 flex gap-2 overflow-x-auto rounded-2xl bg-white/85 p-1">
                 {([
                   { key: "all", label: "All" },
                   { key: "pending", label: "Pending" },
@@ -840,244 +989,223 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="hidden overflow-x-auto md:block">
-            <table className="w-full min-w-[880px] text-left">
-              <thead className="border-y border-stone-100 bg-white/70 text-[10px] uppercase tracking-[0.25em] text-stone-400">
-                <tr>
-                  <SortableHead
-                    className="px-6 py-4 md:px-8"
-                    label="Name"
-                    active={guestSort.key === "guest_name"}
-                    direction={guestSort.direction}
-                    onClick={() => setGuestSortKey("guest_name")}
-                  />
-                  <SortableHead
-                    className="px-4 py-4 text-center"
-                    label="Status"
-                    active={guestSort.key === "attending"}
-                    direction={guestSort.direction}
-                    onClick={() => setGuestSortKey("attending")}
-                  />
-                  <SortableHead
-                    className="px-4 py-4 text-center"
-                    label="Invited / Accepted"
-                    active={guestSort.key === "max_guests" || guestSort.key === "confirmed_guests"}
-                    direction={guestSort.direction}
-                    onClick={() =>
-                      setGuestSortKey(guestSort.key === "max_guests" ? "confirmed_guests" : "max_guests")
-                    }
-                  />
-                  <th className="px-4 py-4 text-center">Invite Link</th>
-                  <SortableHead
-                    className="px-4 py-4 text-center"
-                    label="Code"
-                    active={guestSort.key === "invite_code"}
-                    direction={guestSort.direction}
-                    onClick={() => setGuestSortKey("invite_code")}
-                  />
-                  <th className="px-6 py-4 text-right md:px-8">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100 bg-stone-50/40">
-                {filteredResponses.map((guest) => {
-                  const draft = inlineGuestEdits[guest.id];
-                  const isInlineEditing = Boolean(draft);
-                  const acceptedCount = guest.attending ? guest.confirmed_guests || 0 : 0;
-
-                  return (
-                    <tr key={guest.id} className="align-middle">
-                      <td className="px-6 py-5 md:px-8">
-                        {isInlineEditing ? (
-                          <input
-                            value={draft.guest_name}
-                            onChange={(e) =>
-                              setInlineGuestEdits((prev) => ({
-                                ...prev,
-                                [guest.id]: { ...prev[guest.id], guest_name: e.target.value },
-                              }))
-                            }
-                            className="wedding-input"
-                          />
-                        ) : (
-                          <p className="wedding-subtitle text-2xl">{guest.guest_name}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-5 text-center">
-                        {isInlineEditing ? (
-                          <select
-                            value={
-                              draft.attending === null ? "pending" : draft.attending === true ? "attending" : "declined"
-                            }
-                            onChange={(e) => {
-                              const nextStatus = e.target.value;
-                              setInlineGuestEdits((prev) => ({
-                                ...prev,
-                                [guest.id]: {
-                                  ...prev[guest.id],
-                                  attending:
-                                    nextStatus === "pending" ? null : nextStatus === "attending",
-                                  confirmed_guests:
-                                    nextStatus === "pending"
-                                      ? null
-                                      : nextStatus === "declined"
-                                        ? 0
-                                        : Math.max(1, prev[guest.id].confirmed_guests || 1),
-                                },
-                              }));
-                            }}
-                            className="wedding-select min-w-[170px]"
-                          >
-                            <option value="pending">Pending</option>
-                            <option value="attending">Attending</option>
-                            <option value="declined">Declined</option>
-                          </select>
-                        ) : (
-                          <StatusBadge attending={guest.attending} />
-                        )}
-                      </td>
-                      <td className="px-4 py-5 text-center">
-                        {isInlineEditing ? (
-                          <div className="mx-auto grid max-w-[180px] gap-2">
-                            <input
-                              type="number"
-                              min={1}
-                              value={draft.max_guests}
-                              onChange={(e) =>
-                                setInlineGuestEdits((prev) => ({
-                                  ...prev,
-                                  [guest.id]: {
-                                    ...prev[guest.id],
-                                    max_guests: parseInt(e.target.value, 10) || 1,
-                                  },
-                                }))
-                              }
-                              className="wedding-input text-center"
-                            />
-                            <input
-                              type="number"
-                              min={draft.attending === true ? 1 : 0}
-                              max={Math.max(1, draft.max_guests)}
-                              disabled={draft.attending !== true}
-                              value={draft.attending === true ? draft.confirmed_guests || 1 : 0}
-                              onChange={(e) =>
-                                setInlineGuestEdits((prev) => ({
-                                  ...prev,
-                                  [guest.id]: {
-                                    ...prev[guest.id],
-                                    confirmed_guests: parseInt(e.target.value, 10) || 0,
-                                  },
-                                }))
-                              }
-                              className={`wedding-input text-center ${draft.attending !== true ? "opacity-50" : ""}`}
-                            />
-                          </div>
-                        ) : (
-                          <p className="wedding-subtitle text-2xl">
-                            <span className="text-stone-300">{guest.max_guests}</span>
-                            <span className="mx-2 text-stone-200">/</span>
-                            {acceptedCount}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-5 text-center">
-                        <button onClick={() => void copyInvitation(guest)} className="wedding-button-secondary">
-                          Copy Invitation
-                        </button>
-                      </td>
-                      <td className="px-4 py-5 text-center">
-                        {isInlineEditing ? (
-                          <input
-                            value={draft.invite_code}
-                            onChange={(e) =>
-                              setInlineGuestEdits((prev) => ({
-                                ...prev,
-                                [guest.id]: { ...prev[guest.id], invite_code: e.target.value.toUpperCase() },
-                              }))
-                            }
-                            className="wedding-input text-center uppercase"
-                          />
-                        ) : (
-                          <span className="wedding-code">{guest.invite_code}</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-5 text-right md:px-8">
-                        {isInlineEditing ? (
-                          <div className="flex justify-end gap-2">
-                            <button onClick={() => void saveInlineGuestEdit(guest.id)} className="wedding-button-primary">
-                              Save
-                            </button>
-                            <button onClick={() => cancelInlineGuestEdit(guest.id)} className="wedding-button-secondary">
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => startInlineGuestEdit(guest)}
-                              className="mr-4 text-[10px] font-bold uppercase tracking-[0.22em] text-stone-500 transition-colors hover:text-stone-900"
-                            >
-                              Quick Edit
-                            </button>
-                            <button
-                              onClick={() => {
-                                setEditingGuestId(guest.id);
-                                setNewName(guest.guest_name);
-                                setNewCode(guest.invite_code);
-                                setNewLimit(guest.max_guests);
-                                setAttendanceStatus(
-                                  guest.attending === null ? "pending" : guest.attending ? "attending" : "declined",
-                                );
-                                setConfirmedGuests(guest.confirmed_guests || 0);
-                                window.scrollTo({ top: 0, behavior: "smooth" });
-                              }}
-                              className="mr-4 text-[10px] font-bold uppercase tracking-[0.22em] text-stone-500 transition-colors hover:text-stone-900"
-                            >
-                              Form Edit
-                            </button>
-                            <button
-                              onClick={() =>
-                                askConfirm({
-                                  title: "Remove Invitation?",
-                                  message: `${guest.guest_name} will be deleted from RSVP list.`,
-                                  actionLabel: "Remove",
-                                  actionTone: "danger",
-                                  onConfirm: async () => {
-                                    const { error: deleteError } = await supabase
-                                      .from("rsvp_list")
-                                      .delete()
-                                      .eq("id", guest.id);
-                                    if (deleteError) {
-                                      showToast(deleteError.message, "error");
-                                      return;
-                                    }
-                                    showToast("Invitation removed.", "success");
-                                  },
-                                })
-                              }
-                              className="text-[10px] font-bold uppercase tracking-[0.22em] text-rose-500 transition-colors hover:text-rose-700"
-                            >
-                              Remove
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="space-y-3 px-4 pb-6 md:hidden">
-            {filteredResponses.length === 0 && (
+          {filteredResponses.length === 0 ? (
+            <div className="px-4 pb-6 md:px-8 md:pb-8">
               <div className="wedding-subpanel px-6 py-8 text-center">
                 <p className="wedding-lead text-lg">No guests match this filter.</p>
               </div>
-            )}
-            {filteredResponses.map((guest) => {
+            </div>
+          ) : (
+            <>
+              <div className="mx-6 mb-6 hidden overflow-hidden rounded-[28px] border border-stone-100 bg-stone-50/40 md:block md:overflow-x-auto md:overflow-y-visible md:mx-8 md:mb-8">
+                <table className="w-full min-w-[760px] xl:min-w-[880px] text-left">
+                  <thead className="border-y border-stone-100 bg-white/70 text-[10px] uppercase tracking-[0.25em] text-stone-400">
+                    <tr>
+                      <SortableHead
+                        className="px-6 py-4 md:px-8"
+                        label="Name"
+                        active={guestSort.key === "guest_name"}
+                        direction={guestSort.direction}
+                        onClick={() => setGuestSortKey("guest_name")}
+                      />
+                      <SortableHead
+                        className="px-4 py-4 text-center"
+                        label="Status"
+                        active={guestSort.key === "attending"}
+                        direction={guestSort.direction}
+                        onClick={() => setGuestSortKey("attending")}
+                      />
+                      <th className="px-4 py-4 text-center">RSVP Update</th>
+                      <SortableHead
+                        className="px-4 py-4 text-center"
+                        label="Invited / Accepted"
+                        active={guestSort.key === "max_guests" || guestSort.key === "confirmed_guests"}
+                        direction={guestSort.direction}
+                        onClick={() =>
+                          setGuestSortKey(guestSort.key === "max_guests" ? "confirmed_guests" : "max_guests")
+                        }
+                      />
+                      <SortableHead
+                        className="px-4 py-4 text-center"
+                        label="Code"
+                        active={guestSort.key === "invite_code"}
+                        direction={guestSort.direction}
+                        onClick={() => setGuestSortKey("invite_code")}
+                      />
+                      <th className="px-6 py-4 text-right md:px-8">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {filteredResponses.map((guest) => {
+                      const draft = inlineGuestEdits[guest.id];
+                      const isInlineEditing = Boolean(draft);
+                      const acceptedCount = guest.attending ? guest.confirmed_guests || 0 : 0;
+                      const guestInviteUrl = getGuestInviteUrl(guest);
+                      const guestMenuItems: RowMenuItem[] = [
+                        { label: "Open RSVP Page", href: guestInviteUrl },
+                        { label: "Copy RSVP Link", onSelect: () => void copyInviteLink(guest) },
+                        { label: "Copy Invitation", onSelect: () => void copyInvitation(guest) },
+                        { label: "Quick Edit", onSelect: () => startInlineGuestEdit(guest) },
+                        { label: "Form Edit", onSelect: () => beginGuestFormEdit(guest) },
+                        { label: "Remove", onSelect: () => confirmRemoveGuest(guest), tone: "danger" },
+                      ];
+
+                      return (
+                        <tr key={guest.id} className="align-middle">
+                          <td className="px-6 py-5 md:px-8">
+                            {isInlineEditing ? (
+                              <input
+                                value={draft.guest_name}
+                                onChange={(e) =>
+                                  setInlineGuestEdits((prev) => ({
+                                    ...prev,
+                                    [guest.id]: { ...prev[guest.id], guest_name: e.target.value },
+                                  }))
+                                }
+                                className="wedding-input"
+                              />
+                            ) : (
+                              <div>
+                                <p className="wedding-subtitle text-2xl">{guest.guest_name}</p>
+                                {getGuestEditedMeta(guest) && (
+                                  <p className="mt-1 text-xs text-stone-400">{getGuestEditedMeta(guest)}</p>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-5 text-center">
+                            {isInlineEditing ? (
+                              <select
+                                value={
+                                  draft.attending === null ? "pending" : draft.attending === true ? "attending" : "declined"
+                                }
+                                onChange={(e) => {
+                                  const nextStatus = e.target.value;
+                                  setInlineGuestEdits((prev) => ({
+                                    ...prev,
+                                    [guest.id]: {
+                                      ...prev[guest.id],
+                                      attending:
+                                        nextStatus === "pending" ? null : nextStatus === "attending",
+                                      confirmed_guests:
+                                        nextStatus === "pending"
+                                          ? null
+                                          : nextStatus === "declined"
+                                            ? 0
+                                            : Math.max(1, prev[guest.id].confirmed_guests || 1),
+                                    },
+                                  }));
+                                }}
+                                className="wedding-select min-w-[170px]"
+                              >
+                                <option value="pending">Pending</option>
+                                <option value="attending">Attending</option>
+                                <option value="declined">Declined</option>
+                              </select>
+                            ) : (
+                              <StatusBadge attending={guest.attending} />
+                            )}
+                          </td>
+                          <td className="px-4 py-5 text-center">
+                            <p className="text-sm font-medium text-stone-600">{getGuestResponseMeta(guest)}</p>
+                          </td>
+                          <td className="px-4 py-5 text-center">
+                            {isInlineEditing ? (
+                              <div className="mx-auto grid max-w-[180px] gap-2">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={draft.max_guests}
+                                  onChange={(e) =>
+                                    setInlineGuestEdits((prev) => ({
+                                      ...prev,
+                                      [guest.id]: {
+                                        ...prev[guest.id],
+                                        max_guests: parseInt(e.target.value, 10) || 1,
+                                      },
+                                    }))
+                                  }
+                                  className="wedding-input text-center"
+                                />
+                                <input
+                                  type="number"
+                                  min={draft.attending === true ? 1 : 0}
+                                  max={Math.max(1, draft.max_guests)}
+                                  disabled={draft.attending !== true}
+                                  value={draft.attending === true ? draft.confirmed_guests || 1 : 0}
+                                  onChange={(e) =>
+                                    setInlineGuestEdits((prev) => ({
+                                      ...prev,
+                                      [guest.id]: {
+                                        ...prev[guest.id],
+                                        confirmed_guests: parseInt(e.target.value, 10) || 0,
+                                      },
+                                    }))
+                                  }
+                                  className={`wedding-input text-center ${draft.attending !== true ? "opacity-50" : ""}`}
+                                />
+                              </div>
+                            ) : (
+                              <p className="wedding-subtitle text-2xl">
+                                <span className="text-stone-300">{guest.max_guests}</span>
+                                <span className="mx-2 text-stone-200">/</span>
+                                {acceptedCount}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-4 py-5 text-center">
+                            {isInlineEditing ? (
+                              <input
+                                value={draft.invite_code}
+                                onChange={(e) =>
+                                  setInlineGuestEdits((prev) => ({
+                                    ...prev,
+                                    [guest.id]: { ...prev[guest.id], invite_code: e.target.value.toUpperCase() },
+                                  }))
+                                }
+                                className="wedding-input text-center uppercase"
+                              />
+                            ) : (
+                              <span className="wedding-code">{guest.invite_code}</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-5 text-right md:px-8">
+                            {isInlineEditing ? (
+                              <div className="flex justify-end gap-2">
+                                <button onClick={() => void saveInlineGuestEdit(guest.id)} className="wedding-button-primary">
+                                  Save
+                                </button>
+                                <button onClick={() => cancelInlineGuestEdit(guest.id)} className="wedding-button-secondary">
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex justify-end">
+                                <RowMenu label={`Actions for ${guest.guest_name}`} items={guestMenuItems} />
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="space-y-3 px-4 pb-6 md:hidden">
+                {filteredResponses.map((guest) => {
               const draft = inlineGuestEdits[guest.id];
               const isInlineEditing = Boolean(draft);
               const acceptedCount = guest.attending ? guest.confirmed_guests || 0 : 0;
+              const guestInviteUrl = getGuestInviteUrl(guest);
+              const guestMenuItems: RowMenuItem[] = [
+                { label: "Open RSVP Page", href: guestInviteUrl },
+                { label: "Copy RSVP Link", onSelect: () => void copyInviteLink(guest) },
+                { label: "Copy Invitation", onSelect: () => void copyInvitation(guest) },
+                { label: "Quick Edit", onSelect: () => startInlineGuestEdit(guest) },
+                { label: "Form Edit", onSelect: () => beginGuestFormEdit(guest) },
+                { label: "Remove", onSelect: () => confirmRemoveGuest(guest), tone: "danger" },
+              ];
 
               return (
                 <article key={guest.id} className="wedding-subpanel p-4">
@@ -1166,68 +1294,44 @@ export default function AdminDashboard() {
                     </div>
                   ) : (
                     <>
-                      <div className="mb-3 flex items-start justify-between gap-4">
-                        <div>
+                      <div className="mb-3 flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
                           <p className="wedding-subtitle text-xl">{guest.guest_name}</p>
                           <p className="wedding-code mt-2">{guest.invite_code}</p>
+                          <p className="mt-2 truncate whitespace-nowrap text-xs text-stone-500">{getGuestResponseMeta(guest)}</p>
+                          {getGuestEditedMeta(guest) && (
+                            <p className="mt-1 truncate whitespace-nowrap text-xs text-stone-400">{getGuestEditedMeta(guest)}</p>
+                          )}
                         </div>
-                        <StatusBadge attending={guest.attending} />
+                        <div className="flex shrink-0 flex-col items-end gap-2">
+                          <StatusBadge attending={guest.attending} />
+                          <RowMenu label={`Actions for ${guest.guest_name}`} items={guestMenuItems} />
+                        </div>
                       </div>
                       <div className="mb-4 rounded-2xl bg-white px-4 py-3 text-sm text-stone-600">
                         Invited <strong>{guest.max_guests}</strong> / Accepted <strong>{acceptedCount}</strong>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button onClick={() => void copyInvitation(guest)} className="wedding-button-secondary w-full">
-                          Copy Invite
-                        </button>
-                        <button onClick={() => startInlineGuestEdit(guest)} className="wedding-button-secondary w-full">
-                          Quick Edit
-                        </button>
-                        <button
-                          onClick={() => {
-                            setEditingGuestId(guest.id);
-                            setNewName(guest.guest_name);
-                            setNewCode(guest.invite_code);
-                            setNewLimit(guest.max_guests);
-                            setAttendanceStatus(guest.attending === null ? "pending" : guest.attending ? "attending" : "declined");
-                            setConfirmedGuests(guest.confirmed_guests || 0);
-                            window.scrollTo({ top: 0, behavior: "smooth" });
-                          }}
-                          className="wedding-button-secondary w-full"
+                      <div className="flex justify-start">
+                        <a
+                          href={guestInviteUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="wedding-button-secondary w-full sm:w-auto"
                         >
-                          Form Edit
-                        </button>
-                        <button
-                          onClick={() =>
-                            askConfirm({
-                              title: "Remove Invitation?",
-                              message: `${guest.guest_name} will be deleted from RSVP list.`,
-                              actionLabel: "Remove",
-                              actionTone: "danger",
-                              onConfirm: async () => {
-                                const { error: deleteError } = await supabase.from("rsvp_list").delete().eq("id", guest.id);
-                                if (deleteError) {
-                                  showToast(deleteError.message, "error");
-                                  return;
-                                }
-                                showToast("Invitation removed.", "success");
-                              },
-                            })
-                          }
-                          className="wedding-button-primary w-full bg-rose-700 hover:bg-rose-600"
-                        >
-                          Remove
-                        </button>
+                          Open RSVP Page
+                        </a>
                       </div>
                     </>
                   )}
                 </article>
               );
-            })}
-          </div>
+                })}
+              </div>
+            </>
+          )}
         </section>
 
-        <section className={`wedding-section wedding-animate-up mb-8 mt-8 p-6 md:p-8 ${tabClass("seating")}`}>
+        <section ref={seatingFormSectionRef} className={`wedding-section wedding-animate-up mb-8 mt-8 p-6 md:p-8 ${tabClass("seating")}`}>
           <div className="mb-8 text-center md:text-left">
             <p className="wedding-kicker mb-2">Table Management</p>
             <h2 className="wedding-title text-3xl md:text-4xl">
@@ -1259,8 +1363,8 @@ export default function AdminDashboard() {
               />
             </div>
 
-            <div className="sticky bottom-3 z-20 -mx-2 rounded-3xl bg-[#D0E0F0]/90 p-2 backdrop-blur md:static md:mx-0 md:bg-transparent md:p-0 md:backdrop-blur-0">
-              <div className="flex flex-col gap-3 md:flex-row">
+            <div className="sticky bottom-3 z-20 -mx-2 rounded-3xl border border-stone-100 bg-white/96 p-2 shadow-lg backdrop-blur md:static md:mx-0 md:rounded-none md:border-0 md:bg-transparent md:p-0 md:shadow-none md:backdrop-blur-0">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
                 <button className="wedding-button-primary w-full md:w-auto">
                   {editingSeatingId !== null ? "Save Assignment" : "Add to Seating Chart"}
                 </button>
@@ -1274,7 +1378,7 @@ export default function AdminDashboard() {
           </form>
         </section>
 
-        <section className={`wedding-section wedding-animate-up overflow-hidden ${tabClass("seating")}`}>
+        <section className={`wedding-section wedding-animate-up overflow-visible ${tabClass("seating")}`}>
           <div className="px-6 pb-4 pt-6 md:px-8 md:pt-8">
             <p className="wedding-kicker mb-2">Table Management</p>
             <h2 className="wedding-title text-3xl md:text-4xl">Current Assignments</h2>
@@ -1316,8 +1420,8 @@ export default function AdminDashboard() {
             </div>
           ) : (
             <>
-              <div className="hidden overflow-x-auto md:block">
-                <table className="w-full min-w-[620px] text-left">
+              <div className="mx-6 mb-6 hidden overflow-hidden rounded-[28px] border border-stone-100 bg-stone-50/40 md:block md:overflow-x-auto md:overflow-y-visible md:mx-8 md:mb-8">
+                <table className="w-full min-w-[520px] xl:min-w-[620px] text-left">
                   <thead className="border-y border-stone-100 bg-white/70 text-[10px] uppercase tracking-[0.25em] text-stone-400">
                     <tr>
                       <SortableHead
@@ -1337,10 +1441,15 @@ export default function AdminDashboard() {
                       <th className="px-6 py-4 text-right md:px-8">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-stone-100 bg-stone-50/40">
+                  <tbody className="divide-y divide-stone-100">
                     {filteredSeatingAssignments.map((assignment) => {
                       const draft = inlineSeatingEdits[assignment.id];
                       const isInlineEditing = Boolean(draft);
+                      const seatingMenuItems: RowMenuItem[] = [
+                        { label: "Quick Edit", onSelect: () => startInlineSeatingEdit(assignment) },
+                        { label: "Form Edit", onSelect: () => beginSeatingFormEdit(assignment) },
+                        { label: "Remove", onSelect: () => confirmRemoveSeatingAssignment(assignment), tone: "danger" },
+                      ];
                       return (
                         <tr key={assignment.id} className="align-middle">
                           <td className="px-6 py-5 md:px-8">
@@ -1396,49 +1505,9 @@ export default function AdminDashboard() {
                                 </button>
                               </div>
                             ) : (
-                              <>
-                                <button
-                                  onClick={() => startInlineSeatingEdit(assignment)}
-                                  className="mr-4 text-[10px] font-bold uppercase tracking-[0.22em] text-stone-500 transition-colors hover:text-stone-900"
-                                >
-                                  Quick Edit
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setEditingSeatingId(assignment.id);
-                                    setSeatingName(assignment.name);
-                                    setTableNumber(assignment.table_number);
-                                    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
-                                  }}
-                                  className="mr-4 text-[10px] font-bold uppercase tracking-[0.22em] text-stone-500 transition-colors hover:text-stone-900"
-                                >
-                                  Form Edit
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    askConfirm({
-                                      title: "Remove Seating Assignment?",
-                                      message: `${assignment.name} will be removed from table ${assignment.table_number}.`,
-                                      actionLabel: "Remove",
-                                      actionTone: "danger",
-                                      onConfirm: async () => {
-                                        const { error: deleteError } = await supabase
-                                          .from("seating")
-                                          .delete()
-                                          .eq("id", assignment.id);
-                                        if (deleteError) {
-                                          showToast(deleteError.message, "error");
-                                          return;
-                                        }
-                                        showToast("Seating assignment removed.", "success");
-                                      },
-                                    })
-                                  }
-                                  className="text-[10px] font-bold uppercase tracking-[0.22em] text-rose-500 transition-colors hover:text-rose-700"
-                                >
-                                  Remove
-                                </button>
-                              </>
+                              <div className="flex justify-end">
+                                <RowMenu label={`Actions for ${assignment.name}`} items={seatingMenuItems} />
+                              </div>
                             )}
                           </td>
                         </tr>
@@ -1452,6 +1521,11 @@ export default function AdminDashboard() {
                 {filteredSeatingAssignments.map((assignment) => {
                   const draft = inlineSeatingEdits[assignment.id];
                   const isInlineEditing = Boolean(draft);
+                  const seatingMenuItems: RowMenuItem[] = [
+                    { label: "Quick Edit", onSelect: () => startInlineSeatingEdit(assignment) },
+                    { label: "Form Edit", onSelect: () => beginSeatingFormEdit(assignment) },
+                    { label: "Remove", onSelect: () => confirmRemoveSeatingAssignment(assignment), tone: "danger" },
+                  ];
                   return (
                     <article key={assignment.id} className="wedding-subpanel p-4">
                       {isInlineEditing ? (
@@ -1498,50 +1572,20 @@ export default function AdminDashboard() {
                         </div>
                       ) : (
                         <>
-                          <div className="mb-3 flex items-start justify-between gap-4">
-                            <p className="wedding-subtitle text-xl">{assignment.name}</p>
-                            <span className="inline-flex rounded-full bg-white px-4 py-2 text-sm font-bold text-stone-700">
-                              Table {assignment.table_number}
-                            </span>
+                          <div className="mb-3 flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="wedding-subtitle text-xl">{assignment.name}</p>
+                              <span className="mt-3 inline-flex rounded-full bg-white px-4 py-2 text-sm font-bold text-stone-700">
+                                Table {assignment.table_number}
+                              </span>
+                            </div>
+                            <div className="shrink-0">
+                              <RowMenu label={`Actions for ${assignment.name}`} items={seatingMenuItems} />
+                            </div>
                           </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            <button onClick={() => startInlineSeatingEdit(assignment)} className="wedding-button-secondary w-full">
+                          <div className="flex justify-start">
+                            <button onClick={() => startInlineSeatingEdit(assignment)} className="wedding-button-secondary w-full sm:w-auto">
                               Quick Edit
-                            </button>
-                            <button
-                              onClick={() => {
-                                setEditingSeatingId(assignment.id);
-                                setSeatingName(assignment.name);
-                                setTableNumber(assignment.table_number);
-                                window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
-                              }}
-                              className="wedding-button-secondary w-full"
-                            >
-                              Form Edit
-                            </button>
-                            <button
-                              onClick={() =>
-                                askConfirm({
-                                  title: "Remove Seating Assignment?",
-                                  message: `${assignment.name} will be removed from table ${assignment.table_number}.`,
-                                  actionLabel: "Remove",
-                                  actionTone: "danger",
-                                  onConfirm: async () => {
-                                    const { error: deleteError } = await supabase
-                                      .from("seating")
-                                      .delete()
-                                      .eq("id", assignment.id);
-                                    if (deleteError) {
-                                      showToast(deleteError.message, "error");
-                                      return;
-                                    }
-                                    showToast("Seating assignment removed.", "success");
-                                  },
-                                })
-                              }
-                              className="wedding-button-primary w-full bg-rose-700 hover:bg-rose-600"
-                            >
-                              Remove
                             </button>
                           </div>
                         </>
@@ -1656,6 +1700,137 @@ function StatusBadge({ attending }: { attending: boolean | null }) {
     <span className={`inline-flex whitespace-nowrap rounded-full px-4 py-2 text-[10px] font-bold uppercase tracking-[0.22em] ${styles}`}>
       {label}
     </span>
+  );
+}
+
+function RowMenu({ label, items }: { label: string; items: RowMenuItem[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  const updateMenuPosition = useCallback(() => {
+    if (!buttonRef.current) return;
+
+    const rect = buttonRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const margin = 12;
+    const gap = 8;
+    const menuWidth = 240;
+    const estimatedHeight = menuRef.current?.offsetHeight ?? Math.min(56 * items.length + 16, 360);
+
+    const left = Math.min(
+      Math.max(margin, rect.right - menuWidth),
+      Math.max(margin, viewportWidth - menuWidth - margin),
+    );
+
+    const spaceBelow = viewportHeight - rect.bottom - margin - gap;
+    const spaceAbove = rect.top - margin - gap;
+    const openBelow = spaceBelow >= Math.min(estimatedHeight, 220) || spaceBelow >= spaceAbove;
+    const maxHeight = Math.max(140, openBelow ? spaceBelow : spaceAbove);
+    const top = openBelow
+      ? Math.min(rect.bottom + gap, viewportHeight - maxHeight - margin)
+      : Math.max(margin, rect.top - Math.min(estimatedHeight, maxHeight) - gap);
+
+    setMenuStyle({ top, left, maxHeight });
+  }, [items.length]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const rafId = window.requestAnimationFrame(updateMenuPosition);
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (target && (buttonRef.current?.contains(target) || menuRef.current?.contains(target))) {
+        return;
+      }
+      setIsOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsOpen(false);
+    };
+
+    const handleViewportChange = () => {
+      window.requestAnimationFrame(updateMenuPosition);
+    };
+
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, updateMenuPosition]);
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white text-xl text-stone-500 shadow-sm ring-1 ring-stone-200 transition-colors hover:text-stone-900"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+      >
+        <span aria-hidden="true">⋮</span>
+      </button>
+      {isOpen &&
+        menuStyle &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="fixed z-[160] w-[240px] overflow-y-auto overscroll-contain rounded-2xl border border-stone-100 bg-white p-2 shadow-2xl"
+            style={{ top: menuStyle.top, left: menuStyle.left, maxHeight: menuStyle.maxHeight }}
+            role="menu"
+            aria-label={label}
+          >
+            {items.map((item) =>
+              item.href ? (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => setIsOpen(false)}
+                  className={`block rounded-xl px-4 py-3 text-left text-sm transition-colors ${
+                    item.tone === "danger" ? "text-rose-600 hover:bg-rose-50" : "text-stone-700 hover:bg-stone-50"
+                  }`}
+                >
+                  {item.label}
+                </a>
+              ) : (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    item.onSelect?.();
+                  }}
+                  className={`block w-full rounded-xl px-4 py-3 text-left text-sm transition-colors ${
+                    item.tone === "danger" ? "text-rose-600 hover:bg-rose-50" : "text-stone-700 hover:bg-stone-50"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ),
+            )}
+          </div>,
+          document.body,
+        )}
+    </div>
   );
 }
 
