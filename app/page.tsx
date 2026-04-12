@@ -140,7 +140,11 @@ export default function HomePage() {
           <h1
             className={`${virust.className} wedding-display mb-6 flex w-full items-center justify-center whitespace-nowrap text-[clamp(2.3rem,11vw,3.05rem)] leading-[0.95] text-stone-900 md:mb-8 md:text-8xl`}
           >
-            <span className="inline-block text-center">Omar &amp; Hager</span>
+            <span className="inline-flex items-baseline text-center">
+              <span>Omar</span>
+              <span className="wedding-display-ampersand mx-[0.16em]">&amp;</span>
+              <span>Hager</span>
+            </span>
           </h1>
           <p className="wedding-date mb-8 md:mb-10">June 06, 2026</p>
 

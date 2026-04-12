@@ -36,8 +36,9 @@ export default function GuestRSVP() {
 
   const mapLink =
     "https://maps.google.com/maps?q=Reflections+Venue+and+Gardens+Plano";
-  const calendarLink =
-    "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Omar+%26+Hager+Wedding&dates=20260606/20260607&location=Reflections+Venue+%26+Gardens,+1901+E+Spring+Creek+Pkwy,+Plano,+TX+75074&details=We+can%E2%80%99t+wait+to+celebrate+together.";
+  const mapEmbedLink =
+    "https://www.google.com/maps?q=Reflections%20Venue%20%26%20Gardens%2C%201901%20E%20Spring%20Creek%20Pkwy%2C%20Plano%2C%20TX%2075074&output=embed";
+  const calendarLink = "/omar-hager-wedding.ics";
 
   useEffect(() => {
     async function fetchGuest() {
@@ -223,6 +224,15 @@ export default function GuestRSVP() {
                       <p className="mt-4 text-sm md:text-base text-stone-500 leading-relaxed">
                         1901 E Spring Creek Pkwy, Plano, TX 75074
                       </p>
+                      <div className="mt-5 overflow-hidden rounded-[18px] border border-stone-200 bg-white shadow-inner">
+                        <iframe
+                          title="Reflections Venue & Gardens map"
+                          src={mapEmbedLink}
+                          className="h-[220px] w-full md:h-[280px]"
+                          loading="lazy"
+                          referrerPolicy="no-referrer-when-downgrade"
+                        />
+                      </div>
                       <div className="mt-6 flex flex-col sm:flex-row gap-2 justify-center">
                         <a
                           href={mapLink}

@@ -126,6 +126,18 @@ body {
     letter-spacing: -0.02em;
   }
 
+  .wedding-display-ampersand {
+    font-family: var(--font-bodoni-swashes-italic), "Didot", "Times New Roman", serif;
+    font-style: normal;
+    font-weight: 400;
+    letter-spacing: -0.05em;
+    display: inline-block;
+    line-height: 1;
+    font-size: 0.96em;
+    transform: translateY(0.03em);
+    transform-origin: center;
+  }
+
   .wedding-lead {
     @apply font-serif italic text-stone-500 text-base md:text-lg leading-relaxed;
   }
