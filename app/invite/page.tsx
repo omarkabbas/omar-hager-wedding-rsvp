@@ -379,7 +379,7 @@ function InviteContent() {
 
           <div className="invite-card" onScroll={handleScroll} ref={cardRef}>
             <Image
-              src="/invitation.jpeg"
+              src="/O&H_invitation_1.jpeg"
               alt="Wedding invitation"
               width={1200}
               height={1800}
