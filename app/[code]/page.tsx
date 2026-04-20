@@ -8,6 +8,7 @@ import Navigation from "@/app/components/Navigation";
 import { supabase } from "@/lib/supabase";
 import {
   CALENDAR_FILE_PATH,
+  DRESS_CODE,
   GIFT_NOTE,
   VENUE_ADDRESS,
   VENUE_MAP_EMBED,
@@ -164,7 +165,7 @@ export default function GuestRSVP() {
             {!guestData ? (
               <div className="text-center py-2">
                 <p className="wedding-kicker mb-3">Invitation</p>
-                <h2 className="wedding-state-title mb-4">Invite Not Found</h2>
+                <h2 className="wedding-state-title mb-4 text-[#4E5E72]">Invite Not Found</h2>
                 <p className="wedding-lead mb-8">
                   Please check your invite link or contact Omar & Hager.
                 </p>
@@ -209,21 +210,21 @@ export default function GuestRSVP() {
                 )}
 
                 <p className="wedding-kicker mb-3">Response Received</p>
-                <h2 className="wedding-page-title mb-5">
+                <h2 className="wedding-page-title mb-5 text-[#4E5E72]">
                   {guestData.attending ? "You’re RSVP’d!" : "We’ve received your response"}
                 </h2>
                 <div className="wedding-divider mb-8" />
                 <p className="wedding-lead text-stone-600 text-lg md:text-xl mb-8 md:mb-10">
                   {guestData.attending
                     ? "We can’t wait to celebrate with you!"
-                    : "Thanks for letting us know you can’t make it ☹️"}
+                    : "We’ll miss you, but thanks for letting us know!"}
                 </p>
 
                 {guestData.attending && (
                   <div className="space-y-5 text-left max-w-xl mx-auto">
                     <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8 text-center">
                       <p className="wedding-kicker mb-3">Wedding Details</p>
-                      <p className="wedding-card-title">{VENUE_NAME}</p>
+                      <p className="wedding-card-title text-[#4E5E72]">{VENUE_NAME}</p>
                       <p className="mt-3 text-sm md:text-base text-stone-600 leading-relaxed">
                         {WEDDING_DATE_LABEL}
                       </p>
@@ -262,6 +263,13 @@ export default function GuestRSVP() {
                       </div>
                     </div>
 
+                    <div className="wedding-subpanel px-6 py-6 text-center md:px-8 md:py-8">
+                      <p className="wedding-kicker mb-3">Dress Code</p>
+                      <p className="wedding-copy">
+                        {DRESS_CODE}
+                      </p>
+                    </div>
+
                     <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8 text-center">
                       <p className="wedding-kicker mb-3">A Note On Gifts</p>
                       <p className="wedding-copy italic">
@@ -282,7 +290,7 @@ export default function GuestRSVP() {
                 <div className="text-center">
                   <p className="wedding-kicker mb-3">RSVP</p>
                   <p className="wedding-lead text-stone-400 text-xl mb-1">Welcome,</p>
-                  <h2 className="wedding-title text-4xl md:text-5xl">{guestData.guest_name}</h2>
+                  <h2 className="wedding-title text-4xl text-[#4E5E72] md:text-5xl">{guestData.guest_name}</h2>
                   <p className="mt-3 text-[13px] italic tracking-[0.01em] text-stone-500 md:text-sm">
                     We have reserved {guestData.max_guests} {guestData.max_guests === 1 ? "seat" : "seats"} in your honor.
                   </p>
@@ -316,7 +324,7 @@ export default function GuestRSVP() {
                       ))}
                     </select>
                     <p className="ml-2 text-xs text-stone-500">
-                      Please include children over 2 in your total.
+                      Kindly include any children over the age of 2 in your total.
                     </p>
                   </div>
                 )}

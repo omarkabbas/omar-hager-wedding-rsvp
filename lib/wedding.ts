@@ -11,5 +11,8 @@ export const VENUE_MAP_EMBED =
 
 export const CALENDAR_FILE_PATH = "/omar-hager-wedding.ics";
 
+export const DRESS_CODE =
+  "Formal Attire — suits and ties for gentlemen, cocktail or formal dresses for ladies.";
+
 export const GIFT_NOTE =
-  "As we are fortunate to have a home already filled with everything we need, we kindly request no boxed or bagged gifts. If you'd like to honor us with a gift, a contribution toward our future would be deeply appreciated and will help us create cherished memories together.";
+  "We kindly request no boxed or bagged gifts. If you'd like to honor us with a gift, a contribution toward our future would be deeply appreciated.";

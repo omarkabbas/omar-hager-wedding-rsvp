@@ -175,7 +175,7 @@ export default function GalleryPage() {
               />
             </div>
             <p className="wedding-kicker mb-3">Guest Gallery</p>
-            <h1 className="wedding-state-title mb-4">Gallery is not available yet</h1>
+            <h1 className="wedding-state-title mb-4 text-[#4E5E72]">Gallery is not available yet</h1>
             <p className="wedding-lead">Check back later!</p>
           </section>
         </main>
@@ -202,7 +202,7 @@ export default function GalleryPage() {
             </div>
 
             <p className="wedding-kicker mb-3">Guest Gallery</p>
-            <h1 className="wedding-page-title mb-3">Guest Gallery</h1>
+            <h1 className="wedding-page-title mb-3 text-[#4E5E72]">Guest Gallery</h1>
             <p className="wedding-lead md:text-xl mb-8 md:mb-10">
               Share memories with us
             </p>
@@ -238,7 +238,7 @@ export default function GalleryPage() {
           </div>
 
           <p className="wedding-kicker mb-3">Guest Gallery</p>
-          <h1 className="wedding-page-title mb-3">Guest Gallery</h1>
+          <h1 className="wedding-page-title mb-3 text-[#4E5E72]">Guest Gallery</h1>
           <p className="wedding-lead md:text-xl mb-8 md:mb-10">
             Share memories with us
           </p>
@@ -300,7 +300,7 @@ export default function GalleryPage() {
           <section className="mx-auto mt-12 md:mt-16 w-full max-w-7xl">
             <div className="text-center mb-8 md:mb-10">
               <p className="wedding-kicker mb-3">Shared Photos</p>
-              <h2 className="wedding-state-title">Guest Moments</h2>
+              <h2 className="wedding-state-title text-[#4E5E72]">Guest Moments</h2>
             </div>
 
             {photos.length === 0 ? (

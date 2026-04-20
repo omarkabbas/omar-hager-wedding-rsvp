@@ -134,7 +134,7 @@ export default function MyTablePage() {
               />
             </div>
             <p className="wedding-kicker mb-3">Seating</p>
-            <h1 className="wedding-state-title mb-4">Coming Soon</h1>
+            <h1 className="wedding-state-title mb-4 text-[#4E5E72]">Coming Soon</h1>
             <p className="wedding-lead">
               The seating chart is not yet available. Please check back later.
             </p>
@@ -162,7 +162,7 @@ export default function MyTablePage() {
           </div>
 
           <p className="wedding-kicker mb-3">Seating</p>
-          <h1 className="wedding-page-title mb-4">Find your table</h1>
+          <h1 className="wedding-page-title mb-4 text-[#4E5E72]">Find your table</h1>
           <p className="wedding-lead mb-8 md:mb-10">
             Start typing your name to find your table.
           </p>
@@ -212,7 +212,7 @@ export default function MyTablePage() {
               <div className="wedding-divider mb-8" />
               <div className="wedding-subpanel px-6 py-7 md:px-8 md:py-8">
                 <p className="wedding-lead text-lg mb-2">Welcome, {searchResult.name}!</p>
-                <h2 className="wedding-title text-2xl md:text-4xl leading-tight">
+                <h2 className="wedding-title text-2xl leading-tight text-[#4E5E72] md:text-4xl">
                   Please find your seat at
                   <span className="block mt-3 text-4xl md:text-5xl underline underline-offset-8 decoration-stone-200">
                     Table {searchResult.table_number}
@@ -227,7 +227,7 @@ export default function MyTablePage() {
               <div className="wedding-divider mb-8" />
               <div className="wedding-subpanel px-6 py-7 text-center md:px-8 md:py-8">
                 <p className="wedding-kicker mb-3">Need Help?</p>
-                <h2 className="wedding-subtitle mb-3">We couldn&apos;t find a table under that name just yet.</h2>
+                <h2 className="wedding-subtitle mb-3 text-[#4E5E72]">We couldn&apos;t find a table under that name just yet.</h2>
                 <p className="wedding-copy mx-auto max-w-lg">
                   Please try the name as it appears on your invitation. If you still need help when you arrive, a
                   member of our family will be happy to assist you.

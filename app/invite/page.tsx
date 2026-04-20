@@ -109,7 +109,7 @@ function InviteContent() {
       <div className="wedding-panel wedding-animate-up relative z-10 mt-4 mb-8 flex w-full max-w-md flex-col items-center px-5 py-8 pb-12 pt-28 md:max-w-2xl md:px-8 md:py-10 md:pb-16 md:pt-34">
         <div className="absolute top-10 md:top-14 w-full px-4 text-center">
           <p className="wedding-kicker mb-3">You’re invited,</p>
-          <h1 className="wedding-page-title italic leading-tight">{guestName}</h1>
+          <h1 className="wedding-page-title italic leading-tight text-[#4E5E72]">{guestName}</h1>
         </div>
 
         <style>{`
@@ -118,12 +118,16 @@ function InviteContent() {
             --env-h: 205px;
             --envelope-bg: #d4e8f9;
             --envelope-shadow: #88a8c3;
+            --seal-size: 72px;
+            --seal-y: calc(var(--env-h) * 0.745);
           }
 
           @media (min-width: 768px) {
             :root {
               --env-w: 460px;
               --env-h: 320px;
+              --seal-size: 94px;
+              --seal-y: calc(var(--env-h) * 0.735);
             }
           }
 
@@ -315,7 +319,7 @@ function InviteContent() {
 
           .seal-container {
             position: absolute;
-            top: 75%;
+            top: var(--seal-y);
             left: 50%;
             transform: translate(-50%, -50%);
             z-index: 6;
@@ -327,32 +331,13 @@ function InviteContent() {
           }
 
           .cssletter.step-1 .seal-container,
-          .cssletter.step-2 .seal-container,
-          .cssletter.step-1 .monogram-logo,
-          .cssletter.step-2 .monogram-logo {
+          .cssletter.step-2 .seal-container {
             opacity: 0;
           }
 
-          .monogram-logo {
-            position: absolute;
-            top: 35%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 6;
-            transition: 0.3s opacity;
-            pointer-events: none;
-          }
-
-          .monogram-logo img {
-            width: clamp(42px, 14vw, 82px);
-            height: auto;
-            filter: brightness(0) contrast(100%);
-            transform: rotate(0deg);
-          }
-
           .seal-container img {
-            width: clamp(40px, 14vw, 80px);
-            height: auto;
+            width: var(--seal-size);
+            height: var(--seal-size);
             object-fit: contain;
             filter: drop-shadow(0 4px 8px rgba(96, 124, 150, 0.18)) saturate(1.08);
           }
@@ -392,19 +377,9 @@ function InviteContent() {
             </div>
           </div>
 
-          <div className="monogram-logo">
-            <Image
-              src="/logo.png"
-              alt="Omar & Hager logo"
-              width={82}
-              height={82}
-              className="opacity-90"
-            />
-          </div>
-
           <div className="seal-container">
             <Image
-              src="/seal.png"
+              src="/stamp.png"
               alt="Wax seal"
               width={80}
               height={80}

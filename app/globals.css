@@ -177,7 +177,8 @@ body {
   .wedding-logo {
     @apply h-auto select-none;
     opacity: 1;
-    filter: drop-shadow(0 6px 14px rgba(120, 113, 108, 0.14));
+    filter: brightness(0) saturate(100%) invert(36%) sepia(14%) saturate(708%) hue-rotate(174deg) brightness(92%)
+      contrast(88%) drop-shadow(0 6px 14px rgba(78, 94, 114, 0.16));
   }
 
   .wedding-input {
@@ -193,10 +194,15 @@ body {
 
   .wedding-button-primary {
     @apply inline-flex items-center justify-center rounded-full bg-stone-900 px-6 py-3 text-[10px] uppercase tracking-[0.22em] font-bold text-white shadow-xl hover:bg-stone-800 active:scale-[0.98] md:px-8 md:py-4 md:text-[11px] md:tracking-[0.25em];
+    background-color: #1c1917 !important;
     transition:
       transform var(--motion-fast) var(--easing-gentle),
       box-shadow var(--motion-base) var(--easing-standard),
       background-color var(--motion-fast) ease;
+  }
+
+  .wedding-button-primary:hover {
+    background-color: #292524 !important;
   }
 
   .wedding-button-secondary {
