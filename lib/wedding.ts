@@ -1,7 +1,7 @@
 export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://hageromarwedding.com";
 
 export const WEDDING_DATE_LABEL = "Saturday, June 6, 2026";
-export const WEDDING_ARRIVAL_NOTE = "We kindly invite guests to begin arriving at 6:00 PM.";
+export const WEDDING_ARRIVAL_NOTE = "We look forward to welcoming you starting at 6:00 PM.";
 
 export const VENUE_NAME = "Reflections Venue & Gardens";
 export const VENUE_ADDRESS = "1901 E Spring Creek Pkwy, Plano, TX 75074";
