@@ -24,7 +24,7 @@ export default function RegistryPage() {
           </div>
 
           <p className="wedding-kicker mb-3">Registry</p>
-          <h1 className="wedding-page-title mb-4">Registry</h1>
+          <h1 className="wedding-page-title mb-4 text-[#4E5E72]">Registry</h1>
           <div className="wedding-divider mb-8" />
 
           <div className="space-y-5 max-w-xl mx-auto">

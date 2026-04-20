@@ -105,6 +105,7 @@ export default function AdminDashboard() {
   const [isGalleryFeedEnabled, setIsGalleryFeedEnabled] = useState(true);
   const [isHomeVenueEnabled, setIsHomeVenueEnabled] = useState(false);
   const [isHomeCarouselEnabled, setIsHomeCarouselEnabled] = useState(true);
+  const [isHomeDressCodeEnabled, setIsHomeDressCodeEnabled] = useState(false);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
@@ -166,6 +167,7 @@ export default function AdminDashboard() {
         "is_gallery_feed_enabled",
         "is_home_venue_enabled",
         "is_home_carousel_enabled",
+        "is_home_dress_code_enabled",
       ]);
 
     if (fetchError) {
@@ -180,6 +182,7 @@ export default function AdminDashboard() {
     const galleryFeedSetting = data.find((setting) => setting.key === "is_gallery_feed_enabled");
     const homeVenueSetting = data.find((setting) => setting.key === "is_home_venue_enabled");
     const homeCarouselSetting = data.find((setting) => setting.key === "is_home_carousel_enabled");
+    const homeDressCodeSetting = data.find((setting) => setting.key === "is_home_dress_code_enabled");
 
     startTransition(() => {
       setIsSeatingChartEnabled(seatingSetting?.value === "true");
@@ -187,6 +190,7 @@ export default function AdminDashboard() {
       setIsGalleryFeedEnabled(galleryFeedSetting ? galleryFeedSetting.value === "true" : true);
       setIsHomeVenueEnabled(homeVenueSetting?.value === "true");
       setIsHomeCarouselEnabled(homeCarouselSetting ? homeCarouselSetting.value === "true" : true);
+      setIsHomeDressCodeEnabled(homeDressCodeSetting?.value === "true");
     });
   }, []);
 
@@ -388,6 +392,22 @@ export default function AdminDashboard() {
 
     setIsHomeCarouselEnabled(nextValue);
     showToast(`Homepage carousel ${nextValue ? "enabled" : "hidden"}.`, "success");
+  };
+
+  const toggleHomeDressCode = async () => {
+    const nextValue = !isHomeDressCodeEnabled;
+    const { error: updateError } = await supabase
+      .from("settings")
+      .update({ value: nextValue.toString() })
+      .eq("key", "is_home_dress_code_enabled");
+
+    if (updateError) {
+      showToast(updateError.message, "error");
+      return;
+    }
+
+    setIsHomeDressCodeEnabled(nextValue);
+    showToast(`Homepage dress code ${nextValue ? "enabled" : "hidden"}.`, "success");
   };
 
   const addSeatingAssignment = async (e: React.FormEvent) => {
@@ -845,6 +865,12 @@ export default function AdminDashboard() {
                 description="Show or hide venue details and map on the home page."
                 enabled={isHomeVenueEnabled}
                 onToggle={toggleHomeVenue}
+              />
+              <ToggleRow
+                label="Homepage Dress Code"
+                description="Show or hide the dress code card under the home page venue area."
+                enabled={isHomeDressCodeEnabled}
+                onToggle={toggleHomeDressCode}
               />
               <ToggleRow
                 label="Find Your Table"
