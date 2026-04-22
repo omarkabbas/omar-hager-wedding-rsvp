@@ -9,7 +9,7 @@ export default function MyTablePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResult, setSearchResult] = useState<{ name: string; table_number: number } | null>(null);
   const [suggestions, setSuggestions] = useState<{ name: string }[]>([]);
-  const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState(false);
+  const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState<boolean | null>(null);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
   const [searchAttempted, setSearchAttempted] = useState(false);
 
@@ -21,7 +21,7 @@ export default function MyTablePage() {
         .eq("key", "is_seating_chart_enabled")
         .single();
 
-      if (data) setIsSeatingChartEnabled(data.value === "true");
+      setIsSeatingChartEnabled(data?.value === "true");
     };
 
     const handleVisibilityOrFocus = () => {
@@ -117,7 +117,24 @@ export default function MyTablePage() {
     }
   };
 
-  if (!isSeatingChartEnabled) {
+  if (isSeatingChartEnabled === null) {
+    return (
+      <div className="wedding-shell">
+        <div className="wedding-backdrop" />
+        <Navigation />
+        <main className="wedding-main wedding-center text-center">
+          <section className="wedding-page-panel wedding-animate-fade text-center">
+            <div className="mx-auto mb-6 h-20 w-20 animate-pulse rounded-full bg-stone-100" />
+            <p className="wedding-kicker mb-3">Seating</p>
+            <div className="mx-auto mb-4 h-10 w-48 animate-pulse rounded-full bg-stone-100" />
+            <div className="mx-auto h-5 w-64 max-w-full animate-pulse rounded-full bg-stone-100" />
+          </section>
+        </main>
+      </div>
+    );
+  }
+
+  if (isSeatingChartEnabled === false) {
     return (
       <div className="wedding-shell">
         <div className="wedding-backdrop" />
