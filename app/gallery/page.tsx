@@ -190,30 +190,11 @@ export default function GalleryPage() {
         <Navigation />
 
         <main className="wedding-main pt-2 md:pt-4">
-          <section className="wedding-page-panel max-w-2xl text-center">
-            <div className="flex justify-center mb-6">
-              <Image
-                src="/logo.png"
-                alt="Omar & Hager logo"
-                width={96}
-                height={96}
-                className="wedding-logo w-20 md:w-24"
-              />
-            </div>
-
+          <section className="wedding-page-panel wedding-animate-fade max-w-2xl text-center">
+            <div className="mx-auto mb-6 h-20 w-20 animate-pulse rounded-full bg-stone-100" />
             <p className="wedding-kicker mb-3">Guest Gallery</p>
-            <h1 className="wedding-page-title mb-3 text-[#4E5E72]">Guest Gallery</h1>
-            <p className="wedding-lead md:text-xl mb-8 md:mb-10">
-              Share memories with us
-            </p>
-
-            <div className="space-y-5 text-left animate-pulse">
-              <div className="space-y-2">
-                <div className="ml-2 h-3 w-32 rounded-full bg-stone-200" />
-                <div className="h-14 w-full rounded-2xl bg-stone-100" />
-              </div>
-              <div className="h-12 w-full rounded-full bg-stone-200" />
-            </div>
+            <div className="mx-auto mb-4 h-10 w-56 animate-pulse rounded-full bg-stone-100" />
+            <div className="mx-auto h-5 w-64 max-w-full animate-pulse rounded-full bg-stone-100" />
           </section>
         </main>
       </div>

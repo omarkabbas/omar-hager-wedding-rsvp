@@ -61,11 +61,50 @@ type RowMenuItem = {
 
 const INVITE_BASE_URL = SITE_URL;
 
+const pemToArrayBuffer = (pem: string) => {
+  const base64 = pem.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, "");
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes.buffer;
+};
+
+const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return window.btoa(binary);
+};
+
+const encryptAdminPassword = async (password: string, publicKeyPem: string) => {
+  const publicKey = await window.crypto.subtle.importKey(
+    "spki",
+    pemToArrayBuffer(publicKeyPem),
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    false,
+    ["encrypt"],
+  );
+  const encodedPassword = new TextEncoder().encode(password);
+  const encryptedPassword = await window.crypto.subtle.encrypt({ name: "RSA-OAEP" }, publicKey, encodedPassword);
+
+  return arrayBufferToBase64(encryptedPassword);
+};
+
 export default function AdminDashboard() {
   const [responses, setResponses] = useState<GuestResponse[]>([]);
   const [seatingAssignments, setSeatingAssignments] = useState<SeatingAssignment[]>([]);
   const [authorized, setAuthorized] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [passwordInput, setPasswordInput] = useState("");
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [error, setError] = useState("");
 
   const [newName, setNewName] = useState("");
@@ -126,18 +165,47 @@ export default function AdminDashboard() {
     });
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
+    setIsAuthenticating(true);
 
-    if (passwordInput === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
+    try {
+      const publicKeyResponse = await fetch("/api/admin-public-key");
+      const publicKeyResult = (await publicKeyResponse.json()) as { ok: boolean; publicKey?: string };
+
+      if (!publicKeyResponse.ok || !publicKeyResult.ok || !publicKeyResult.publicKey) {
+        setError("Admin encryption key is not configured");
+        return;
+      }
+
+      const encryptedPassword = await encryptAdminPassword(passwordInput, publicKeyResult.publicKey);
+      const loginResponse = await fetch("/api/admin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ encryptedPassword }),
+      });
+      const result = (await loginResponse.json()) as { ok: boolean; error?: string };
+
+      if (!loginResponse.ok || !result.ok) {
+        setError(result.error === "missing_config" ? "Admin password is not configured" : "Incorrect password");
+        setPasswordInput("");
+        return;
+      }
+
       setAuthorized(true);
-      setError("");
-      return;
+      window.sessionStorage.setItem("isLoggedIn", "true");
+    } catch {
+      setError("Unable to verify password");
+    } finally {
+      setIsAuthenticating(false);
     }
-
-    setError("Incorrect password");
-    setPasswordInput("");
   };
+
+  useEffect(() => {
+    setAuthorized(window.sessionStorage.getItem("isLoggedIn") === "true");
+    setIsCheckingSession(false);
+  }, []);
 
   const fetchData = useCallback(async () => {
     const { data, error: fetchError } = await supabase
@@ -721,6 +789,18 @@ export default function AdminDashboard() {
   const tabClass = (tab: Exclude<AdminTab, "all">) =>
     activeTab === "all" || activeTab === tab ? "block" : "hidden";
 
+  if (isCheckingSession) {
+    return (
+      <div className="wedding-shell flex items-center justify-center px-4 py-10">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.65),_transparent_55%)]" />
+        <div className="wedding-panel wedding-animate-fade relative z-10 w-full max-w-sm px-8 py-10 text-center">
+          <div className="mx-auto mb-6 h-16 w-16 animate-pulse rounded-full bg-stone-100" />
+          <p className="wedding-kicker">Checking Access</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!authorized) {
     return (
       <div className="wedding-shell flex items-center justify-center px-4 py-10">
@@ -753,7 +833,12 @@ export default function AdminDashboard() {
 
           {error && <p className="mt-4 text-xs font-bold uppercase tracking-[0.2em] text-rose-600">{error}</p>}
 
-          <button className="wedding-button-primary mt-8 w-full">Access Dashboard</button>
+          <button
+            className="wedding-button-primary mt-8 w-full disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isAuthenticating}
+          >
+            {isAuthenticating ? "Checking..." : "Access Dashboard"}
+          </button>
         </form>
       </div>
     );

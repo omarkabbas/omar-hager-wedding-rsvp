@@ -16,6 +16,7 @@ export default function HomePage() {
   const [isHomeVenueEnabled, setIsHomeVenueEnabled] = useState(false);
   const [isHomeCarouselEnabled, setIsHomeCarouselEnabled] = useState(true);
   const [isHomeDressCodeEnabled, setIsHomeDressCodeEnabled] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -30,7 +31,10 @@ export default function HomePage() {
           "is_home_dress_code_enabled",
         ]);
 
-      if (!data) return;
+      if (!data) {
+        setSettingsLoaded(true);
+        return;
+      }
 
       const seatingSetting = data.find((setting) => setting.key === "is_seating_chart_enabled");
       const gallerySetting = data.find((setting) => setting.key === "is_gallery_enabled");
@@ -43,6 +47,7 @@ export default function HomePage() {
       if (homeVenueSetting) setIsHomeVenueEnabled(homeVenueSetting.value === "true");
       setIsHomeCarouselEnabled(homeCarouselSetting ? homeCarouselSetting.value === "true" : true);
       setIsHomeDressCodeEnabled(homeDressCodeSetting?.value === "true");
+      setSettingsLoaded(true);
     };
 
     const handleVisibilityOrFocus = () => {
@@ -180,7 +185,7 @@ export default function HomePage() {
             ))}
           </div>
 
-          {isHomeCarouselEnabled && (
+          {settingsLoaded && isHomeCarouselEnabled && (
             <div className="wedding-subpanel mx-auto max-w-sm md:max-w-xl p-3 md:p-4 mb-10 md:mb-12">
               <div className="relative w-full aspect-[3/4] md:aspect-[4/5] overflow-hidden rounded-[24px]">
                 <HeroCarousel />
@@ -188,7 +193,7 @@ export default function HomePage() {
             </div>
           )}
 
-          {(isHomeVenueEnabled || isHomeDressCodeEnabled) && (
+          {settingsLoaded && (isHomeVenueEnabled || isHomeDressCodeEnabled) && (
             <div className="mx-auto mb-8 w-full max-w-3xl space-y-4 md:mb-10 md:space-y-5">
               {isHomeVenueEnabled && (
                 <section className="wedding-subpanel p-4 text-left md:p-6">
@@ -222,7 +227,7 @@ export default function HomePage() {
             </div>
           )}
 
-          {(isSeatingChartEnabled || isGalleryEnabled) && (
+          {settingsLoaded && (isSeatingChartEnabled || isGalleryEnabled) && (
             <div className="flex flex-col md:flex-row justify-center items-stretch md:items-center gap-4 md:gap-5">
               {isSeatingChartEnabled && (
                 <Link href="/mytable" className="wedding-button-primary w-full md:w-auto">
