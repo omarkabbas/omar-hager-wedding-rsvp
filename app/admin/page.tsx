@@ -14,6 +14,9 @@ type GuestResponse = {
   max_guests: number;
   attending: boolean | null;
   confirmed_guests: number | null;
+  invitation_sent?: boolean | null;
+  has_children?: boolean | null;
+  children_count?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
   responded_at?: string | null;
@@ -32,6 +35,7 @@ type Toast = {
 };
 
 type RsvpFilter = "all" | "pending" | "attending" | "declined";
+type GuestExtraFilter = "all" | "sent" | "not_sent" | "has_children";
 type GuestSortKey = "guest_name" | "invite_code" | "attending" | "max_guests" | "confirmed_guests";
 type SortDirection = "asc" | "desc";
 type AdminTab = "overview" | "settings" | "invitations" | "seating" | "all";
@@ -42,6 +46,9 @@ type InlineGuestDraft = {
   max_guests: number;
   attending: boolean | null;
   confirmed_guests: number | null;
+  invitation_sent: boolean;
+  has_children: boolean;
+  children_count: number;
 };
 
 type ConfirmDialogState = {
@@ -112,6 +119,9 @@ export default function AdminDashboard() {
   const [newLimit, setNewLimit] = useState(1);
   const [attendanceStatus, setAttendanceStatus] = useState<"pending" | "attending" | "declined">("pending");
   const [confirmedGuests, setConfirmedGuests] = useState(1);
+  const [invitationSent, setInvitationSent] = useState(false);
+  const [hasChildren, setHasChildren] = useState(false);
+  const [childrenCount, setChildrenCount] = useState<number | "">(1);
   const [editingGuestId, setEditingGuestId] = useState<number | null>(null);
 
   const [seatingName, setSeatingName] = useState("");
@@ -124,6 +134,7 @@ export default function AdminDashboard() {
   const deferredSeatingSearch = useDeferredValue(seatingSearch);
 
   const [rsvpFilter, setRsvpFilter] = useState<RsvpFilter>("all");
+  const [guestExtraFilter, setGuestExtraFilter] = useState<GuestExtraFilter>("all");
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
   const [guestSort, setGuestSort] = useState<{ key: GuestSortKey; direction: SortDirection }>({
     key: "guest_name",
@@ -307,6 +318,9 @@ export default function AdminDashboard() {
     setNewLimit(1);
     setAttendanceStatus("pending");
     setConfirmedGuests(1);
+    setInvitationSent(false);
+    setHasChildren(false);
+    setChildrenCount(1);
     setEditingGuestId(null);
   };
 
@@ -333,6 +347,9 @@ export default function AdminDashboard() {
       max_guests: Math.max(1, newLimit),
       attending: attendingValue,
       confirmed_guests: finalConfirmed,
+      invitation_sent: invitationSent,
+      has_children: hasChildren,
+      children_count: hasChildren ? Math.min(Math.max(1, Number(childrenCount) || 1), Math.max(1, newLimit)) : 0,
     };
 
     if (editingGuestId !== null) {
@@ -516,6 +533,8 @@ export default function AdminDashboard() {
     const attendingGuests = responses.filter((guest) => guest.attending === true);
     const declinedGuests = responses.filter((guest) => guest.attending === false);
     const pendingGuests = responses.filter((guest) => guest.attending === null);
+    const sentInvitations = responses.filter((guest) => guest.invitation_sent === true);
+    const pendingInvitations = responses.filter((guest) => guest.invitation_sent !== true);
     const totalAccepted = attendingGuests.reduce((sum, guest) => sum + (guest.confirmed_guests || 0), 0);
     const totalInvitedGuests = responses.reduce((sum, guest) => sum + (guest.max_guests || 0), 0);
 
@@ -523,6 +542,8 @@ export default function AdminDashboard() {
       invitedHouseholds: responses.length,
       invitedGuests: totalInvitedGuests,
       attendingGuests: totalAccepted,
+      sentInvitations: sentInvitations.length,
+      pendingInvitations: pendingInvitations.length,
       declinedHouseholds: declinedGuests.length,
       pendingHouseholds: pendingGuests.length,
     };
@@ -543,7 +564,14 @@ export default function AdminDashboard() {
       return guest.attending === false;
     });
 
-    return [...byStatus].sort((a, b) => {
+    const byExtraFilter = byStatus.filter((guest) => {
+      if (guestExtraFilter === "all") return true;
+      if (guestExtraFilter === "sent") return guest.invitation_sent === true;
+      if (guestExtraFilter === "not_sent") return guest.invitation_sent !== true;
+      return guest.has_children === true;
+    });
+
+    return [...byExtraFilter].sort((a, b) => {
       const directionFactor = guestSort.direction === "asc" ? 1 : -1;
 
       if (guestSort.key === "guest_name" || guestSort.key === "invite_code") {
@@ -559,7 +587,7 @@ export default function AdminDashboard() {
       const right = guestSort.key === "max_guests" ? b.max_guests : b.confirmed_guests || 0;
       return (left - right) * directionFactor;
     });
-  }, [deferredGuestSearch, guestSort, responses, rsvpFilter]);
+  }, [deferredGuestSearch, guestExtraFilter, guestSort, responses, rsvpFilter]);
 
   const filteredSeatingAssignments = useMemo(() => {
     const query = deferredSeatingSearch.trim().toLowerCase();
@@ -598,6 +626,9 @@ export default function AdminDashboard() {
         max_guests: guest.max_guests,
         attending: guest.attending,
         confirmed_guests: guest.confirmed_guests,
+        invitation_sent: Boolean(guest.invitation_sent),
+        has_children: Boolean(guest.has_children),
+        children_count: Math.min(Math.max(1, guest.children_count || 1), Math.max(1, guest.max_guests)),
       },
     }));
   };
@@ -624,6 +655,7 @@ export default function AdminDashboard() {
         : attending === false
           ? 0
           : null;
+    const childrenCount = draft.has_children ? Math.min(Math.max(1, draft.children_count || 1), maxGuests) : 0;
 
     const { error: updateError } = await supabase
       .from("rsvp_list")
@@ -633,6 +665,9 @@ export default function AdminDashboard() {
         max_guests: maxGuests,
         attending,
         confirmed_guests: confirmed,
+        invitation_sent: draft.invitation_sent,
+        has_children: draft.has_children,
+        children_count: childrenCount,
         responded_at:
           attending === null
             ? null
@@ -703,16 +738,30 @@ export default function AdminDashboard() {
 
   const getGuestInviteUrl = (guest: GuestResponse) => `${INVITE_BASE_URL}/${guest.invite_code.toLowerCase()}`;
 
-  const getGuestResponseMeta = (guest: GuestResponse) => {
-    if (guest.attending === null) return "Awaiting RSVP";
-    const responseLabel = guest.attending ? "Accepted" : "Declined";
+  const getGuestActionIndicators = (guest: GuestResponse) => {
+    const indicators: string[] = [];
     const respondedAt = formatAdminDateTime(guest.responded_at);
-    return respondedAt ? `${responseLabel} · ${respondedAt}` : responseLabel;
-  };
-
-  const getGuestEditedMeta = (guest: GuestResponse) => {
     const editedAt = formatAdminDateTime(guest.updated_at);
-    return editedAt ? `Last edited ${editedAt}` : null;
+    const createdAt = formatAdminDateTime(guest.created_at);
+
+    if (guest.attending === null) {
+      indicators.push("Awaiting RSVP");
+    } else {
+      const responseLabel = guest.attending ? "RSVP accepted" : "RSVP declined";
+      indicators.push(respondedAt ? `${responseLabel} · ${respondedAt}` : responseLabel);
+    }
+
+    if (guest.invitation_sent) {
+      indicators.push("Invitation marked sent");
+    }
+
+    if (editedAt) {
+      indicators.push(`Last edited · ${editedAt}`);
+    } else if (createdAt) {
+      indicators.push(`Created · ${createdAt}`);
+    }
+
+    return indicators;
   };
 
   const copyInviteLink = async (guest: GuestResponse) => {
@@ -741,6 +790,9 @@ export default function AdminDashboard() {
     setNewLimit(guest.max_guests);
     setAttendanceStatus(guest.attending === null ? "pending" : guest.attending ? "attending" : "declined");
     setConfirmedGuests(guest.confirmed_guests || 0);
+    setInvitationSent(Boolean(guest.invitation_sent));
+    setHasChildren(Boolean(guest.has_children));
+    setChildrenCount(Math.min(Math.max(1, guest.children_count || 1), Math.max(1, guest.max_guests)));
     scrollToSection(guestFormSectionRef);
   };
 
@@ -922,12 +974,14 @@ export default function AdminDashboard() {
         </div>
 
         <section className={`wedding-panel wedding-animate-up mb-8 p-5 md:p-8 ${tabClass("overview")}`}>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+            <StatCard label="Invitations Sent" value={stats.sentInvitations} accent="text-sky-700" />
+            <StatCard label="Pending Invitations" value={stats.pendingInvitations} />
             <StatCard label="Accepted Guests" value={stats.attendingGuests} accent="text-emerald-700" />
-            <StatCard label="Total Guests Invited" value={stats.invitedGuests} />
-            <StatCard label="Invitations" value={stats.invitedHouseholds} />
-            <StatCard label="Pending RSVPs" value={stats.pendingHouseholds} />
-            <StatCard label="Declines" value={stats.declinedHouseholds} accent="text-rose-700" />
+            <StatCard label="Declined Invitations" value={stats.declinedHouseholds} accent="text-rose-700" />
+            <StatCard label="Awaiting Response" value={stats.pendingHouseholds} />
+            <StatCard label="Total Invitations" value={stats.invitedHouseholds} />
+            <StatCard label="Total Invited Guests" value={stats.invitedGuests} />
           </div>
         </section>
 
@@ -994,7 +1048,7 @@ export default function AdminDashboard() {
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 required
-                className="wedding-input"
+                className="wedding-inline-edit-input"
                 placeholder="Household or primary guest"
               />
             </div>
@@ -1006,7 +1060,7 @@ export default function AdminDashboard() {
                   value={newCode}
                   onChange={(e) => setNewCode(e.target.value)}
                   required
-                  className="wedding-input uppercase"
+                  className="wedding-inline-edit-input uppercase"
                   placeholder="OMARHAGER"
                 />
               </div>
@@ -1015,9 +1069,13 @@ export default function AdminDashboard() {
                 <input
                   type="number"
                   value={newLimit}
-                  onChange={(e) => setNewLimit(parseInt(e.target.value, 10) || 1)}
+                  onChange={(e) => {
+                    const nextLimit = Math.max(1, parseInt(e.target.value, 10) || 1);
+                    setNewLimit(nextLimit);
+                    setChildrenCount((prev) => (prev === "" ? prev : Math.min(prev, nextLimit)));
+                  }}
                   required
-                  className="wedding-input"
+                  className="wedding-inline-edit-input"
                   min="1"
                 />
               </div>
@@ -1029,7 +1087,7 @@ export default function AdminDashboard() {
                 <select
                   value={attendanceStatus}
                   onChange={(e) => setAttendanceStatus(e.target.value as "pending" | "attending" | "declined")}
-                  className="wedding-select"
+                  className="wedding-inline-edit-select"
                 >
                   <option value="pending">Pending</option>
                   <option value="attending">Attending</option>
@@ -1043,13 +1101,69 @@ export default function AdminDashboard() {
                   value={attendanceStatus === "pending" ? "" : confirmedGuests}
                   onChange={(e) => setConfirmedGuests(parseInt(e.target.value, 10) || 0)}
                   disabled={attendanceStatus === "pending"}
-                  className={`wedding-input ${attendanceStatus === "pending" ? "opacity-50" : ""}`}
+                  className={`wedding-inline-edit-input ${attendanceStatus === "pending" ? "opacity-50" : ""}`}
                   min={attendanceStatus === "attending" ? "1" : "0"}
                   max={newLimit}
                   placeholder={attendanceStatus === "pending" ? "Pending RSVP" : "Guest count"}
                 />
               </div>
             </div>
+
+            <label className="flex items-center gap-3 rounded-[22px] border border-stone-100 bg-stone-50 px-4 py-4 text-left">
+              <input
+                type="checkbox"
+                checked={invitationSent}
+                onChange={(e) => setInvitationSent(e.target.checked)}
+                className="h-5 w-5 rounded border-stone-300 text-stone-900 focus:ring-stone-300"
+              />
+              <div>
+                <p className="wedding-subtitle text-base md:text-lg">Invitation Sent</p>
+                <p className="text-xs text-stone-500 md:text-sm">Mark this after you have sent the RSVP link.</p>
+              </div>
+            </label>
+
+            <label className="flex items-center gap-3 rounded-[22px] border border-stone-100 bg-stone-50 px-4 py-4 text-left">
+              <input
+                type="checkbox"
+                checked={hasChildren}
+                onChange={(e) => {
+                  setHasChildren(e.target.checked);
+                  if (!e.target.checked) setChildrenCount(1);
+                }}
+                className="h-5 w-5 rounded border-stone-300 text-stone-900 focus:ring-stone-300"
+              />
+              <div>
+                <p className="wedding-subtitle text-base md:text-lg">Has Children</p>
+                <p className="text-xs text-stone-500 md:text-sm">Track children included within the total guest count.</p>
+              </div>
+            </label>
+
+            {hasChildren && (
+              <div className="max-w-sm">
+                <label className="wedding-kicker mb-2 ml-2 block">Children Count Included In Guest Limit</label>
+                <input
+                  type="number"
+                  value={childrenCount}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    if (nextValue === "") {
+                      setChildrenCount("");
+                      return;
+                    }
+
+                    setChildrenCount(Math.min(Math.max(1, parseInt(nextValue, 10) || 1), newLimit));
+                  }}
+                  onBlur={() => {
+                    if (childrenCount === "") {
+                      setChildrenCount(1);
+                    }
+                  }}
+                  min="1"
+                  max={newLimit}
+                  className="wedding-inline-edit-input"
+                />
+              </div>
+            )}
 
             <div className="sticky bottom-3 z-20 -mx-2 rounded-3xl border border-stone-100 bg-white/96 p-2 shadow-lg backdrop-blur md:static md:mx-0 md:rounded-none md:border-0 md:bg-transparent md:p-0 md:shadow-none md:backdrop-blur-0">
               <div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -1097,6 +1211,25 @@ export default function AdminDashboard() {
                   </button>
                 ))}
               </div>
+              <div className="-mx-1 flex gap-2 overflow-x-auto rounded-2xl bg-white/85 p-1">
+                {([
+                  { key: "all", label: "Any" },
+                  { key: "sent", label: "Sent" },
+                  { key: "not_sent", label: "Not Sent" },
+                  { key: "has_children", label: "Has Children" },
+                ] as { key: GuestExtraFilter; label: string }[]).map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setGuestExtraFilter(item.key)}
+                    className={`h-9 rounded-full px-4 text-[10px] font-bold uppercase tracking-[0.18em] transition-colors ${
+                      guestExtraFilter === item.key ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-600"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -1126,7 +1259,7 @@ export default function AdminDashboard() {
                         direction={guestSort.direction}
                         onClick={() => setGuestSortKey("attending")}
                       />
-                      <th className="px-4 py-4 text-center">RSVP Update</th>
+                      <th className="px-4 py-4 text-center">Last Action</th>
                       <SortableHead
                         className="px-4 py-4 text-center"
                         label="Invited / Accepted"
@@ -1165,22 +1298,62 @@ export default function AdminDashboard() {
                         <tr key={guest.id} className="align-middle">
                           <td className="px-6 py-5 md:px-8">
                             {isInlineEditing ? (
-                              <input
-                                value={draft.guest_name}
-                                onChange={(e) =>
-                                  setInlineGuestEdits((prev) => ({
-                                    ...prev,
-                                    [guest.id]: { ...prev[guest.id], guest_name: e.target.value },
-                                  }))
-                                }
-                                className="wedding-input"
-                              />
+                              <div className="space-y-3">
+                                <input
+                                  value={draft.guest_name}
+                                  onChange={(e) =>
+                                    setInlineGuestEdits((prev) => ({
+                                      ...prev,
+                                      [guest.id]: { ...prev[guest.id], guest_name: e.target.value },
+                                    }))
+                                  }
+                                  className="wedding-inline-edit-input"
+                                />
+                                <label className="inline-flex items-center gap-3 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-600">
+                                  <input
+                                    type="checkbox"
+                                    checked={draft.invitation_sent}
+                                    onChange={(e) =>
+                                      setInlineGuestEdits((prev) => ({
+                                        ...prev,
+                                        [guest.id]: { ...prev[guest.id], invitation_sent: e.target.checked },
+                                      }))
+                                    }
+                                    className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-300"
+                                  />
+                                  Invitation Sent
+                                </label>
+                                <label className="inline-flex items-center gap-3 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-600">
+                                  <input
+                                    type="checkbox"
+                                    checked={draft.has_children}
+                                    onChange={(e) =>
+                                    setInlineGuestEdits((prev) => ({
+                                      ...prev,
+                                      [guest.id]: {
+                                        ...prev[guest.id],
+                                        has_children: e.target.checked,
+                                        children_count: e.target.checked
+                                          ? Math.min(
+                                              Math.max(1, prev[guest.id].children_count || 1),
+                                              Math.max(1, prev[guest.id].max_guests),
+                                            )
+                                          : 1,
+                                      },
+                                    }))
+                                  }
+                                    className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-300"
+                                  />
+                                  Has Children
+                                </label>
+                              </div>
                             ) : (
                               <div>
                                 <p className="wedding-subtitle text-2xl">{guest.guest_name}</p>
-                                {getGuestEditedMeta(guest) && (
-                                  <p className="mt-1 text-xs text-stone-400">{getGuestEditedMeta(guest)}</p>
-                                )}
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <InvitationSentBadge sent={Boolean(guest.invitation_sent)} />
+                                  {Boolean(guest.has_children) && <ChildrenCountBadge count={guest.children_count || 0} />}
+                                </div>
                               </div>
                             )}
                           </td>
@@ -1207,7 +1380,7 @@ export default function AdminDashboard() {
                                     },
                                   }));
                                 }}
-                                className="wedding-select min-w-[170px]"
+                                className="wedding-inline-edit-select min-w-[170px]"
                               >
                                 <option value="pending">Pending</option>
                                 <option value="attending">Attending</option>
@@ -1218,7 +1391,13 @@ export default function AdminDashboard() {
                             )}
                           </td>
                           <td className="px-4 py-5 text-center">
-                            <p className="text-sm font-medium text-stone-600">{getGuestResponseMeta(guest)}</p>
+                            <div className="space-y-1">
+                              {getGuestActionIndicators(guest).map((indicator) => (
+                                <p key={indicator} className="text-sm font-medium text-stone-600">
+                                  {indicator}
+                                </p>
+                              ))}
+                            </div>
                           </td>
                           <td className="px-4 py-5 text-center">
                             {isInlineEditing ? (
@@ -1232,11 +1411,15 @@ export default function AdminDashboard() {
                                       ...prev,
                                       [guest.id]: {
                                         ...prev[guest.id],
-                                        max_guests: parseInt(e.target.value, 10) || 1,
+                                        max_guests: Math.max(1, parseInt(e.target.value, 10) || 1),
+                                        children_count: Math.min(
+                                          prev[guest.id].children_count,
+                                          Math.max(1, parseInt(e.target.value, 10) || 1),
+                                        ),
                                       },
                                     }))
                                   }
-                                  className="wedding-input text-center"
+                                  className="wedding-inline-edit-input text-center"
                                 />
                                 <input
                                   type="number"
@@ -1253,8 +1436,29 @@ export default function AdminDashboard() {
                                       },
                                     }))
                                   }
-                                  className={`wedding-input text-center ${draft.attending !== true ? "opacity-50" : ""}`}
+                                  className={`wedding-inline-edit-input text-center ${draft.attending !== true ? "opacity-50" : ""}`}
                                 />
+                                {draft.has_children && (
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={Math.max(1, draft.max_guests)}
+                                    value={draft.children_count}
+                                    onChange={(e) =>
+                                      setInlineGuestEdits((prev) => ({
+                                        ...prev,
+                                        [guest.id]: {
+                                          ...prev[guest.id],
+                                          children_count: Math.min(
+                                            Math.max(1, parseInt(e.target.value, 10) || 1),
+                                            Math.max(1, prev[guest.id].max_guests),
+                                          ),
+                                        },
+                                      }))
+                                    }
+                                    className="wedding-inline-edit-input text-center"
+                                  />
+                                )}
                               </div>
                             ) : (
                               <p className="wedding-subtitle text-2xl">
@@ -1274,7 +1478,7 @@ export default function AdminDashboard() {
                                     [guest.id]: { ...prev[guest.id], invite_code: e.target.value.toUpperCase() },
                                   }))
                                 }
-                                className="wedding-input text-center uppercase"
+                                className="wedding-inline-edit-input uppercase"
                               />
                             ) : (
                               <span className="wedding-code">{guest.invite_code}</span>
@@ -1330,7 +1534,7 @@ export default function AdminDashboard() {
                             [guest.id]: { ...prev[guest.id], guest_name: e.target.value },
                           }))
                         }
-                        className="wedding-input"
+                        className="wedding-inline-edit-input"
                       />
                       <input
                         value={draft.invite_code}
@@ -1340,7 +1544,7 @@ export default function AdminDashboard() {
                             [guest.id]: { ...prev[guest.id], invite_code: e.target.value.toUpperCase() },
                           }))
                         }
-                        className="wedding-input uppercase"
+                        className="wedding-inline-edit-input uppercase"
                       />
                       <div className="grid grid-cols-2 gap-3">
                         <input
@@ -1350,10 +1554,17 @@ export default function AdminDashboard() {
                           onChange={(e) =>
                             setInlineGuestEdits((prev) => ({
                               ...prev,
-                              [guest.id]: { ...prev[guest.id], max_guests: parseInt(e.target.value, 10) || 1 },
+                              [guest.id]: {
+                                ...prev[guest.id],
+                                max_guests: Math.max(1, parseInt(e.target.value, 10) || 1),
+                                children_count: Math.min(
+                                  prev[guest.id].children_count,
+                                  Math.max(1, parseInt(e.target.value, 10) || 1),
+                                ),
+                              },
                             }))
                           }
-                          className="wedding-input"
+                          className="wedding-inline-edit-input"
                         />
                         <input
                           type="number"
@@ -1367,7 +1578,7 @@ export default function AdminDashboard() {
                               [guest.id]: { ...prev[guest.id], confirmed_guests: parseInt(e.target.value, 10) || 0 },
                             }))
                           }
-                          className={`wedding-input ${draft.attending !== true ? "opacity-50" : ""}`}
+                          className={`wedding-inline-edit-input ${draft.attending !== true ? "opacity-50" : ""}`}
                         />
                       </div>
                       <select
@@ -1388,12 +1599,71 @@ export default function AdminDashboard() {
                             },
                           }));
                         }}
-                        className="wedding-select"
+                        className="wedding-inline-edit-select"
                       >
                         <option value="pending">Pending</option>
                         <option value="attending">Attending</option>
                         <option value="declined">Declined</option>
                       </select>
+                      <label className="flex items-center gap-3 rounded-[18px] border border-stone-100 bg-white px-4 py-3 text-sm text-stone-600">
+                        <input
+                          type="checkbox"
+                          checked={draft.invitation_sent}
+                          onChange={(e) =>
+                            setInlineGuestEdits((prev) => ({
+                              ...prev,
+                              [guest.id]: { ...prev[guest.id], invitation_sent: e.target.checked },
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-300"
+                        />
+                        Invitation Sent
+                      </label>
+                      <label className="flex items-center gap-3 rounded-[18px] border border-stone-100 bg-white px-4 py-3 text-sm text-stone-600">
+                        <input
+                          type="checkbox"
+                          checked={draft.has_children}
+                          onChange={(e) =>
+                            setInlineGuestEdits((prev) => ({
+                              ...prev,
+                              [guest.id]: {
+                                ...prev[guest.id],
+                                has_children: e.target.checked,
+                                children_count: e.target.checked
+                                  ? Math.min(
+                                      Math.max(1, prev[guest.id].children_count || 1),
+                                      Math.max(1, prev[guest.id].max_guests),
+                                    )
+                                  : 1,
+                              },
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-300"
+                        />
+                        Has Children
+                      </label>
+                      {draft.has_children && (
+                        <input
+                          type="number"
+                          min={1}
+                          max={Math.max(1, draft.max_guests)}
+                          value={draft.children_count}
+                          onChange={(e) =>
+                            setInlineGuestEdits((prev) => ({
+                              ...prev,
+                              [guest.id]: {
+                                ...prev[guest.id],
+                                children_count: Math.min(
+                                  Math.max(1, parseInt(e.target.value, 10) || 1),
+                                  Math.max(1, prev[guest.id].max_guests),
+                                ),
+                              },
+                            }))
+                          }
+                          className="wedding-inline-edit-input"
+                          placeholder="Children count included in guest limit"
+                        />
+                      )}
                       <div className="grid grid-cols-2 gap-2">
                         <button onClick={() => void saveInlineGuestEdit(guest.id)} className="wedding-button-primary w-full">
                           Save
@@ -1409,12 +1679,17 @@ export default function AdminDashboard() {
                         <div className="min-w-0 flex-1">
                           <p className="wedding-subtitle text-xl">{guest.guest_name}</p>
                           <p className="wedding-code mt-2">{guest.invite_code}</p>
-                          <p className="mt-2 truncate whitespace-nowrap text-xs text-stone-500">{getGuestResponseMeta(guest)}</p>
-                          {getGuestEditedMeta(guest) && (
-                            <p className="mt-1 truncate whitespace-nowrap text-xs text-stone-400">{getGuestEditedMeta(guest)}</p>
-                          )}
+                          <div className="mt-2 space-y-1">
+                            {getGuestActionIndicators(guest).map((indicator) => (
+                              <p key={indicator} className="truncate whitespace-nowrap text-xs text-stone-500">
+                                {indicator}
+                              </p>
+                            ))}
+                          </div>
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-2">
+                          <InvitationSentBadge sent={Boolean(guest.invitation_sent)} />
+                          {Boolean(guest.has_children) && <ChildrenCountBadge count={guest.children_count || 0} />}
                           <StatusBadge attending={guest.attending} />
                           <RowMenu label={`Actions for ${guest.guest_name}`} items={guestMenuItems} />
                         </div>
@@ -1457,7 +1732,7 @@ export default function AdminDashboard() {
                 value={seatingName}
                 onChange={(e) => setSeatingName(e.target.value)}
                 required
-                className="wedding-input"
+                className="wedding-inline-edit-input"
                 placeholder="Guest full name"
               />
             </div>
@@ -1470,7 +1745,7 @@ export default function AdminDashboard() {
                 onChange={(e) => setTableNumber(parseInt(e.target.value, 10) || 1)}
                 required
                 min="1"
-                className="wedding-input"
+                className="wedding-inline-edit-input"
               />
             </div>
 
@@ -1573,7 +1848,7 @@ export default function AdminDashboard() {
                                     [assignment.id]: { ...prev[assignment.id], name: e.target.value },
                                   }))
                                 }
-                                className="wedding-input"
+                                className="wedding-inline-edit-input"
                               />
                             ) : (
                               <p className="wedding-subtitle text-xl md:text-2xl">{assignment.name}</p>
@@ -1594,7 +1869,7 @@ export default function AdminDashboard() {
                                     },
                                   }))
                                 }
-                                className="wedding-input mx-auto max-w-[130px] text-center"
+                                className="wedding-inline-edit-input mx-auto max-w-[130px] text-center"
                               />
                             ) : (
                               <span className="inline-flex rounded-full bg-stone-100 px-4 py-2 text-sm font-bold text-stone-700">
@@ -1649,7 +1924,7 @@ export default function AdminDashboard() {
                                 [assignment.id]: { ...prev[assignment.id], name: e.target.value },
                               }))
                             }
-                            className="wedding-input"
+                            className="wedding-inline-edit-input"
                           />
                           <input
                             type="number"
@@ -1664,7 +1939,7 @@ export default function AdminDashboard() {
                                 },
                               }))
                             }
-                            className="wedding-input"
+                            className="wedding-inline-edit-input"
                           />
                           <div className="grid grid-cols-2 gap-2">
                             <button
@@ -1810,6 +2085,26 @@ function StatusBadge({ attending }: { attending: boolean | null }) {
   return (
     <span className={`inline-flex whitespace-nowrap rounded-full px-4 py-2 text-[10px] font-bold uppercase tracking-[0.22em] ${styles}`}>
       {label}
+    </span>
+  );
+}
+
+function InvitationSentBadge({ sent }: { sent: boolean }) {
+  return (
+    <span
+      className={`inline-flex whitespace-nowrap rounded-full px-4 py-2 text-[10px] font-bold uppercase tracking-[0.22em] ${
+        sent ? "bg-sky-50 text-sky-700" : "bg-stone-100 text-stone-500"
+      }`}
+    >
+      {sent ? "Sent" : "Not Sent"}
+    </span>
+  );
+}
+
+function ChildrenCountBadge({ count }: { count: number }) {
+  return (
+    <span className="inline-flex whitespace-nowrap rounded-full bg-amber-50 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.22em] text-amber-700">
+      {count} {count === 1 ? "Child" : "Children"}
     </span>
   );
 }

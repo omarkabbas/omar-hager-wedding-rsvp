@@ -315,7 +315,7 @@ export default function GuestRSVP() {
 
                 {isAttending === "true" && guestData.max_guests > 1 && (
                   <div className="wedding-animate-up space-y-2 text-left">
-                    <label className="wedding-kicker block ml-2">Number of Guests Attending</label>
+                    <label className="wedding-kicker block ml-2">Total Attending in Your Party</label>
                     <select name="count" required className="wedding-select">
                       {Array.from({ length: guestData.max_guests }, (_, i) => i + 1).map((count) => (
                         <option key={count} value={count}>
@@ -324,7 +324,7 @@ export default function GuestRSVP() {
                       ))}
                     </select>
                     <p className="ml-2 text-xs text-stone-500">
-                      Kindly include any children over the age of 2 in your total.
+                      Please include children over age 2 in your total attending count.
                     </p>
                   </div>
                 )}
