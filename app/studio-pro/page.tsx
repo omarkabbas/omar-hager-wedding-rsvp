@@ -1,7 +1,7 @@
 "use client";
 
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, WheelEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { createPortal } from "react-dom";
@@ -19,6 +19,7 @@ type GuestResponse = {
   updated_at: string | null;
   responded_at: string | null;
   invitation_sent: boolean | null;
+  invitation_sent_at?: string | null;
   has_children: boolean | null;
   children_count: number | null;
   notes?: string | null;
@@ -38,30 +39,29 @@ type Toast = {
 };
 
 type AdminView = "overview" | "invitations" | "seating" | "settings";
-type OverviewWorkspaceTab = "pulse" | "flow" | "watchlist";
 type InvitationWorkspaceTab = "manage" | "bulk" | "composer";
 type SeatingWorkspaceTab = "board" | "tables" | "composer";
-type GuestStatusFilter = "all" | "pending" | "attending" | "declined";
-type GuestExtraFilter = "all" | "sent" | "not_sent" | "has_children" | "needs_seating";
+type GuestStatusFilter = "pending" | "attending" | "declined";
+type GuestExtraFilter = "sent" | "not_sent" | "has_children" | "needs_seating" | "sent_awaiting_response";
 type GuestSort = "recent" | "name" | "invite_code" | "largest_party";
 type SeatingSort = "table" | "name";
 
 type InlineGuestDraft = {
   guest_name: string;
   invite_code: string;
-  max_guests: number;
+  max_guests: number | "";
   attending: boolean | null;
-  confirmed_guests: number | null;
+  confirmed_guests: number | "" | null;
   invitation_sent: boolean;
   has_children: boolean;
-  children_count: number;
+  children_count: number | "";
   notes: string;
 };
 
 type InlineSeatingDraft = {
   name: string;
-  table_number: number;
-  guest_count: number;
+  table_number: number | "";
+  guest_count: number | "";
 };
 
 type ConfirmDialogState = {
@@ -141,7 +141,7 @@ const formatAdminDateTime = (value?: string | null) => {
 const normalizeNameKey = (value?: string | null) => (value || "").trim().toLowerCase();
 
 const getLatestGuestTimestamp = (guest: GuestResponse) => {
-  const latest = [guest.responded_at, guest.updated_at, guest.created_at]
+  const latest = [guest.responded_at, guest.invitation_sent_at, guest.updated_at, guest.created_at]
     .filter(Boolean)
     .map((value) => new Date(value as string).getTime())
     .filter((value) => !Number.isNaN(value))
@@ -154,21 +154,44 @@ const getGuestInviteUrl = (guest: GuestResponse) => `${INVITE_BASE_URL}/${guest.
 const getSeatingGuestCount = (guest: GuestResponse) =>
   guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : Math.max(1, guest.max_guests || 1);
 
+const preventNumberInputScroll = (event: WheelEvent<HTMLInputElement>) => {
+  if (document.activeElement === event.currentTarget) {
+    event.preventDefault();
+  }
+};
+
+const getInvitationSentAtValue = ({
+  nextInvitationSent,
+  existingGuest,
+  now,
+}: {
+  nextInvitationSent: boolean;
+  existingGuest?: GuestResponse | null;
+  now: string;
+}) => {
+  if (!nextInvitationSent) return null;
+  if (existingGuest?.invitation_sent_at) return existingGuest.invitation_sent_at;
+  return now;
+};
+
 const getGuestActionIndicators = (guest: GuestResponse) => {
   const indicators: string[] = [];
   const respondedAt = formatAdminDateTime(guest.responded_at);
+  const invitationSentAt = formatAdminDateTime(guest.invitation_sent_at);
   const editedAt = formatAdminDateTime(guest.updated_at);
   const createdAt = formatAdminDateTime(guest.created_at);
 
-  if (guest.attending === null) {
+  if (guest.attending === null && guest.invitation_sent) {
+    indicators.push(invitationSentAt ? `Invitation sent · ${invitationSentAt} · Awaiting RSVP` : "Invitation sent · Awaiting RSVP");
+  } else if (guest.attending === null) {
     indicators.push("Awaiting RSVP");
   } else {
     const responseLabel = guest.attending ? "RSVP accepted" : "RSVP declined";
     indicators.push(respondedAt ? `${responseLabel} · ${respondedAt}` : responseLabel);
   }
 
-  if (guest.invitation_sent) {
-    indicators.push("Invitation marked sent");
+  if (guest.invitation_sent && guest.attending !== null) {
+    indicators.push(invitationSentAt ? `Invitation sent · ${invitationSentAt}` : "Invitation sent");
   }
 
   if (editedAt) {
@@ -184,11 +207,28 @@ const buildRecentActivity = (responses: GuestResponse[]) => {
   return responses
     .map((guest) => {
       const respondedAt = guest.responded_at ? new Date(guest.responded_at).getTime() : 0;
+      const invitationSentAt = guest.invitation_sent_at ? new Date(guest.invitation_sent_at).getTime() : 0;
       const updatedAt = guest.updated_at ? new Date(guest.updated_at).getTime() : 0;
       const createdAt = guest.created_at ? new Date(guest.created_at).getTime() : 0;
-      const latest = Math.max(respondedAt, updatedAt, createdAt);
+      const latest = Math.max(respondedAt, invitationSentAt, updatedAt, createdAt);
+      const initialCreateWindowMs = 10 * 1000;
 
       if (!latest) return null;
+
+      const responseHappenedLater = respondedAt > createdAt;
+      const sentHappenedLater = invitationSentAt > createdAt;
+      const updateHappenedLater = updatedAt > createdAt + initialCreateWindowMs;
+      const isInitialCreate = createdAt > 0 && !responseHappenedLater && !sentHappenedLater && !updateHappenedLater;
+
+      if (isInitialCreate) {
+        return {
+          id: `${guest.id}-created`,
+          title: "Invitation created",
+          detail: guest.guest_name,
+          timestamp: formatAdminDateTime(guest.created_at) ?? "Recently",
+          sortValue: createdAt,
+        };
+      }
 
       if (latest === respondedAt && guest.attending !== null) {
         return {
@@ -197,6 +237,16 @@ const buildRecentActivity = (responses: GuestResponse[]) => {
           detail: guest.guest_name,
           timestamp: formatAdminDateTime(guest.responded_at) ?? "Recently",
           sortValue: respondedAt,
+        };
+      }
+
+      if (latest === invitationSentAt && guest.invitation_sent) {
+        return {
+          id: `${guest.id}-sent`,
+          title: "Invitation sent",
+          detail: guest.guest_name,
+          timestamp: formatAdminDateTime(guest.invitation_sent_at) ?? "Recently",
+          sortValue: invitationSentAt,
         };
       }
 
@@ -233,13 +283,12 @@ export default function StudioProPage() {
   const [error, setError] = useState("");
 
   const [activeView, setActiveView] = useState<AdminView>("overview");
-  const [overviewTab, setOverviewTab] = useState<OverviewWorkspaceTab>("pulse");
   const [invitationTab, setInvitationTab] = useState<InvitationWorkspaceTab>("manage");
   const [seatingTab, setSeatingTab] = useState<SeatingWorkspaceTab>("board");
 
   const [newName, setNewName] = useState("");
   const [newCode, setNewCode] = useState("");
-  const [newLimit, setNewLimit] = useState(1);
+  const [newLimit, setNewLimit] = useState<number | "">(1);
   const [attendanceStatus, setAttendanceStatus] = useState<"pending" | "attending" | "declined">("pending");
   const [confirmedGuests, setConfirmedGuests] = useState(1);
   const [invitationSent, setInvitationSent] = useState(false);
@@ -249,14 +298,14 @@ export default function StudioProPage() {
   const [editingGuestId, setEditingGuestId] = useState<string | null>(null);
 
   const [seatingName, setSeatingName] = useState("");
-  const [tableNumber, setTableNumber] = useState(1);
-  const [seatingGuestCount, setSeatingGuestCount] = useState(1);
+  const [tableNumber, setTableNumber] = useState<number | "">(1);
+  const [seatingGuestCount, setSeatingGuestCount] = useState<number | "">(1);
   const [editingSeatingId, setEditingSeatingId] = useState<number | null>(null);
 
   const [guestSearch, setGuestSearch] = useState("");
-  const [guestStatusFilter, setGuestStatusFilter] = useState<GuestStatusFilter>("all");
-  const [guestExtraFilter, setGuestExtraFilter] = useState<GuestExtraFilter>("all");
-  const [guestSort, setGuestSort] = useState<GuestSort>("recent");
+  const [guestStatusFilters, setGuestStatusFilters] = useState<GuestStatusFilter[]>([]);
+  const [guestExtraFilters, setGuestExtraFilters] = useState<GuestExtraFilter[]>([]);
+  const [guestSort, setGuestSort] = useState<GuestSort>("name");
   const deferredGuestSearch = useDeferredValue(guestSearch);
 
   const [seatingSearch, setSeatingSearch] = useState("");
@@ -281,6 +330,7 @@ export default function StudioProPage() {
   const [isHomeDressCodeEnabled, setIsHomeDressCodeEnabled] = useState(false);
   const [isGuestNotesAvailable, setIsGuestNotesAvailable] = useState<boolean | null>(null);
   const [isSeatingGuestCountAvailable, setIsSeatingGuestCountAvailable] = useState<boolean | null>(null);
+  const [isInvitationSentAtAvailable, setIsInvitationSentAtAvailable] = useState<boolean | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
@@ -359,12 +409,11 @@ export default function StudioProPage() {
       try {
         const parsed = JSON.parse(savedState) as {
           activeView?: AdminView;
-          overviewTab?: OverviewWorkspaceTab;
           invitationTab?: InvitationWorkspaceTab;
           seatingTab?: SeatingWorkspaceTab;
           guestSearch?: string;
-          guestStatusFilter?: GuestStatusFilter;
-          guestExtraFilter?: GuestExtraFilter;
+          guestStatusFilters?: GuestStatusFilter[];
+          guestExtraFilters?: GuestExtraFilter[];
           guestSort?: GuestSort;
         seatingSearch?: string;
         seatingSort?: SeatingSort;
@@ -376,12 +425,11 @@ export default function StudioProPage() {
       };
 
         if (parsed.activeView) setActiveView(parsed.activeView);
-        if (parsed.overviewTab) setOverviewTab(parsed.overviewTab);
         if (parsed.invitationTab) setInvitationTab(parsed.invitationTab);
         if (parsed.seatingTab) setSeatingTab(parsed.seatingTab);
         if (parsed.guestSearch !== undefined) setGuestSearch(parsed.guestSearch);
-        if (parsed.guestStatusFilter) setGuestStatusFilter(parsed.guestStatusFilter);
-        if (parsed.guestExtraFilter) setGuestExtraFilter(parsed.guestExtraFilter);
+        if (Array.isArray(parsed.guestStatusFilters)) setGuestStatusFilters(parsed.guestStatusFilters);
+        if (Array.isArray(parsed.guestExtraFilters)) setGuestExtraFilters(parsed.guestExtraFilters);
         if (parsed.guestSort) setGuestSort(parsed.guestSort);
         if (parsed.seatingSearch !== undefined) setSeatingSearch(parsed.seatingSearch);
         if (parsed.seatingSort) setSeatingSort(parsed.seatingSort);
@@ -405,12 +453,11 @@ export default function StudioProPage() {
       "studio_pro_workspace_state_v1",
       JSON.stringify({
         activeView,
-        overviewTab,
         invitationTab,
         seatingTab,
         guestSearch,
-        guestStatusFilter,
-        guestExtraFilter,
+        guestStatusFilters,
+        guestExtraFilters,
         guestSort,
         seatingSearch,
         seatingSort,
@@ -424,13 +471,12 @@ export default function StudioProPage() {
   }, [
     activeView,
     authorized,
-    guestExtraFilter,
+    guestExtraFilters,
     guestSearch,
     guestSort,
-    guestStatusFilter,
+    guestStatusFilters,
     hasRestoredWorkspaceState,
     invitationTab,
-    overviewTab,
     seatingSearch,
     seatingSort,
     seatingTab,
@@ -517,6 +563,11 @@ export default function StudioProPage() {
     setIsSeatingGuestCountAvailable(!guestCountError);
   }, []);
 
+  const detectInvitationSentAtColumn = useCallback(async () => {
+    const { error: invitationSentAtError } = await supabase.from("rsvp_list").select("invitation_sent_at").limit(1);
+    setIsInvitationSentAtAvailable(!invitationSentAtError);
+  }, []);
+
   useEffect(() => {
     if (!authorized) return;
 
@@ -527,6 +578,7 @@ export default function StudioProPage() {
         fetchSeatingAssignments(),
         detectGuestNotesColumn(),
         detectSeatingGuestCountColumn(),
+        detectInvitationSentAtColumn(),
       ]);
     };
 
@@ -542,7 +594,15 @@ export default function StudioProPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [authorized, detectGuestNotesColumn, detectSeatingGuestCountColumn, fetchResponses, fetchSeatingAssignments, fetchSettings]);
+  }, [
+    authorized,
+    detectGuestNotesColumn,
+    detectInvitationSentAtColumn,
+    detectSeatingGuestCountColumn,
+    fetchResponses,
+    fetchSeatingAssignments,
+    fetchSettings,
+  ]);
 
   useEffect(() => {
     setSelectedGuestIds((prev) => prev.filter((guestId) => responses.some((guest) => guest.id === guestId)));
@@ -577,7 +637,7 @@ export default function StudioProPage() {
 
     const now = new Date().toISOString();
     const attendingValue = attendanceStatus === "pending" ? null : attendanceStatus === "attending";
-    const maxGuests = Math.max(1, newLimit);
+    const maxGuests = Math.max(1, Number(newLimit) || 1);
     const finalConfirmed =
       attendanceStatus === "pending" ? null : attendanceStatus === "attending" ? Math.max(1, Math.min(confirmedGuests, maxGuests)) : 0;
 
@@ -588,6 +648,7 @@ export default function StudioProPage() {
       attending: attendingValue,
       confirmed_guests: finalConfirmed,
       invitation_sent: invitationSent,
+      ...(isInvitationSentAtAvailable ? { invitation_sent_at: getInvitationSentAtValue({ nextInvitationSent: invitationSent, now }) } : {}),
       has_children: hasChildren,
       children_count: hasChildren ? Math.min(Math.max(1, Number(childrenCount) || 1), maxGuests) : 0,
       ...(isGuestNotesAvailable ? { notes: guestNotes.trim() || null } : {}),
@@ -606,6 +667,15 @@ export default function StudioProPage() {
         .from("rsvp_list")
         .update({
           ...payload,
+          ...(isInvitationSentAtAvailable
+            ? {
+                invitation_sent_at: getInvitationSentAtValue({
+                  nextInvitationSent: invitationSent,
+                  existingGuest,
+                  now,
+                }),
+              }
+            : {}),
           responded_at: respondedAt,
           updated_at: now,
         })
@@ -644,10 +714,10 @@ export default function StudioProPage() {
     const cleanedName = seatingName.trim();
     if (!cleanedName) return;
 
-    const payload = {
+      const payload = {
       name: cleanedName,
-      table_number: Math.max(1, tableNumber),
-      ...(isSeatingGuestCountAvailable ? { guest_count: Math.max(1, seatingGuestCount || 1) } : {}),
+      table_number: Math.max(1, Number(tableNumber) || 1),
+      ...(isSeatingGuestCountAvailable ? { guest_count: Math.max(1, Number(seatingGuestCount) || 1) } : {}),
     };
 
     if (editingSeatingId !== null) {
@@ -687,7 +757,7 @@ export default function StudioProPage() {
         invite_code: guest.invite_code,
         max_guests: guest.max_guests,
         attending: guest.attending,
-        confirmed_guests: guest.confirmed_guests,
+        confirmed_guests: guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : guest.confirmed_guests,
         invitation_sent: Boolean(guest.invitation_sent),
         has_children: Boolean(guest.has_children),
         children_count: Math.min(Math.max(1, guest.children_count || 1), Math.max(1, guest.max_guests)),
@@ -735,6 +805,11 @@ export default function StudioProPage() {
           ? 0
           : null;
     const children = draft.has_children ? Math.min(Math.max(1, draft.children_count || 1), maxGuests) : 0;
+    const nextInvitationSentAt = getInvitationSentAtValue({
+      nextInvitationSent: draft.invitation_sent,
+      existingGuest,
+      now,
+    });
 
     const { error: updateError } = await supabase
       .from("rsvp_list")
@@ -745,6 +820,7 @@ export default function StudioProPage() {
         attending: draft.attending,
         confirmed_guests: confirmed,
         invitation_sent: draft.invitation_sent,
+        ...(isInvitationSentAtAvailable ? { invitation_sent_at: nextInvitationSentAt } : {}),
         has_children: draft.has_children,
         children_count: children,
         ...(isGuestNotesAvailable ? { notes: draft.notes.trim() || null } : {}),
@@ -871,6 +947,17 @@ export default function StudioProPage() {
     scrollToSection(seatingFormRef);
   };
 
+  const beginSeatingCreateForGuest = (guest: GuestResponse) => {
+    setEditingSeatingId(null);
+    setSeatingName(guest.guest_name);
+    setTableNumber(1);
+    setSeatingGuestCount(getSeatingGuestCount(guest));
+    setSeatingSearch("");
+    setActiveView("seating");
+    setSeatingTab("composer");
+    scrollToSection(seatingFormRef);
+  };
+
   const confirmRemoveSeatingAssignment = (assignment: SeatingAssignment) => {
     askConfirm({
       title: "Remove Seating Assignment?",
@@ -934,22 +1021,56 @@ export default function StudioProPage() {
     );
   }, [responses, seatingLookup]);
 
+  const toggleGuestStatusFilter = (filter: GuestStatusFilter) => {
+    setGuestStatusFilters((prev) =>
+      prev.includes(filter) ? prev.filter((value) => value !== filter) : [...prev, filter],
+    );
+  };
+
+  const toggleGuestExtraFilter = (filter: GuestExtraFilter) => {
+    setGuestExtraFilters((prev) => {
+      if (prev.includes(filter)) {
+        return prev.filter((value) => value !== filter);
+      }
+
+      let next = [...prev];
+      if (filter === "sent") {
+        next = next.filter((value) => value !== "not_sent");
+      }
+      if (filter === "not_sent") {
+        next = next.filter((value) => value !== "sent" && value !== "sent_awaiting_response");
+      }
+      if (filter === "sent_awaiting_response") {
+        next = next.filter((value) => value !== "not_sent");
+      }
+
+      next.push(filter);
+      return next;
+    });
+  };
+
+  const clearGuestStatusFilters = () => setGuestStatusFilters([]);
+  const clearGuestExtraFilters = () => setGuestExtraFilters([]);
+
   const stats = useMemo(() => {
     const sentInvitations = responses.filter((guest) => guest.invitation_sent === true).length;
     const pendingInvitations = responses.filter((guest) => guest.invitation_sent !== true).length;
     const awaitingResponse = responses.filter((guest) => guest.attending === null).length;
     const declinedInvitations = responses.filter((guest) => guest.attending === false).length;
-    const acceptedHouseholds = responses.filter((guest) => guest.attending === true).length;
     const acceptedGuests = responses.reduce(
       (sum, guest) => sum + (guest.attending === true ? guest.confirmed_guests || 0 : 0),
       0,
     );
+    const acceptedGuestsSeated = responses.reduce((sum, guest) => {
+      if (guest.attending !== true) return sum;
+      const assignment = seatingAssignmentLookup.get(normalizeNameKey(guest.guest_name));
+      if (!assignment) return sum;
+
+      const confirmed = Math.max(1, guest.confirmed_guests || 1);
+      const seatedCount = isSeatingGuestCountAvailable ? Math.max(1, assignment.guest_count || 1) : confirmed;
+      return sum + Math.min(confirmed, seatedCount);
+    }, 0);
     const totalInvitedGuests = responses.reduce((sum, guest) => sum + (guest.max_guests || 0), 0);
-    const respondedHouseholds = responses.filter((guest) => guest.attending !== null).length;
-    const householdsWithChildren = responses.filter((guest) => guest.has_children === true).length;
-    const trackedChildren = responses.reduce((sum, guest) => sum + (guest.has_children ? guest.children_count || 0 : 0), 0);
-    const responseRate = responses.length ? Math.round((respondedHouseholds / responses.length) * 100) : 0;
-    const seatFillRate = totalInvitedGuests ? Math.round((acceptedGuests / totalInvitedGuests) * 100) : 0;
     const uniqueTables = new Set(seatingAssignments.map((assignment) => assignment.table_number)).size;
     return {
       totalInvitations: responses.length,
@@ -958,17 +1079,12 @@ export default function StudioProPage() {
       pendingInvitations,
       awaitingResponse,
       declinedInvitations,
-      acceptedHouseholds,
       acceptedGuests,
-      householdsWithChildren,
-      trackedChildren,
+      acceptedGuestsSeated,
       acceptedWithoutSeating: acceptedWithoutSeating.length,
-      responseRate,
-      seatFillRate,
-      seatingAssignments: seatingAssignments.length,
       uniqueTables,
     };
-  }, [acceptedWithoutSeating.length, responses, seatingAssignments]);
+  }, [acceptedWithoutSeating.length, isSeatingGuestCountAvailable, responses, seatingAssignmentLookup, seatingAssignments]);
 
   const filteredResponses = useMemo(() => {
     const query = deferredGuestSearch.trim().toLowerCase();
@@ -980,18 +1096,25 @@ export default function StudioProPage() {
       : responses;
 
     const byStatus = byQuery.filter((guest) => {
-      if (guestStatusFilter === "all") return true;
-      if (guestStatusFilter === "pending") return guest.attending === null;
-      if (guestStatusFilter === "attending") return guest.attending === true;
-      return guest.attending === false;
+      if (guestStatusFilters.length === 0) return true;
+
+      return guestStatusFilters.some((filter) => {
+        if (filter === "pending") return guest.attending === null;
+        if (filter === "attending") return guest.attending === true;
+        return guest.attending === false;
+      });
     });
 
     const byExtraFilter = byStatus.filter((guest) => {
-      if (guestExtraFilter === "all") return true;
-      if (guestExtraFilter === "sent") return guest.invitation_sent === true;
-      if (guestExtraFilter === "not_sent") return guest.invitation_sent !== true;
-      if (guestExtraFilter === "has_children") return guest.has_children === true;
-      return guest.attending === true && !seatingLookup.has(normalizeNameKey(guest.guest_name));
+      if (guestExtraFilters.length === 0) return true;
+
+      return guestExtraFilters.every((filter) => {
+        if (filter === "sent") return guest.invitation_sent === true;
+        if (filter === "not_sent") return guest.invitation_sent !== true;
+        if (filter === "has_children") return guest.has_children === true;
+        if (filter === "sent_awaiting_response") return guest.invitation_sent === true && guest.attending === null;
+        return guest.attending === true && !seatingLookup.has(normalizeNameKey(guest.guest_name));
+      });
     });
 
     const sorted = [...byExtraFilter];
@@ -1007,7 +1130,7 @@ export default function StudioProPage() {
     }
 
     return sorted;
-  }, [deferredGuestSearch, guestExtraFilter, guestSort, guestStatusFilter, responses, seatingLookup]);
+  }, [deferredGuestSearch, guestExtraFilters, guestSort, guestStatusFilters, responses, seatingLookup]);
 
   const filteredInvitationStats = useMemo(() => {
     const acceptedGuests = filteredResponses.reduce(
@@ -1175,7 +1298,11 @@ export default function StudioProPage() {
     const now = new Date().toISOString();
     const { error: updateError } = await supabase
       .from("rsvp_list")
-      .update({ invitation_sent: true, updated_at: now })
+      .update({
+        invitation_sent: true,
+        ...(isInvitationSentAtAvailable ? { invitation_sent_at: now } : {}),
+        updated_at: now,
+      })
       .in("id", selectedGuestIds);
 
     if (updateError) {
@@ -1184,6 +1311,85 @@ export default function StudioProPage() {
     }
 
     showToast(`${selectedGuestIds.length} invitation${selectedGuestIds.length === 1 ? "" : "s"} marked sent.`, "success");
+    setSelectedGuestIds([]);
+  };
+
+  const bulkMarkSelectedAsNotSent = async () => {
+    if (selectedGuestIds.length === 0) return;
+
+    const now = new Date().toISOString();
+    const { error: updateError } = await supabase
+      .from("rsvp_list")
+      .update({
+        invitation_sent: false,
+        ...(isInvitationSentAtAvailable ? { invitation_sent_at: null } : {}),
+        updated_at: now,
+      })
+      .in("id", selectedGuestIds);
+
+    if (updateError) {
+      showToast(updateError.message, "error");
+      return;
+    }
+
+    showToast(`${selectedGuestIds.length} invitation${selectedGuestIds.length === 1 ? "" : "s"} marked not sent.`, "success");
+    setSelectedGuestIds([]);
+  };
+
+  const copySelectedInviteLinks = async () => {
+    if (selectedGuests.length === 0) return;
+
+    const links = selectedGuests.map((guest) => getGuestInviteUrl(guest)).join("\n");
+
+    try {
+      await navigator.clipboard.writeText(links);
+      showToast(`${selectedGuests.length} RSVP link${selectedGuests.length === 1 ? "" : "s"} copied.`, "success");
+    } catch (copyError) {
+      showToast(copyError instanceof Error ? copyError.message : "Could not copy RSVP links.", "error");
+    }
+  };
+
+  const copySelectedInvitations = async () => {
+    if (selectedGuests.length === 0) return;
+
+    const invitations = selectedGuests
+      .map(
+        (guest) =>
+          `Dear ${guest.guest_name}, with great joy, Omar & Hager invite you to celebrate their wedding. Please RSVP here: ${INVITE_BASE_URL}/${guest.invite_code.toLowerCase()}`,
+      )
+      .join("\n\n");
+
+    try {
+      await navigator.clipboard.writeText(invitations);
+      showToast(`${selectedGuests.length} invitation message${selectedGuests.length === 1 ? "" : "s"} copied.`, "success");
+    } catch (copyError) {
+      showToast(copyError instanceof Error ? copyError.message : "Could not copy invitation messages.", "error");
+    }
+  };
+
+  const bulkResetSelectedRsvpToPending = async () => {
+    if (selectedGuestIds.length === 0) return;
+
+    const now = new Date().toISOString();
+    const { error: updateError } = await supabase
+      .from("rsvp_list")
+      .update({
+        attending: null,
+        confirmed_guests: null,
+        responded_at: null,
+        updated_at: now,
+      })
+      .in("id", selectedGuestIds);
+
+    if (updateError) {
+      showToast(updateError.message, "error");
+      return;
+    }
+
+    showToast(
+      `${selectedGuestIds.length} RSVP${selectedGuestIds.length === 1 ? "" : "s"} reset to pending.`,
+      "success",
+    );
     setSelectedGuestIds([]);
   };
 
@@ -1276,6 +1482,7 @@ export default function StudioProPage() {
       "confirmed_guests",
       "attending",
       "invitation_sent",
+      "invitation_sent_at",
       "has_children",
       "children_count",
       "responded_at",
@@ -1307,6 +1514,7 @@ export default function StudioProPage() {
         guest.confirmed_guests ?? "",
         guest.attending === null ? "pending" : guest.attending ? "attending" : "declined",
         Boolean(guest.invitation_sent),
+        guest.invitation_sent_at ?? "",
         Boolean(guest.has_children),
         guest.children_count ?? "",
         guest.responded_at ?? "",
@@ -1330,20 +1538,6 @@ export default function StudioProPage() {
     link.click();
     URL.revokeObjectURL(url);
     showToast("CSV export downloaded.", "success");
-  };
-
-  const quickJumpToNeedsSeating = () => {
-    setActiveView("invitations");
-    setInvitationTab("manage");
-    setGuestStatusFilter("attending");
-    setGuestExtraFilter("needs_seating");
-  };
-
-  const quickJumpToPendingInvites = () => {
-    setActiveView("invitations");
-    setInvitationTab("manage");
-    setGuestStatusFilter("all");
-    setGuestExtraFilter("not_sent");
   };
 
   const moveEntireTable = async () => {
@@ -1418,10 +1612,10 @@ export default function StudioProPage() {
               </div>
             </div>
             <p className="wedding-kicker mb-3">Private Access</p>
-            <h1 className="wedding-state-title mb-4">Studio Pro</h1>
+            <h1 className="wedding-state-title mb-4">Admin Studio</h1>
             <div className="mx-auto mb-8 h-px w-20 bg-stone-200" />
             <p className="mx-auto mb-8 max-w-xl text-base leading-relaxed text-stone-500">
-              Manage invitations, RSVPs, seating operations, and live wedding settings from one place.
+              Manage invitations, seating, RSVPs, and live wedding controls.
             </p>
 
             <input
@@ -1456,9 +1650,14 @@ export default function StudioProPage() {
                   </div>
                   <div className="min-w-0">
                     <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.26em] text-stone-400">Omar & Hager 2026</p>
-                    <h1 className="font-serif text-3xl tracking-tight text-stone-900 md:text-4xl">Studio Pro</h1>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h1 className="font-serif text-3xl tracking-tight text-stone-900 md:text-4xl">Admin Studio</h1>
+                      <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-sky-700">
+                        Pro
+                      </span>
+                    </div>
                     <p className="mt-1 max-w-3xl text-sm leading-relaxed text-stone-500">
-                      A polished control surface for invitations, RSVPs, seating assignments, and live site settings, tuned for both phone and desktop.
+                      Manage invitations, seating, RSVPs, and live wedding controls.
                     </p>
                   </div>
                 </div>
@@ -1509,8 +1708,8 @@ export default function StudioProPage() {
                   <StudioPanel>
                     <SectionHeading
                       kicker="Overview"
-                      title="Wedding Snapshot"
-                      description="The six numbers that matter most when you are sending invitations, tracking responses, and finalizing seating."
+                      title="Overview"
+                      description="A quick view of sent invitations, guest responses, accepted guests, and seating status."
                     />
                     <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                       <StatTile label="Invitations Sent" value={stats.sentInvitations} tone="sky" />
@@ -1525,8 +1724,8 @@ export default function StudioProPage() {
                   <StudioPanel>
                     <SectionHeading
                       kicker="Progress"
-                      title="Quick Read"
-                      description="Simple bars that show how far the invitation rollout, reply rate, guest count, and seating work have moved."
+                      title="Progress"
+                      description="These bars show sending progress, responses received, accepted guests, and seating coverage."
                     />
                     <div className="mt-5 space-y-4">
                       <ProgressLine label="Sent Invitations" value={stats.sentInvitations} total={stats.totalInvitations} tone="sky" />
@@ -1538,9 +1737,9 @@ export default function StudioProPage() {
                       />
                       <ProgressLine label="Accepted Guests" value={stats.acceptedGuests} total={stats.totalInvitedGuests} tone="emerald" />
                       <ProgressLine
-                        label="Accepted Guests With Tables"
-                        value={Math.max(0, stats.acceptedHouseholds - stats.acceptedWithoutSeating)}
-                        total={Math.max(stats.acceptedHouseholds, 1)}
+                        label="Accepted Guests Seated"
+                        value={stats.acceptedGuestsSeated}
+                        total={Math.max(stats.acceptedGuests, 1)}
                         tone="amber"
                       />
                     </div>
@@ -1551,12 +1750,12 @@ export default function StudioProPage() {
                   <StudioPanel>
                     <SectionHeading
                       kicker="Recent Activity"
-                      title="Latest Guest Actions"
-                      description="The newest invitation changes and guest responses, kept in one place so you can quickly spot movement."
+                      title="Recent Activity"
+                      description="Recent invitation updates and guest responses."
                     />
                     <div className="mt-5 space-y-3">
                       {recentActivity.length === 0 ? (
-                        <EmptyState title="No activity yet" description="Guest actions will begin showing here as soon as invitations start moving." />
+                        <EmptyState title="No activity yet" description="Activity will appear here as guests respond and records are updated." />
                       ) : (
                         recentActivity.map((item) => (
                           <ActivityRow key={item.id} title={item.title} detail={item.detail} timestamp={item.timestamp} />
@@ -1568,14 +1767,14 @@ export default function StudioProPage() {
                   <StudioPanel>
                     <SectionHeading
                       kicker="Needs Seating"
-                      title="Accepted Guests Missing Tables"
-                      description="These guests have accepted but do not yet have a seating assignment."
+                      title="Accepted Guests Without Tables"
+                      description="Accepted guests who still need a table assignment."
                     />
                     <div className="mt-5 grid gap-3">
                       {acceptedWithoutSeating.length === 0 ? (
                         <EmptyState
-                          title="Everyone accepted has seating"
-                          description="Your accepted guest list currently matches your seating assignments."
+                          title="All accepted guests have seating"
+                          description="Your current seating assignments cover everyone who has RSVP’d yes."
                         />
                       ) : (
                         acceptedWithoutSeating.map((guest) => (
@@ -1583,12 +1782,8 @@ export default function StudioProPage() {
                             key={guest.id}
                             title={guest.guest_name}
                             subtitle={`Accepted ${guest.confirmed_guests || 0} guest${guest.confirmed_guests === 1 ? "" : "s"} · ${guest.invite_code}`}
-                            actionLabel="Open Seating"
-                            onAction={() => {
-                              setActiveView("seating");
-                              setSeatingTab("board");
-                              setSeatingSearch(guest.guest_name);
-                            }}
+                            actionLabel="Add Seating"
+                            onAction={() => beginSeatingCreateForGuest(guest)}
                           />
                         ))
                       )}
@@ -1615,16 +1810,19 @@ export default function StudioProPage() {
                   <StudioPanel>
                     <SectionHeading
                       kicker="Guest Workspace"
-                      title="Invitation Directory"
-                      description="A denser guest list with filters and selection controls tucked into lighter sections."
+                      title="Guest List"
+                      description="Search, filter, and manage invitations in one place."
                     />
 
                     <div className="mt-5 space-y-4">
                       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
                         <input
+                          type="search"
                           value={guestSearch}
                           onChange={(event) => setGuestSearch(event.target.value)}
-                          className="wedding-input"
+                          autoComplete="off"
+                          enterKeyHint="search"
+                          className="wedding-input caret-stone-900 text-stone-900 focus:border-stone-300 focus:ring-2 focus:ring-stone-200"
                           placeholder="Search by guest name or invite code"
                         />
                         <select value={guestSort} onChange={(event) => setGuestSort(event.target.value as GuestSort)} className="wedding-select">
@@ -1637,39 +1835,48 @@ export default function StudioProPage() {
 
                       <CompactDisclosure
                         title="Filters"
-                        subtitle="Status, sent state, children, and seating."
+                        subtitle="You can combine multiple chips here when the filters make sense together."
                         open={guestFiltersOpen}
                         onToggle={() => setGuestFiltersOpen((prev) => !prev)}
                       >
                         <div className="space-y-3">
                           <div className="flex flex-wrap gap-2">
+                            <Pill
+                              active={guestStatusFilters.length === 0}
+                              onClick={clearGuestStatusFilters}
+                              label="All"
+                            />
                             {([
-                              { key: "all", label: "All" },
                               { key: "pending", label: "Pending" },
                               { key: "attending", label: "Attending" },
                               { key: "declined", label: "Declined" },
                             ] as { key: GuestStatusFilter; label: string }[]).map((item) => (
                               <Pill
                                 key={item.key}
-                                active={guestStatusFilter === item.key}
-                                onClick={() => setGuestStatusFilter(item.key)}
+                                active={guestStatusFilters.includes(item.key)}
+                                onClick={() => toggleGuestStatusFilter(item.key)}
                                 label={item.label}
                               />
                             ))}
                           </div>
 
                           <div className="flex flex-wrap gap-2">
+                            <Pill
+                              active={guestExtraFilters.length === 0}
+                              onClick={clearGuestExtraFilters}
+                              label="Any"
+                            />
                             {([
-                              { key: "all", label: "Any" },
                               { key: "sent", label: "Sent" },
                               { key: "not_sent", label: "Not Sent" },
+                              { key: "sent_awaiting_response", label: "Sent + Awaiting Reply" },
                               { key: "has_children", label: "Has Children" },
                               { key: "needs_seating", label: "Needs Seating" },
                             ] as { key: GuestExtraFilter; label: string }[]).map((item) => (
                               <Pill
                                 key={item.key}
-                                active={guestExtraFilter === item.key}
-                                onClick={() => setGuestExtraFilter(item.key)}
+                                active={guestExtraFilters.includes(item.key)}
+                                onClick={() => toggleGuestExtraFilter(item.key)}
                                 label={item.label}
                               />
                             ))}
@@ -1770,51 +1977,93 @@ export default function StudioProPage() {
                               {isEditing ? (
                                 <div className="space-y-3">
                                   <div className="grid gap-3 md:grid-cols-2">
-                                    <input
-                                      value={draft.guest_name}
-                                      onChange={(event) =>
-                                        setInlineGuestEdits((prev) => ({
-                                          ...prev,
-                                          [guest.id]: { ...prev[guest.id], guest_name: event.target.value },
-                                        }))
-                                      }
-                                      className="wedding-inline-edit-input"
-                                      placeholder="Guest name"
-                                    />
-                                    <input
-                                      value={draft.invite_code}
-                                      onChange={(event) =>
-                                        setInlineGuestEdits((prev) => ({
-                                          ...prev,
-                                          [guest.id]: { ...prev[guest.id], invite_code: event.target.value.toUpperCase() },
-                                        }))
-                                      }
-                                      className="wedding-inline-edit-input uppercase"
-                                      placeholder="Invite code"
-                                    />
+                                    <div className="space-y-1">
+                                      <input
+                                        value={draft.guest_name}
+                                        onChange={(event) =>
+                                          setInlineGuestEdits((prev) => ({
+                                            ...prev,
+                                            [guest.id]: { ...prev[guest.id], guest_name: event.target.value },
+                                          }))
+                                        }
+                                        className="wedding-inline-edit-input"
+                                        placeholder="Guest name"
+                                      />
+                                      <InlineFieldHint text="Guest or household name" />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <input
+                                        value={draft.invite_code}
+                                        onChange={(event) =>
+                                          setInlineGuestEdits((prev) => ({
+                                            ...prev,
+                                            [guest.id]: { ...prev[guest.id], invite_code: event.target.value.toUpperCase() },
+                                          }))
+                                        }
+                                        autoCapitalize="characters"
+                                        autoCorrect="off"
+                                        spellCheck={false}
+                                        className="wedding-inline-edit-input uppercase"
+                                        placeholder="Invite code"
+                                      />
+                                      <InlineFieldHint text="Unique RSVP code" />
+                                    </div>
                                   </div>
 
                                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                                    <input
-                                      type="number"
-                                      min={1}
-                                      value={draft.max_guests}
-                                      onChange={(event) =>
-                                        setInlineGuestEdits((prev) => {
-                                          const nextLimit = Math.max(1, parseInt(event.target.value, 10) || 1);
-                                          return {
+                                    <div className="space-y-1">
+                                      <input
+                                        type="number"
+                                        onWheel={preventNumberInputScroll}
+                                        min={1}
+                                        value={draft.max_guests}
+                                        onChange={(event) =>
+                                          setInlineGuestEdits((prev) => {
+                                            if (event.target.value === "") {
+                                              return {
+                                                ...prev,
+                                                [guest.id]: {
+                                                  ...prev[guest.id],
+                                                  max_guests: "",
+                                                },
+                                              };
+                                            }
+
+                                            const nextLimit = Math.max(1, parseInt(event.target.value, 10) || 1);
+                                            return {
+                                              ...prev,
+                                              [guest.id]: {
+                                                ...prev[guest.id],
+                                                max_guests: nextLimit,
+                                                children_count:
+                                                  prev[guest.id].children_count === ""
+                                                    ? ""
+                                                    : Math.min(Number(prev[guest.id].children_count) || 1, nextLimit),
+                                              },
+                                            };
+                                          })
+                                        }
+                                        onBlur={() =>
+                                          setInlineGuestEdits((prev) => ({
                                             ...prev,
                                             [guest.id]: {
                                               ...prev[guest.id],
-                                              max_guests: nextLimit,
-                                              children_count: Math.min(prev[guest.id].children_count, nextLimit),
+                                              max_guests: prev[guest.id].max_guests === "" ? 1 : prev[guest.id].max_guests,
+                                              children_count:
+                                                prev[guest.id].children_count === ""
+                                                  ? 1
+                                                  : Math.min(
+                                                      Number(prev[guest.id].children_count) || 1,
+                                                      Number(prev[guest.id].max_guests === "" ? 1 : prev[guest.id].max_guests) || 1,
+                                                    ),
                                             },
-                                          };
-                                        })
-                                      }
-                                      className="wedding-inline-edit-input"
-                                      placeholder="Guest limit"
-                                    />
+                                          }))
+                                        }
+                                        className="wedding-inline-edit-input"
+                                        placeholder="Guest limit"
+                                      />
+                                      <InlineFieldHint text="Total invited guests" />
+                                    </div>
                                     <select
                                       value={draft.attending === null ? "pending" : draft.attending ? "attending" : "declined"}
                                       onChange={(event) => {
@@ -1839,45 +2088,95 @@ export default function StudioProPage() {
                                       <option value="attending">Attending</option>
                                       <option value="declined">Declined</option>
                                     </select>
-                                    <input
-                                      type="number"
-                                      min={draft.attending === true ? 1 : 0}
-                                      max={Math.max(1, draft.max_guests)}
-                                      disabled={draft.attending !== true}
-                                      value={draft.attending === true ? draft.confirmed_guests || 1 : 0}
-                                      onChange={(event) =>
-                                        setInlineGuestEdits((prev) => ({
-                                          ...prev,
-                                          [guest.id]: {
-                                            ...prev[guest.id],
-                                            confirmed_guests: parseInt(event.target.value, 10) || 0,
-                                          },
-                                        }))
-                                      }
-                                      className={`wedding-inline-edit-input ${draft.attending !== true ? "opacity-50" : ""}`}
-                                      placeholder="Confirmed"
-                                    />
-                                    {draft.has_children ? (
+                                    <div className="space-y-1">
                                       <input
                                         type="number"
-                                        min={1}
-                                        max={Math.max(1, draft.max_guests)}
-                                        value={draft.children_count}
+                                        onWheel={preventNumberInputScroll}
+                                        min={draft.attending === true ? 1 : 0}
+                                        max={Math.max(1, Number(draft.max_guests) || 1)}
+                                        disabled={draft.attending !== true}
+                                        value={draft.attending === true ? (draft.confirmed_guests ?? "") : 0}
                                         onChange={(event) =>
                                           setInlineGuestEdits((prev) => ({
                                             ...prev,
                                             [guest.id]: {
                                               ...prev[guest.id],
-                                              children_count: Math.min(
-                                                Math.max(1, parseInt(event.target.value, 10) || 1),
-                                                Math.max(1, prev[guest.id].max_guests),
-                                              ),
+                                              confirmed_guests:
+                                                event.target.value === ""
+                                                  ? ""
+                                                  : Math.max(1, parseInt(event.target.value, 10) || 1),
                                             },
                                           }))
                                         }
-                                        className="wedding-inline-edit-input"
-                                        placeholder="Children"
+                                        onBlur={() =>
+                                          setInlineGuestEdits((prev) => ({
+                                            ...prev,
+                                            [guest.id]: {
+                                              ...prev[guest.id],
+                                              confirmed_guests:
+                                                prev[guest.id].attending === true && prev[guest.id].confirmed_guests === ""
+                                                  ? 1
+                                                  : prev[guest.id].confirmed_guests,
+                                            },
+                                          }))
+                                        }
+                                        className={`wedding-inline-edit-input ${draft.attending !== true ? "opacity-50" : ""}`}
+                                        placeholder="Confirmed"
                                       />
+                                      <InlineFieldHint text="Guests attending" />
+                                    </div>
+                                    {draft.has_children ? (
+                                      <div className="space-y-1">
+                                        <input
+                                          type="number"
+                                          onWheel={preventNumberInputScroll}
+                                          min={1}
+                                          max={Math.max(1, Number(draft.max_guests) || 1)}
+                                          value={draft.children_count}
+                                          onChange={(event) =>
+                                            setInlineGuestEdits((prev) => {
+                                              if (event.target.value === "") {
+                                                return {
+                                                  ...prev,
+                                                  [guest.id]: {
+                                                    ...prev[guest.id],
+                                                    children_count: "",
+                                                  },
+                                                };
+                                              }
+
+                                              return {
+                                                ...prev,
+                                                [guest.id]: {
+                                                  ...prev[guest.id],
+                                                  children_count: Math.min(
+                                                    Math.max(1, parseInt(event.target.value, 10) || 1),
+                                                    Math.max(1, Number(prev[guest.id].max_guests) || 1),
+                                                  ),
+                                                },
+                                              };
+                                            })
+                                          }
+                                          onBlur={() =>
+                                            setInlineGuestEdits((prev) => ({
+                                              ...prev,
+                                              [guest.id]: {
+                                                ...prev[guest.id],
+                                                children_count:
+                                                  prev[guest.id].children_count === ""
+                                                    ? 1
+                                                    : Math.min(
+                                                        Number(prev[guest.id].children_count) || 1,
+                                                        Math.max(1, Number(prev[guest.id].max_guests) || 1),
+                                                      ),
+                                              },
+                                            }))
+                                          }
+                                          className="wedding-inline-edit-input"
+                                          placeholder="Children"
+                                        />
+                                        <InlineFieldHint text="Children included" />
+                                      </div>
                                     ) : (
                                       <div className="hidden xl:block" />
                                     )}
@@ -1933,20 +2232,24 @@ export default function StudioProPage() {
                                         </p>
                                       </div>
                                       <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                                        <input
-                                          type="number"
-                                          min={1}
-                                          value={quickTableValue}
-                                          onChange={(event) =>
-                                            setQuickTableDrafts((prev) => ({
-                                              ...prev,
-                                              [guest.id]:
-                                                event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1),
-                                            }))
-                                          }
-                                          className="wedding-inline-edit-input"
-                                          placeholder="Table #"
-                                        />
+                                        <div className="min-w-0 flex-1 space-y-1">
+                                          <input
+                                            type="number"
+                                            onWheel={preventNumberInputScroll}
+                                            min={1}
+                                            value={quickTableValue}
+                                            onChange={(event) =>
+                                              setQuickTableDrafts((prev) => ({
+                                                ...prev,
+                                                [guest.id]:
+                                                  event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1),
+                                              }))
+                                            }
+                                            className="wedding-inline-edit-input"
+                                            placeholder="Table #"
+                                          />
+                                          <InlineFieldHint text="Enter the table number" />
+                                        </div>
                                         <button
                                           type="button"
                                           onClick={() => void assignGuestToTable(guest, Math.max(1, Number(quickTableValue) || 1))}
@@ -2002,20 +2305,24 @@ export default function StudioProPage() {
                                     </p>
                                   </div>
                                   <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                                    <input
-                                      type="number"
-                                      min={1}
-                                      value={quickTableValue}
-                                      onChange={(event) =>
-                                        setQuickTableDrafts((prev) => ({
-                                          ...prev,
-                                          [guest.id]:
-                                            event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1),
-                                        }))
-                                      }
-                                      className="wedding-inline-edit-input"
-                                      placeholder="Table #"
-                                    />
+                                    <div className="min-w-0 flex-1 space-y-1">
+                                      <input
+                                        type="number"
+                                        onWheel={preventNumberInputScroll}
+                                        min={1}
+                                        value={quickTableValue}
+                                        onChange={(event) =>
+                                          setQuickTableDrafts((prev) => ({
+                                            ...prev,
+                                            [guest.id]:
+                                              event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1),
+                                          }))
+                                        }
+                                        className="wedding-inline-edit-input"
+                                        placeholder="Table #"
+                                      />
+                                      <InlineFieldHint text="Enter the table number" />
+                                    </div>
                                     <button
                                       type="button"
                                       onClick={() => void assignGuestToTable(guest, Math.max(1, Number(quickTableValue) || 1))}
@@ -2042,7 +2349,7 @@ export default function StudioProPage() {
                                   </div>
                                 </div>
                               ) : (
-                                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                                <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
                                   <InfoPanel label="Invited" value={`${guest.max_guests} guest${guest.max_guests === 1 ? "" : "s"}`} />
                                   <InfoPanel
                                     label="Accepted"
@@ -2086,8 +2393,8 @@ export default function StudioProPage() {
                     <StudioPanel>
                       <SectionHeading
                         kicker="Bulk Actions"
-                        title="Selection Console"
-                        description="A dedicated action surface for assigning tables, clearing seating, marking invitations sent, and exporting without crowding the guest list."
+                        title="Bulk Actions"
+                        description="Use bulk actions here for sending, follow-up, table assignment, seating cleanup, and export."
                       />
 
                       <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -2113,9 +2420,10 @@ export default function StudioProPage() {
                           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-[160px_minmax(0,1fr)_minmax(0,1fr)]">
                             <div className="rounded-[18px] border border-stone-200 bg-white px-3 py-3">
                               <p className="wedding-kicker mb-1">Table</p>
-                              <input
-                                type="number"
-                                min={1}
+                                <input
+                                  type="number"
+                                  onWheel={preventNumberInputScroll}
+                                  min={1}
                                 value={bulkTableNumber}
                                 onChange={(event) => {
                                   const nextValue = event.target.value;
@@ -2158,6 +2466,38 @@ export default function StudioProPage() {
                             >
                               Mark Selected Sent
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => void bulkMarkSelectedAsNotSent()}
+                              disabled={selectedGuestIds.length === 0}
+                              className="wedding-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Mark Selected Not Sent
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void bulkResetSelectedRsvpToPending()}
+                              disabled={selectedGuestIds.length === 0}
+                              className="wedding-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Reset Selected RSVP To Pending
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void copySelectedInviteLinks()}
+                              disabled={selectedGuestIds.length === 0}
+                              className="wedding-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Copy Selected RSVP Links
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void copySelectedInvitations()}
+                              disabled={selectedGuestIds.length === 0}
+                              className="wedding-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Copy Selected Invitations
+                            </button>
                             <button type="button" onClick={exportInvitationCsv} className="wedding-button-secondary">
                               Export Current CSV
                             </button>
@@ -2170,7 +2510,7 @@ export default function StudioProPage() {
                             {selectedGuests.length === 0 ? (
                               <EmptyState
                                 title="No guests selected"
-                                description="Select guests from Guest List, then come here to run the heavier actions in one place."
+                                description="Select guests from Guest List, then come here to run bulk actions."
                               />
                             ) : (
                               selectedGuests.slice(0, 10).map((guest) => (
@@ -2202,7 +2542,7 @@ export default function StudioProPage() {
                     <SectionHeading
                       kicker="Composer"
                       title={editingGuestId ? "Edit Invitation" : "Create Invitation"}
-                      description="A dedicated compose panel so you can update guest records without the whole page feeling like one long form."
+                      description="Add a new invitation or update an existing one."
                     />
 
                     <form onSubmit={addGuest} className="mt-5 space-y-4">
@@ -2222,6 +2562,9 @@ export default function StudioProPage() {
                             value={newCode}
                             onChange={(event) => setNewCode(event.target.value)}
                             required
+                            autoCapitalize="characters"
+                            autoCorrect="off"
+                            spellCheck={false}
                             className="wedding-inline-edit-input uppercase"
                             placeholder="OMARHAGER"
                           />
@@ -2229,12 +2572,25 @@ export default function StudioProPage() {
                         <FormField label="Guest Limit">
                           <input
                             type="number"
+                            onWheel={preventNumberInputScroll}
                             min={1}
                             value={newLimit}
                             onChange={(event) => {
-                              const nextLimit = Math.max(1, parseInt(event.target.value, 10) || 1);
+                              const nextValue = event.target.value;
+                              if (nextValue === "") {
+                                setNewLimit("");
+                                return;
+                              }
+
+                              const nextLimit = Math.max(1, parseInt(nextValue, 10) || 1);
                               setNewLimit(nextLimit);
                               setChildrenCount((prev) => (prev === "" ? prev : Math.min(prev, nextLimit)));
+                            }}
+                            onBlur={() => {
+                              if (newLimit === "") {
+                                setNewLimit(1);
+                                setChildrenCount((prev) => (prev === "" ? prev : Math.min(prev, 1)));
+                              }
                             }}
                             className="wedding-inline-edit-input"
                           />
@@ -2256,8 +2612,9 @@ export default function StudioProPage() {
                         <FormField label="Confirmed Guests">
                           <input
                             type="number"
+                            onWheel={preventNumberInputScroll}
                             min={attendanceStatus === "attending" ? 1 : 0}
-                            max={newLimit}
+                            max={Math.max(1, Number(newLimit) || 1)}
                             value={attendanceStatus === "pending" ? "" : confirmedGuests}
                             onChange={(event) => setConfirmedGuests(parseInt(event.target.value, 10) || 0)}
                             disabled={attendanceStatus === "pending"}
@@ -2289,8 +2646,9 @@ export default function StudioProPage() {
                         <FormField label="Children Count Included In Guest Limit">
                           <input
                             type="number"
+                            onWheel={preventNumberInputScroll}
                             min={1}
-                            max={newLimit}
+                            max={Math.max(1, Number(newLimit) || 1)}
                             value={childrenCount}
                             onChange={(event) => {
                               const nextValue = event.target.value;
@@ -2298,7 +2656,9 @@ export default function StudioProPage() {
                                 setChildrenCount("");
                                 return;
                               }
-                              setChildrenCount(Math.min(Math.max(1, parseInt(nextValue, 10) || 1), newLimit));
+                              setChildrenCount(
+                                Math.min(Math.max(1, parseInt(nextValue, 10) || 1), Math.max(1, Number(newLimit) || 1)),
+                              );
                             }}
                             onBlur={() => {
                               if (childrenCount === "") setChildrenCount(1);
@@ -2357,14 +2717,17 @@ export default function StudioProPage() {
                     <SectionHeading
                       kicker="Seating Workspace"
                       title="Seating Board"
-                      description="A tighter seating board with search and table filters kept in one compact control block."
+                      description="Search, filter, and update seating assignments by guest or table number."
                     />
 
                     <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
                       <input
+                        type="search"
                         value={seatingSearch}
                         onChange={(event) => setSeatingSearch(event.target.value)}
-                        className="wedding-input"
+                        autoComplete="off"
+                        enterKeyHint="search"
+                        className="wedding-input caret-stone-900 text-stone-900 focus:border-stone-300 focus:ring-2 focus:ring-stone-200"
                         placeholder="Search by guest or table number"
                       />
                       <select value={seatingSort} onChange={(event) => setSeatingSort(event.target.value as SeatingSort)} className="wedding-select">
@@ -2427,78 +2790,113 @@ export default function StudioProPage() {
 
                         return (
                           <StudioPanel key={assignment.id} dense>
-                            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                              <div>
-                                <h3 className="font-serif text-2xl tracking-tight text-stone-900">{assignment.name}</h3>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  <p className="inline-flex rounded-full bg-stone-100 px-4 py-2 text-sm font-semibold text-stone-700">
-                                    Table {assignment.table_number}
-                                  </p>
-                                  {isSeatingGuestCountAvailable && (
-                                    <p className="inline-flex rounded-full bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700">
-                                      {Math.max(1, assignment.guest_count || 1)} seat{Math.max(1, assignment.guest_count || 1) === 1 ? "" : "s"}
+                            <div className="space-y-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <h3 className="font-serif text-xl tracking-tight text-stone-900 md:text-2xl">{assignment.name}</h3>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    <p className="inline-flex rounded-full bg-stone-100 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-700">
+                                      Table {assignment.table_number}
                                     </p>
-                                  )}
+                                    {isSeatingGuestCountAvailable && (
+                                      <p className="inline-flex rounded-full bg-sky-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">
+                                        {Math.max(1, assignment.guest_count || 1)} seat{Math.max(1, assignment.guest_count || 1) === 1 ? "" : "s"}
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
 
-                              <div className="flex items-center gap-2">
-                                {!isEditing && (
-                                  <button type="button" onClick={() => startInlineSeatingEdit(assignment)} className="wedding-button-secondary">
-                                    Quick Edit
-                                  </button>
-                                )}
-                                <RowMenu label={`Actions for ${assignment.name}`} items={seatingMenuItems} />
+                                <div className="flex shrink-0 items-start gap-1.5">
+                                  {!isEditing && (
+                                    <button type="button" onClick={() => startInlineSeatingEdit(assignment)} className="wedding-button-secondary">
+                                      Quick Edit
+                                    </button>
+                                  )}
+                                  <RowMenu label={`Actions for ${assignment.name}`} items={seatingMenuItems} />
+                                </div>
                               </div>
                             </div>
 
                             {isEditing ? (
                               <div className="mt-5 space-y-3">
-                                <div className={`grid gap-3 ${isSeatingGuestCountAvailable ? "md:grid-cols-[minmax(0,1fr)_140px_140px]" : "md:grid-cols-[1fr_150px]"}`}>
-                                  <input
-                                    value={draft.name}
-                                    onChange={(event) =>
-                                      setInlineSeatingEdits((prev) => ({
-                                        ...prev,
-                                        [assignment.id]: { ...prev[assignment.id], name: event.target.value },
-                                      }))
-                                    }
-                                    className="wedding-inline-edit-input"
-                                    placeholder="Guest name"
-                                  />
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    value={draft.table_number}
-                                    onChange={(event) =>
-                                      setInlineSeatingEdits((prev) => ({
-                                        ...prev,
-                                        [assignment.id]: {
-                                          ...prev[assignment.id],
-                                          table_number: parseInt(event.target.value, 10) || 1,
-                                        },
-                                      }))
-                                    }
-                                    className="wedding-inline-edit-input"
-                                    placeholder="Table"
-                                  />
-                                  {isSeatingGuestCountAvailable && (
+                              <div className={`grid gap-3 ${isSeatingGuestCountAvailable ? "md:grid-cols-[minmax(0,1fr)_140px_140px]" : "md:grid-cols-[1fr_150px]"}`}>
+                                  <div className="space-y-1">
+                                    <input
+                                      value={draft.name}
+                                      onChange={(event) =>
+                                        setInlineSeatingEdits((prev) => ({
+                                          ...prev,
+                                          [assignment.id]: { ...prev[assignment.id], name: event.target.value },
+                                        }))
+                                      }
+                                      className="wedding-inline-edit-input"
+                                      placeholder="Guest name"
+                                    />
+                                    <InlineFieldHint text="Assigned guest name" />
+                                  </div>
+                                  <div className="space-y-1">
                                     <input
                                       type="number"
                                       min={1}
-                                      value={draft.guest_count}
+                                      value={draft.table_number}
                                       onChange={(event) =>
                                         setInlineSeatingEdits((prev) => ({
                                           ...prev,
                                           [assignment.id]: {
                                             ...prev[assignment.id],
-                                            guest_count: Math.max(1, parseInt(event.target.value, 10) || 1),
+                                            table_number:
+                                              event.target.value === ""
+                                                ? ""
+                                                : Math.max(1, parseInt(event.target.value, 10) || 1),
+                                          },
+                                        }))
+                                      }
+                                      onBlur={() =>
+                                        setInlineSeatingEdits((prev) => ({
+                                          ...prev,
+                                          [assignment.id]: {
+                                            ...prev[assignment.id],
+                                            table_number: prev[assignment.id].table_number === "" ? 1 : prev[assignment.id].table_number,
                                           },
                                         }))
                                       }
                                       className="wedding-inline-edit-input"
-                                      placeholder="Seats"
+                                      placeholder="Table"
                                     />
+                                    <InlineFieldHint text="Table number" />
+                                  </div>
+                                  {isSeatingGuestCountAvailable && (
+                                    <div className="space-y-1">
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        value={draft.guest_count}
+                                        onChange={(event) =>
+                                          setInlineSeatingEdits((prev) => ({
+                                            ...prev,
+                                            [assignment.id]: {
+                                              ...prev[assignment.id],
+                                              guest_count:
+                                                event.target.value === ""
+                                                  ? ""
+                                                  : Math.max(1, parseInt(event.target.value, 10) || 1),
+                                            },
+                                          }))
+                                        }
+                                        onBlur={() =>
+                                          setInlineSeatingEdits((prev) => ({
+                                            ...prev,
+                                            [assignment.id]: {
+                                              ...prev[assignment.id],
+                                              guest_count: prev[assignment.id].guest_count === "" ? 1 : prev[assignment.id].guest_count,
+                                            },
+                                          }))
+                                        }
+                                        className="wedding-inline-edit-input"
+                                        placeholder="Seats"
+                                      />
+                                      <InlineFieldHint text="Seats at this table" />
+                                    </div>
                                   )}
                                 </div>
 
@@ -2524,15 +2922,18 @@ export default function StudioProPage() {
                   <StudioPanel>
                     <SectionHeading
                       kicker="Table Tools"
-                      title="Seat Totals & Table Moves"
-                      description="One place for whole-table changes and the current seat totals across every visible table."
+                      title="Table Totals & Moves"
+                      description="Review visible table totals and move an entire table when plans change."
                     />
 
                     <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
                       <input
+                        type="search"
                         value={seatingSearch}
                         onChange={(event) => setSeatingSearch(event.target.value)}
-                        className="wedding-input"
+                        autoComplete="off"
+                        enterKeyHint="search"
+                        className="wedding-input caret-stone-900 text-stone-900 focus:border-stone-300 focus:ring-2 focus:ring-stone-200"
                         placeholder="Search by guest or table number"
                       />
                       <select value={seatingSort} onChange={(event) => setSeatingSort(event.target.value as SeatingSort)} className="wedding-select">
@@ -2561,7 +2962,7 @@ export default function StudioProPage() {
                       <div className="mt-5">
                         <CompactDisclosure
                           title="Move Entire Table"
-                          subtitle="Shift all assignments from one table number to another."
+                          subtitle="Move every assignment from one table number to another."
                           open={tableToolsOpen}
                           onToggle={() => setTableToolsOpen((prev) => !prev)}
                         >
@@ -2610,7 +3011,7 @@ export default function StudioProPage() {
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <div>
                             <p className="wedding-kicker">Visible Table Totals</p>
-                            <p className="mt-1 text-sm text-stone-500">Tap a table card to jump back into the seating board filtered to that table.</p>
+                            <p className="mt-1 text-sm text-stone-500">Select a table to open the seating board filtered to that table.</p>
                           </div>
                           <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-stone-600 ring-1 ring-stone-200">
                             {filteredTableSeatTotals.size} table{filteredTableSeatTotals.size === 1 ? "" : "s"}
@@ -2656,7 +3057,7 @@ export default function StudioProPage() {
                           title={isSeatingGuestCountAvailable ? "No visible table totals yet" : "Add guest_count to seating first"}
                           description={
                             isSeatingGuestCountAvailable
-                              ? "Once seating assignments are visible here, each table total will show up automatically."
+                              ? "Table totals will appear here as soon as seating assignments match this view."
                               : "Add a guest_count column to public.seating if you want table seat totals to be tracked."
                           }
                         />
@@ -2670,7 +3071,7 @@ export default function StudioProPage() {
                     <SectionHeading
                       kicker="Composer"
                       title={editingSeatingId !== null ? "Edit Assignment" : "Add Assignment"}
-                      description="A dedicated seating composer that stays separate from the board, so the list never feels crushed."
+                      description="Add a new seating assignment or update an existing one."
                     />
 
                     <form onSubmit={addSeatingAssignment} className="mt-5 space-y-4">
@@ -2687,9 +3088,21 @@ export default function StudioProPage() {
                       <FormField label="Table Number">
                         <input
                           type="number"
+                          onWheel={preventNumberInputScroll}
                           min={1}
                           value={tableNumber}
-                          onChange={(event) => setTableNumber(parseInt(event.target.value, 10) || 1)}
+                          onChange={(event) => {
+                            const nextValue = event.target.value;
+                            if (nextValue === "") {
+                              setTableNumber("");
+                              return;
+                            }
+
+                            setTableNumber(Math.max(1, parseInt(nextValue, 10) || 1));
+                          }}
+                          onBlur={() => {
+                            if (tableNumber === "") setTableNumber(1);
+                          }}
                           className="wedding-inline-edit-input"
                         />
                       </FormField>
@@ -2698,9 +3111,21 @@ export default function StudioProPage() {
                         <FormField label="Guest Count">
                           <input
                             type="number"
+                            onWheel={preventNumberInputScroll}
                             min={1}
                             value={seatingGuestCount}
-                            onChange={(event) => setSeatingGuestCount(Math.max(1, parseInt(event.target.value, 10) || 1))}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              if (nextValue === "") {
+                                setSeatingGuestCount("");
+                                return;
+                              }
+
+                              setSeatingGuestCount(Math.max(1, parseInt(nextValue, 10) || 1));
+                            }}
+                            onBlur={() => {
+                              if (seatingGuestCount === "") setSeatingGuestCount(1);
+                            }}
                             className="wedding-inline-edit-input"
                           />
                         </FormField>
@@ -2728,7 +3153,7 @@ export default function StudioProPage() {
                   <SectionHeading
                     kicker="Live Controls"
                     title="Site Settings"
-                    description="A dedicated settings surface for controlling the live wedding experience without interrupting invitation work."
+                    description="Turn live site sections on or off here."
                   />
 
                   <div className="mt-5 grid gap-4 xl:grid-cols-2">
@@ -2897,30 +3322,6 @@ function WorkspaceTabs({
   );
 }
 
-function HeroMetric({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: "sky" | "emerald" | "stone" | "amber";
-}) {
-  const tones = {
-    sky: "border-sky-100 bg-sky-50 text-sky-900",
-    emerald: "border-emerald-100 bg-emerald-50 text-emerald-900",
-    stone: "border-stone-100 bg-stone-50 text-stone-900",
-    amber: "border-amber-100 bg-amber-50 text-amber-900",
-  }[tone];
-
-  return (
-    <div className={`min-w-0 rounded-[18px] border px-3 py-3 shadow-sm ${tones}`}>
-      <p className="text-[9px] font-bold uppercase tracking-[0.22em] opacity-60">{label}</p>
-      <p className="mt-2 font-serif text-[1.75rem] leading-none">{value}</p>
-    </div>
-  );
-}
-
 function StatTile({
   label,
   value,
@@ -2980,21 +3381,6 @@ function ProgressLine({
   );
 }
 
-function CompactShortcut({ label, value, onClick }: { label: string; value: number; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-2 text-left text-stone-700 transition hover:bg-white"
-    >
-      <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-stone-500">{label}</span>
-      <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-stone-700 ring-1 ring-stone-200">
-        {value}
-      </span>
-    </button>
-  );
-}
-
 function CompactDisclosure({
   title,
   subtitle,
@@ -3023,42 +3409,8 @@ function CompactDisclosure({
           {open ? "Hide" : "Show"}
         </span>
       </button>
-      <div className={`${open ? "block" : "hidden"} border-t border-stone-100 px-4 py-4 md:block`}>
-        <div className={open ? "block" : "hidden md:block"}>{children}</div>
-      </div>
+      {open && <div className="border-t border-stone-100 px-4 py-4">{children}</div>}
     </div>
-  );
-}
-
-function AttentionItem({
-  label,
-  value,
-  description,
-  tone,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  description: string;
-  tone: "sky" | "stone" | "amber";
-  onClick: () => void;
-}) {
-  const tones = {
-    sky: "border-sky-100 bg-sky-50/80 text-sky-900",
-    stone: "border-stone-100 bg-stone-50 text-stone-900",
-    amber: "border-amber-100 bg-amber-50/80 text-amber-900",
-  }[tone];
-
-  return (
-    <button type="button" onClick={onClick} className={`w-full rounded-[26px] border px-4 py-4 text-left ${tones}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-serif text-xl">{label}</p>
-          <p className="mt-2 text-sm leading-relaxed opacity-80">{description}</p>
-        </div>
-        <span className="font-serif text-3xl leading-none">{value}</span>
-      </div>
-    </button>
   );
 }
 
@@ -3141,9 +3493,9 @@ function InvitationCard({
   return (
     <section className="min-w-0 overflow-hidden rounded-[22px] border border-white/85 bg-white/92 shadow-[0_10px_22px_rgba(28,25,23,0.045)]">
       <div className="border-b border-stone-100 px-3 py-3 md:px-4 md:py-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="min-w-0">
-            <label className="mb-2 inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-2.5 py-1 text-[11px] text-stone-600 md:mb-2 md:px-3 md:py-1.5 md:text-xs">
+        <div className="space-y-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <label className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-2.5 py-1 text-[11px] text-stone-600 md:px-3 md:py-1.5 md:text-xs">
               <input
                 type="checkbox"
                 checked={selected}
@@ -3152,14 +3504,17 @@ function InvitationCard({
               />
               Select
             </label>
+
+            <div className="flex shrink-0 items-start gap-1.5 self-start">{actions}</div>
+          </div>
+
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="font-serif text-[1.35rem] tracking-tight text-stone-900 md:text-[1.75rem]">{title}</h3>
               <span className="wedding-code">{subtitle}</span>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5 md:mt-2">{badges}</div>
           </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">{actions}</div>
         </div>
       </div>
       <div className="px-3 py-3 md:px-4 md:py-4">{children}</div>
@@ -3177,11 +3532,15 @@ function InfoPanel({
   mono?: boolean;
 }) {
   return (
-    <div className="rounded-[16px] border border-stone-100 bg-stone-50 p-3">
-      <p className="wedding-kicker mb-1">{label}</p>
-      <p className={`${mono ? "font-mono text-xs" : "text-sm"} leading-relaxed text-stone-700`}>{value}</p>
+    <div className="rounded-[14px] border border-stone-100 bg-stone-50 px-2.5 py-2">
+      <p className="mb-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400">{label}</p>
+      <p className={`${mono ? "font-mono text-[11px]" : "text-[13px]"} leading-snug text-stone-700`}>{value}</p>
     </div>
   );
+}
+
+function InlineFieldHint({ text }: { text: string }) {
+  return <p className="px-1 text-[10px] leading-tight text-stone-400">{text}</p>;
 }
 
 function FormField({ label, children }: { label: string; children: ReactNode }) {
