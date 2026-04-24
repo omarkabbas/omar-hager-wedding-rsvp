@@ -28,6 +28,7 @@ type SeatingAssignment = {
   id: number;
   name: string;
   table_number: number;
+  guest_count?: number | null;
 };
 
 type Toast = {
@@ -39,7 +40,7 @@ type Toast = {
 type AdminView = "overview" | "invitations" | "seating" | "settings";
 type OverviewWorkspaceTab = "pulse" | "flow" | "watchlist";
 type InvitationWorkspaceTab = "manage" | "composer";
-type SeatingWorkspaceTab = "board" | "composer";
+type SeatingWorkspaceTab = "board" | "totals" | "composer";
 type GuestStatusFilter = "all" | "pending" | "attending" | "declined";
 type GuestExtraFilter = "all" | "sent" | "not_sent" | "has_children" | "needs_seating";
 type GuestSort = "recent" | "name" | "invite_code" | "largest_party";
@@ -60,6 +61,7 @@ type InlineGuestDraft = {
 type InlineSeatingDraft = {
   name: string;
   table_number: number;
+  guest_count: number;
 };
 
 type ConfirmDialogState = {
@@ -149,6 +151,8 @@ const getLatestGuestTimestamp = (guest: GuestResponse) => {
 };
 
 const getGuestInviteUrl = (guest: GuestResponse) => `${INVITE_BASE_URL}/${guest.invite_code.toLowerCase()}`;
+const getSeatingGuestCount = (guest: GuestResponse) =>
+  guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : Math.max(1, guest.max_guests || 1);
 
 const getGuestActionIndicators = (guest: GuestResponse) => {
   const indicators: string[] = [];
@@ -246,6 +250,7 @@ export default function AdminDashboardV2() {
 
   const [seatingName, setSeatingName] = useState("");
   const [tableNumber, setTableNumber] = useState(1);
+  const [seatingGuestCount, setSeatingGuestCount] = useState(1);
   const [editingSeatingId, setEditingSeatingId] = useState<number | null>(null);
 
   const [guestSearch, setGuestSearch] = useState("");
@@ -256,10 +261,14 @@ export default function AdminDashboardV2() {
 
   const [seatingSearch, setSeatingSearch] = useState("");
   const [seatingSort, setSeatingSort] = useState<SeatingSort>("table");
+  const [seatingTableFilter, setSeatingTableFilter] = useState<number | "all">("all");
+  const [tableMoveFrom, setTableMoveFrom] = useState<number | "">("");
+  const [tableMoveTo, setTableMoveTo] = useState<number | "">("");
   const deferredSeatingSearch = useDeferredValue(seatingSearch);
 
   const [inlineGuestEdits, setInlineGuestEdits] = useState<Record<string, InlineGuestDraft>>({});
   const [inlineSeatingEdits, setInlineSeatingEdits] = useState<Record<number, InlineSeatingDraft>>({});
+  const [quickTableDrafts, setQuickTableDrafts] = useState<Record<string, number | "">>({});
   const [selectedGuestIds, setSelectedGuestIds] = useState<string[]>([]);
   const [bulkTableNumber, setBulkTableNumber] = useState<number | "">(1);
 
@@ -270,9 +279,11 @@ export default function AdminDashboardV2() {
   const [isHomeCarouselEnabled, setIsHomeCarouselEnabled] = useState(true);
   const [isHomeDressCodeEnabled, setIsHomeDressCodeEnabled] = useState(false);
   const [isGuestNotesAvailable, setIsGuestNotesAvailable] = useState<boolean | null>(null);
+  const [isSeatingGuestCountAvailable, setIsSeatingGuestCountAvailable] = useState<boolean | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const [hasRestoredWorkspaceState, setHasRestoredWorkspaceState] = useState(false);
 
   const invitationFormRef = useRef<HTMLElement | null>(null);
   const seatingFormRef = useRef<HTMLElement | null>(null);
@@ -334,6 +345,80 @@ export default function AdminDashboardV2() {
     setAuthorized(window.sessionStorage.getItem("isLoggedIn") === "true");
     setIsCheckingSession(false);
   }, []);
+
+  useEffect(() => {
+    if (!authorized || hasRestoredWorkspaceState) return;
+
+    const savedState = window.sessionStorage.getItem("studio_workspace_state_v1");
+    if (savedState) {
+      try {
+        const parsed = JSON.parse(savedState) as {
+          activeView?: AdminView;
+          overviewTab?: OverviewWorkspaceTab;
+          invitationTab?: InvitationWorkspaceTab;
+          seatingTab?: SeatingWorkspaceTab;
+          guestSearch?: string;
+          guestStatusFilter?: GuestStatusFilter;
+          guestExtraFilter?: GuestExtraFilter;
+          guestSort?: GuestSort;
+          seatingSearch?: string;
+          seatingSort?: SeatingSort;
+          seatingTableFilter?: number | "all";
+        };
+
+        if (parsed.activeView) setActiveView(parsed.activeView);
+        if (parsed.overviewTab) setOverviewTab(parsed.overviewTab);
+        if (parsed.invitationTab) setInvitationTab(parsed.invitationTab);
+        if (parsed.seatingTab) setSeatingTab(parsed.seatingTab);
+        if (parsed.guestSearch !== undefined) setGuestSearch(parsed.guestSearch);
+        if (parsed.guestStatusFilter) setGuestStatusFilter(parsed.guestStatusFilter);
+        if (parsed.guestExtraFilter) setGuestExtraFilter(parsed.guestExtraFilter);
+        if (parsed.guestSort) setGuestSort(parsed.guestSort);
+        if (parsed.seatingSearch !== undefined) setSeatingSearch(parsed.seatingSearch);
+        if (parsed.seatingSort) setSeatingSort(parsed.seatingSort);
+        if (parsed.seatingTableFilter !== undefined) setSeatingTableFilter(parsed.seatingTableFilter);
+      } catch {
+        window.sessionStorage.removeItem("studio_workspace_state_v1");
+      }
+    }
+
+    setHasRestoredWorkspaceState(true);
+  }, [authorized, hasRestoredWorkspaceState]);
+
+  useEffect(() => {
+    if (!authorized || !hasRestoredWorkspaceState) return;
+
+    window.sessionStorage.setItem(
+      "studio_workspace_state_v1",
+      JSON.stringify({
+        activeView,
+        overviewTab,
+        invitationTab,
+        seatingTab,
+        guestSearch,
+        guestStatusFilter,
+        guestExtraFilter,
+        guestSort,
+        seatingSearch,
+        seatingSort,
+        seatingTableFilter,
+      }),
+    );
+  }, [
+    activeView,
+    authorized,
+    guestExtraFilter,
+    guestSearch,
+    guestSort,
+    guestStatusFilter,
+    hasRestoredWorkspaceState,
+    invitationTab,
+    overviewTab,
+    seatingSearch,
+    seatingSort,
+    seatingTab,
+    seatingTableFilter,
+  ]);
 
   const fetchResponses = useCallback(async () => {
     const { data, error: fetchError } = await supabase.from("rsvp_list").select("*").order("guest_name", { ascending: true });
@@ -406,11 +491,22 @@ export default function AdminDashboardV2() {
     setIsGuestNotesAvailable(!notesError);
   }, []);
 
+  const detectSeatingGuestCountColumn = useCallback(async () => {
+    const { error: guestCountError } = await supabase.from("seating").select("guest_count").limit(1);
+    setIsSeatingGuestCountAvailable(!guestCountError);
+  }, []);
+
   useEffect(() => {
     if (!authorized) return;
 
     const loadDashboard = async () => {
-      await Promise.all([fetchResponses(), fetchSettings(), fetchSeatingAssignments(), detectGuestNotesColumn()]);
+      await Promise.all([
+        fetchResponses(),
+        fetchSettings(),
+        fetchSeatingAssignments(),
+        detectGuestNotesColumn(),
+        detectSeatingGuestCountColumn(),
+      ]);
     };
 
     void loadDashboard();
@@ -425,7 +521,7 @@ export default function AdminDashboardV2() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [authorized, detectGuestNotesColumn, fetchResponses, fetchSeatingAssignments, fetchSettings]);
+  }, [authorized, detectGuestNotesColumn, detectSeatingGuestCountColumn, fetchResponses, fetchSeatingAssignments, fetchSettings]);
 
   useEffect(() => {
     setSelectedGuestIds((prev) => prev.filter((guestId) => responses.some((guest) => guest.id === guestId)));
@@ -447,6 +543,7 @@ export default function AdminDashboardV2() {
   const resetSeatingForm = () => {
     setSeatingName("");
     setTableNumber(1);
+    setSeatingGuestCount(1);
     setEditingSeatingId(null);
   };
 
@@ -529,6 +626,7 @@ export default function AdminDashboardV2() {
     const payload = {
       name: cleanedName,
       table_number: Math.max(1, tableNumber),
+      ...(isSeatingGuestCountAvailable ? { guest_count: Math.max(1, seatingGuestCount || 1) } : {}),
     };
 
     if (editingSeatingId !== null) {
@@ -569,6 +667,14 @@ export default function AdminDashboardV2() {
         children_count: Math.min(Math.max(1, guest.children_count || 1), Math.max(1, guest.max_guests)),
         notes: guest.notes || "",
       },
+    }));
+  };
+
+  const startInlineTableEdit = (guest: GuestResponse) => {
+    startInlineGuestEdit(guest);
+    setQuickTableDrafts((prev) => ({
+      ...prev,
+      [guest.id]: prev[guest.id] ?? seatingLookup.get(normalizeNameKey(guest.guest_name)) ?? "",
     }));
   };
 
@@ -632,6 +738,7 @@ export default function AdminDashboardV2() {
       [assignment.id]: {
         name: assignment.name,
         table_number: assignment.table_number,
+        guest_count: Math.max(1, assignment.guest_count || 1),
       },
     }));
   };
@@ -653,6 +760,7 @@ export default function AdminDashboardV2() {
       .update({
         name: draft.name.trim(),
         table_number: Math.max(1, draft.table_number || 1),
+        ...(isSeatingGuestCountAvailable ? { guest_count: Math.max(1, draft.guest_count || 1) } : {}),
       })
       .eq("id", assignmentId);
 
@@ -722,6 +830,7 @@ export default function AdminDashboardV2() {
     setEditingSeatingId(assignment.id);
     setSeatingName(assignment.name);
     setTableNumber(assignment.table_number);
+    setSeatingGuestCount(Math.max(1, assignment.guest_count || 1));
     setActiveView("seating");
     setSeatingTab("composer");
     scrollToSection(seatingFormRef);
@@ -773,6 +882,17 @@ export default function AdminDashboardV2() {
     return map;
   }, [seatingAssignments]);
 
+  const seatingAssignmentLookup = useMemo(() => {
+    const map = new Map<string, SeatingAssignment>();
+    seatingAssignments.forEach((assignment) => {
+      const key = normalizeNameKey(assignment.name);
+      if (key && !map.has(key)) {
+        map.set(key, assignment);
+      }
+    });
+    return map;
+  }, [seatingAssignments]);
+
   const acceptedWithoutSeating = useMemo(() => {
     return responses.filter(
       (guest) => guest.attending === true && !seatingLookup.has(normalizeNameKey(guest.guest_name)),
@@ -796,7 +916,6 @@ export default function AdminDashboardV2() {
     const responseRate = responses.length ? Math.round((respondedHouseholds / responses.length) * 100) : 0;
     const seatFillRate = totalInvitedGuests ? Math.round((acceptedGuests / totalInvitedGuests) * 100) : 0;
     const uniqueTables = new Set(seatingAssignments.map((assignment) => assignment.table_number)).size;
-
     return {
       totalInvitations: responses.length,
       totalInvitedGuests,
@@ -884,12 +1003,56 @@ export default function AdminDashboardV2() {
         )
       : seatingAssignments;
 
-    return [...byQuery].sort((left, right) =>
+    const byTable =
+      seatingTableFilter === "all"
+        ? byQuery
+        : byQuery.filter((assignment) => assignment.table_number === seatingTableFilter);
+
+    return [...byTable].sort((left, right) =>
       seatingSort === "name"
         ? left.name.localeCompare(right.name)
         : left.table_number - right.table_number || left.name.localeCompare(right.name),
     );
-  }, [deferredSeatingSearch, seatingAssignments, seatingSort]);
+  }, [deferredSeatingSearch, seatingAssignments, seatingSort, seatingTableFilter]);
+
+  const filteredSeatingGuestCount = useMemo(
+    () => filteredSeatingAssignments.reduce((sum, assignment) => sum + Math.max(1, assignment.guest_count || 1), 0),
+    [filteredSeatingAssignments],
+  );
+
+  const filteredTableSeatTotals = useMemo(() => {
+    const totals = new Map<number, number>();
+
+    filteredSeatingAssignments.forEach((assignment) => {
+      const currentTotal = totals.get(assignment.table_number) || 0;
+      totals.set(assignment.table_number, currentTotal + Math.max(1, assignment.guest_count || 1));
+    });
+
+    return totals;
+  }, [filteredSeatingAssignments]);
+
+  const availableTableNumbers = useMemo(
+    () => Array.from(new Set(seatingAssignments.map((assignment) => assignment.table_number))).sort((left, right) => left - right),
+    [seatingAssignments],
+  );
+
+  useEffect(() => {
+    if (availableTableNumbers.length === 0) {
+      setTableMoveFrom("");
+      setTableMoveTo("");
+      return;
+    }
+
+    setTableMoveFrom((prev) => {
+      if (typeof prev === "number" && availableTableNumbers.includes(prev)) return prev;
+      return availableTableNumbers[0];
+    });
+
+    setTableMoveTo((prev) => {
+      if (typeof prev === "number" && availableTableNumbers.includes(prev)) return prev;
+      return availableTableNumbers.length > 1 ? availableTableNumbers[1] : availableTableNumbers[0];
+    });
+  }, [availableTableNumbers]);
 
   const recentActivity = useMemo(() => buildRecentActivity(responses), [responses]);
 
@@ -902,6 +1065,55 @@ export default function AdminDashboardV2() {
     () => responses.filter((guest) => selectedGuestIds.includes(guest.id)),
     [responses, selectedGuestIds],
   );
+
+  const selectedGuestSeatCount = useMemo(
+    () => selectedGuests.reduce((sum, guest) => sum + getSeatingGuestCount(guest), 0),
+    [selectedGuests],
+  );
+
+  const assignGuestToTable = async (guest: GuestResponse, nextTableNumber: number) => {
+    const assignmentPayload = {
+      table_number: Math.max(1, nextTableNumber),
+      ...(isSeatingGuestCountAvailable ? { guest_count: getSeatingGuestCount(guest) } : {}),
+    };
+    const existingAssignment = seatingAssignmentLookup.get(normalizeNameKey(guest.guest_name));
+
+    if (existingAssignment) {
+      const { error: updateError } = await supabase.from("seating").update(assignmentPayload).eq("id", existingAssignment.id);
+      if (updateError) {
+        showToast(updateError.message, "error");
+        return;
+      }
+    } else {
+      const { error: insertError } = await supabase
+        .from("seating")
+        .insert([{ name: guest.guest_name.trim(), ...assignmentPayload }]);
+      if (insertError) {
+        showToast(insertError.message, "error");
+        return;
+      }
+    }
+
+    setQuickTableDrafts((prev) => ({ ...prev, [guest.id]: nextTableNumber }));
+    showToast(`${guest.guest_name} assigned to table ${nextTableNumber}.`, "success");
+  };
+
+  const removeGuestSeating = async (guest: GuestResponse) => {
+    const existingAssignment = seatingAssignmentLookup.get(normalizeNameKey(guest.guest_name));
+    if (!existingAssignment) {
+      showToast(`${guest.guest_name} does not have a seating assignment yet.`, "info");
+      return;
+    }
+
+    const { error: deleteError } = await supabase.from("seating").delete().eq("id", existingAssignment.id);
+    if (deleteError) {
+      showToast(deleteError.message, "error");
+      return;
+    }
+
+    setQuickTableDrafts((prev) => ({ ...prev, [guest.id]: "" }));
+    showToast(`Removed seating for ${guest.guest_name}.`, "success");
+  };
 
   const toggleGuestSelection = (guestId: string) => {
     setSelectedGuestIds((prev) => (prev.includes(guestId) ? prev.filter((id) => id !== guestId) : [...prev, guestId]));
@@ -952,7 +1164,10 @@ export default function AdminDashboardV2() {
       if (existingAssignment) {
         const { error: updateError } = await supabase
           .from("seating")
-          .update({ table_number: nextTableNumber })
+          .update({
+            table_number: nextTableNumber,
+            ...(isSeatingGuestCountAvailable ? { guest_count: getSeatingGuestCount(guest) } : {}),
+          })
           .eq("id", existingAssignment.id);
 
         if (updateError) {
@@ -962,7 +1177,13 @@ export default function AdminDashboardV2() {
       } else {
         const { error: insertError } = await supabase
           .from("seating")
-          .insert([{ name: guest.guest_name.trim(), table_number: nextTableNumber }]);
+          .insert([
+            {
+              name: guest.guest_name.trim(),
+              table_number: nextTableNumber,
+              ...(isSeatingGuestCountAvailable ? { guest_count: getSeatingGuestCount(guest) } : {}),
+            },
+          ]);
 
         if (insertError) {
           showToast(insertError.message, "error");
@@ -972,7 +1193,7 @@ export default function AdminDashboardV2() {
     }
 
     showToast(
-      `${selectedGuests.length} guest${selectedGuests.length === 1 ? "" : "s"} assigned to table ${nextTableNumber}.`,
+      `${selectedGuests.length} guest${selectedGuests.length === 1 ? "" : "s"} (${selectedGuestSeatCount} seat${selectedGuestSeatCount === 1 ? "" : "s"}) assigned to table ${nextTableNumber}.`,
       "success",
     );
     setSelectedGuestIds([]);
@@ -1024,6 +1245,7 @@ export default function AdminDashboardV2() {
       "updated_at",
       "created_at",
       "table_number",
+      "table_guest_count",
       "notes",
       "rsvp_url",
     ];
@@ -1037,7 +1259,10 @@ export default function AdminDashboardV2() {
     };
 
     const rows = filteredResponses.map((guest) => {
-      const tableNumber = seatingLookup.get(normalizeNameKey(guest.guest_name)) ?? "";
+      const matchingAssignment = seatingAssignments.find(
+        (assignment) => normalizeNameKey(assignment.name) === normalizeNameKey(guest.guest_name),
+      );
+      const tableNumber = matchingAssignment?.table_number ?? "";
       return [
         guest.guest_name,
         guest.invite_code,
@@ -1051,6 +1276,7 @@ export default function AdminDashboardV2() {
         guest.updated_at ?? "",
         guest.created_at ?? "",
         tableNumber,
+        matchingAssignment?.guest_count ?? "",
         isGuestNotesAvailable ? guest.notes ?? "" : "",
         getGuestInviteUrl(guest),
       ]
@@ -1081,6 +1307,50 @@ export default function AdminDashboardV2() {
     setInvitationTab("manage");
     setGuestStatusFilter("all");
     setGuestExtraFilter("not_sent");
+  };
+
+  const moveEntireTable = async () => {
+    if (tableMoveFrom === "" || tableMoveTo === "") return;
+
+    const sourceTable = Number(tableMoveFrom);
+    const targetTable = Number(tableMoveTo);
+
+    if (sourceTable === targetTable) {
+      showToast("Choose a different destination table.", "info");
+      return;
+    }
+
+    const assignmentsToMove = seatingAssignments.filter((assignment) => assignment.table_number === sourceTable);
+    if (assignmentsToMove.length === 0) {
+      showToast(`Table ${sourceTable} has no assignments to move.`, "info");
+      return;
+    }
+
+    const seatTotal = assignmentsToMove.reduce((sum, assignment) => sum + Math.max(1, assignment.guest_count || 1), 0);
+
+    askConfirm({
+      title: `Move Table ${sourceTable} To Table ${targetTable}?`,
+      message: `This will move ${assignmentsToMove.length} seating assignment${assignmentsToMove.length === 1 ? "" : "s"} covering ${seatTotal} seat${seatTotal === 1 ? "" : "s"} to table ${targetTable}.`,
+      actionLabel: "Move Table",
+      onConfirm: async () => {
+        const { error: updateError } = await supabase
+          .from("seating")
+          .update({ table_number: targetTable })
+          .eq("table_number", sourceTable);
+
+        if (updateError) {
+          showToast(updateError.message, "error");
+          return;
+        }
+
+        setSeatingTableFilter(targetTable);
+        setSeatingTab("board");
+        showToast(
+          `Moved ${assignmentsToMove.length} seating assignment${assignmentsToMove.length === 1 ? "" : "s"} from table ${sourceTable} to table ${targetTable}.`,
+          "success",
+        );
+      },
+    });
   };
 
   if (isCheckingSession) {
@@ -1371,7 +1641,7 @@ export default function AdminDashboardV2() {
                 />
 
                 {invitationTab === "manage" && (
-                  <div className="space-y-5">
+                  <div className="space-y-5 pb-32 md:pb-0">
                   <StudioPanel>
                     <SectionHeading
                       kicker="Directory"
@@ -1453,6 +1723,7 @@ export default function AdminDashboardV2() {
                             <span className="text-sm text-stone-500">
                               {selectedGuestIds.length} selected
                               {selectedVisibleGuestCount > 0 ? ` · ${selectedVisibleGuestCount} visible` : ""}
+                              {selectedGuestIds.length > 0 ? ` · ${selectedGuestSeatCount} seat${selectedGuestSeatCount === 1 ? "" : "s"}` : ""}
                             </span>
                           </div>
 
@@ -1527,11 +1798,19 @@ export default function AdminDashboardV2() {
                         const acceptedCount = guest.attending === true ? guest.confirmed_guests || 0 : 0;
                         const guestInviteUrl = getGuestInviteUrl(guest);
                         const seatingTable = seatingLookup.get(normalizeNameKey(guest.guest_name));
+                        const quickTableValue = quickTableDrafts[guest.id] ?? (seatingTable || "");
                         const guestMenuItems: RowMenuItem[] = [
                           { label: "Open RSVP Page", href: guestInviteUrl },
                           { label: "Copy RSVP Link", onSelect: () => void copyInviteLink(guest) },
                           { label: "Copy Invitation", onSelect: () => void copyInvitation(guest) },
                           { label: "Open Composer", onSelect: () => beginGuestFormEdit(guest) },
+                          {
+                            label: seatingTable ? "Quick Edit Table Assignment" : "Assign Table in Quick Edit",
+                            onSelect: () => startInlineTableEdit(guest),
+                          },
+                          ...(seatingTable
+                            ? [{ label: "Remove Seating", onSelect: () => void removeGuestSeating(guest), tone: "danger" as const }]
+                            : []),
                           { label: "Remove", onSelect: () => confirmRemoveGuest(guest), tone: "danger" },
                         ];
 
@@ -1543,8 +1822,8 @@ export default function AdminDashboardV2() {
                             badges={
                               <>
                                 <InvitationSentBadge sent={Boolean(guest.invitation_sent)} />
-                                {Boolean(guest.has_children) && <ChildrenCountBadge count={guest.children_count || 0} />}
                                 <StatusBadge attending={guest.attending} />
+                                {Boolean(guest.has_children) && <ChildrenCountBadge count={guest.children_count || 0} />}
                               </>
                             }
                             actions={
@@ -1565,22 +1844,30 @@ export default function AdminDashboardV2() {
                             selected={selectedGuestIds.includes(guest.id)}
                             onToggleSelected={() => toggleGuestSelection(guest.id)}
                           >
-                            <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
-                              <div className="rounded-[24px] border border-stone-100 bg-white p-4">
+                            <div className="grid gap-3 xl:grid-cols-[220px_minmax(0,1fr)]">
+                              <div className="rounded-[20px] border border-stone-100 bg-stone-50 p-3.5">
                                 <p className="wedding-kicker mb-2">Guest Count</p>
-                                <p className="font-serif text-3xl text-stone-900">
+                                <p className="font-serif text-2xl text-stone-900 md:text-3xl">
                                   <span className="text-stone-300">{guest.max_guests}</span>
                                   <span className="mx-2 text-stone-200">/</span>
                                   {acceptedCount}
                                 </p>
                                 <p className="mt-2 text-sm text-stone-500">Invited / accepted seats</p>
-                                <p className="mt-4 text-sm text-stone-500">
-                                  {seatingTable
-                                    ? `Table ${seatingTable}`
-                                    : guest.attending === true
-                                      ? "No seating assigned yet"
-                                      : "Seating not needed yet"}
-                                </p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {seatingTable ? (
+                                    <span className="inline-flex rounded-full bg-stone-900 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white">
+                                      Table {seatingTable}
+                                    </span>
+                                  ) : guest.attending === true ? (
+                                    <span className="inline-flex rounded-full bg-amber-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-700">
+                                      Needs Seating
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex rounded-full bg-stone-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-stone-500">
+                                      Seating Later
+                                    </span>
+                                  )}
+                                </div>
                               </div>
 
                               {isEditing ? (
@@ -1740,6 +2027,49 @@ export default function AdminDashboardV2() {
                                     </label>
                                   </div>
 
+                                  {(draft.attending === true || seatingTable) && (
+                                    <div className="rounded-[20px] border border-stone-100 bg-stone-50 p-3">
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="wedding-kicker">Table Assignment</p>
+                                        <p className="text-xs font-medium uppercase tracking-[0.14em] text-stone-500">
+                                          {seatingTable ? `Currently Table ${seatingTable}` : "No table yet"}
+                                        </p>
+                                      </div>
+                                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                        <input
+                                          type="number"
+                                          min={1}
+                                          value={quickTableValue}
+                                          onChange={(event) =>
+                                            setQuickTableDrafts((prev) => ({
+                                              ...prev,
+                                              [guest.id]:
+                                                event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1),
+                                            }))
+                                          }
+                                          className="wedding-inline-edit-input"
+                                          placeholder="Table #"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => void assignGuestToTable(guest, Math.max(1, Number(quickTableValue) || 1))}
+                                          className="wedding-button-secondary w-full sm:w-auto"
+                                        >
+                                          {seatingTable ? "Move Seating" : "Assign Seating"}
+                                        </button>
+                                        {seatingTable && (
+                                          <button
+                                            type="button"
+                                            onClick={() => void removeGuestSeating(guest)}
+                                            className="wedding-button-secondary w-full sm:w-auto"
+                                          >
+                                            Remove
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+
                                   {isGuestNotesAvailable && (
                                     <textarea
                                       value={draft.notes}
@@ -1770,7 +2100,7 @@ export default function AdminDashboardV2() {
                                 <div className="grid gap-3 sm:grid-cols-2">
                                   <InfoPanel label="Last Action" value={getGuestActionIndicators(guest)[0] ?? "No activity yet"} />
                                   <InfoPanel label="Direct RSVP Link" value={guestInviteUrl.replace(/^https?:\/\//, "")} mono />
-                                  <div className="sm:col-span-2">
+                                  <div className="hidden sm:col-span-2 md:block">
                                     <InfoPanel
                                       label="Activity Summary"
                                       value={getGuestActionIndicators(guest).join(" • ")}
@@ -1939,6 +2269,7 @@ export default function AdminDashboardV2() {
                 <WorkspaceTabs
                   tabs={[
                     { key: "board", label: "Seating Board" },
+                    { key: "totals", label: "Table Totals" },
                     { key: "composer", label: editingSeatingId !== null ? "Edit Assignment" : "Add Assignment" },
                   ]}
                   activeTab={seatingTab}
@@ -1967,11 +2298,31 @@ export default function AdminDashboardV2() {
                       </select>
                     </div>
 
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Pill
+                        label="All Tables"
+                        active={seatingTableFilter === "all"}
+                        onClick={() => setSeatingTableFilter("all")}
+                      />
+                      {availableTableNumbers.map((table) => (
+                        <Pill
+                          key={table}
+                          label={`Table ${table}`}
+                          active={seatingTableFilter === table}
+                          onClick={() => setSeatingTableFilter(table)}
+                        />
+                      ))}
+                    </div>
+
                     <div className="mt-5 grid gap-3 sm:grid-cols-3">
                       <MiniMetric label="Assignments" value={filteredSeatingAssignments.length} />
-                      <MiniMetric label="Tables" value={stats.uniqueTables} />
+                      <MiniMetric
+                        label={isSeatingGuestCountAvailable ? "Seated Guests" : "Tables"}
+                        value={isSeatingGuestCountAvailable ? filteredSeatingGuestCount : stats.uniqueTables}
+                      />
                       <MiniMetric label="Needs Seating" value={stats.acceptedWithoutSeating} />
                     </div>
+
                   </StudioPanel>
 
                   <div className="space-y-4">
@@ -1993,9 +2344,16 @@ export default function AdminDashboardV2() {
                             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                               <div>
                                 <h3 className="font-serif text-2xl tracking-tight text-stone-900">{assignment.name}</h3>
-                                <p className="mt-2 inline-flex rounded-full bg-stone-100 px-4 py-2 text-sm font-semibold text-stone-700">
-                                  Table {assignment.table_number}
-                                </p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <p className="inline-flex rounded-full bg-stone-100 px-4 py-2 text-sm font-semibold text-stone-700">
+                                    Table {assignment.table_number}
+                                  </p>
+                                  {isSeatingGuestCountAvailable && (
+                                    <p className="inline-flex rounded-full bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700">
+                                      {Math.max(1, assignment.guest_count || 1)} seat{Math.max(1, assignment.guest_count || 1) === 1 ? "" : "s"}
+                                    </p>
+                                  )}
+                                </div>
                               </div>
 
                               <div className="flex items-center gap-2">
@@ -2010,7 +2368,7 @@ export default function AdminDashboardV2() {
 
                             {isEditing ? (
                               <div className="mt-5 space-y-3">
-                                <div className="grid gap-3 md:grid-cols-[1fr_150px]">
+                                <div className={`grid gap-3 ${isSeatingGuestCountAvailable ? "md:grid-cols-[minmax(0,1fr)_140px_140px]" : "md:grid-cols-[1fr_150px]"}`}>
                                   <input
                                     value={draft.name}
                                     onChange={(event) =>
@@ -2038,6 +2396,24 @@ export default function AdminDashboardV2() {
                                     className="wedding-inline-edit-input"
                                     placeholder="Table"
                                   />
+                                  {isSeatingGuestCountAvailable && (
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={draft.guest_count}
+                                      onChange={(event) =>
+                                        setInlineSeatingEdits((prev) => ({
+                                          ...prev,
+                                          [assignment.id]: {
+                                            ...prev[assignment.id],
+                                            guest_count: Math.max(1, parseInt(event.target.value, 10) || 1),
+                                          },
+                                        }))
+                                      }
+                                      className="wedding-inline-edit-input"
+                                      placeholder="Seats"
+                                    />
+                                  )}
                                 </div>
 
                                 <div className="flex flex-col gap-3 sm:flex-row">
@@ -2049,17 +2425,159 @@ export default function AdminDashboardV2() {
                                   </button>
                                 </div>
                               </div>
-                            ) : (
-                              <p className="mt-4 text-sm leading-relaxed text-stone-500">
-                                This seating card is intentionally roomy on mobile too, so quick changes do not feel trapped inside a tiny table row.
-                              </p>
-                            )}
+                            ) : null}
                           </StudioPanel>
                         );
                       })
                     )}
                   </div>
                   </div>
+                )}
+
+                {seatingTab === "totals" && (
+                  <StudioPanel>
+                    <SectionHeading
+                      kicker="Table Totals"
+                      title="Seat Count By Table"
+                      description="A clean rollup of how many seats are currently assigned to each visible table."
+                    />
+
+                    <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
+                      <input
+                        value={seatingSearch}
+                        onChange={(event) => setSeatingSearch(event.target.value)}
+                        className="wedding-input"
+                        placeholder="Search by guest or table number"
+                      />
+                      <select value={seatingSort} onChange={(event) => setSeatingSort(event.target.value as SeatingSort)} className="wedding-select">
+                        <option value="table">Sort: Table Number</option>
+                        <option value="name">Sort: Guest Name</option>
+                      </select>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Pill
+                        label="All Tables"
+                        active={seatingTableFilter === "all"}
+                        onClick={() => setSeatingTableFilter("all")}
+                      />
+                      {availableTableNumbers.map((table) => (
+                        <Pill
+                          key={table}
+                          label={`Table ${table}`}
+                          active={seatingTableFilter === table}
+                          onClick={() => setSeatingTableFilter(table)}
+                        />
+                      ))}
+                    </div>
+
+                    {availableTableNumbers.length > 0 && (
+                      <div className="mt-5 rounded-[28px] border border-stone-100 bg-white p-4">
+                        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                          <div>
+                            <p className="wedding-kicker mb-2">Move Entire Table</p>
+                            <p className="text-sm text-stone-500">
+                              Move every seating assignment from one table number to another in one step.
+                            </p>
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-[minmax(0,180px)_minmax(0,180px)_auto]">
+                            <FormField label="From Table">
+                              <select
+                                value={tableMoveFrom}
+                                onChange={(event) => setTableMoveFrom(parseInt(event.target.value, 10) || "")}
+                                className="wedding-select"
+                              >
+                                {availableTableNumbers.map((table) => (
+                                  <option key={table} value={table}>
+                                    Table {table}
+                                  </option>
+                                ))}
+                              </select>
+                            </FormField>
+                            <FormField label="To Table">
+                              <select
+                                value={tableMoveTo}
+                                onChange={(event) => setTableMoveTo(parseInt(event.target.value, 10) || "")}
+                                className="wedding-select"
+                              >
+                                {availableTableNumbers.map((table) => (
+                                  <option key={table} value={table}>
+                                    Table {table}
+                                  </option>
+                                ))}
+                              </select>
+                            </FormField>
+                            <button
+                              type="button"
+                              onClick={() => void moveEntireTable()}
+                              disabled={tableMoveFrom === "" || tableMoveTo === "" || tableMoveFrom === tableMoveTo}
+                              className="wedding-button-primary w-full self-end disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                            >
+                              Move Table
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {isSeatingGuestCountAvailable && filteredTableSeatTotals.size > 0 ? (
+                      <div className="mt-5 rounded-[28px] border border-stone-100 bg-[linear-gradient(180deg,_rgba(248,250,252,0.96),_rgba(241,245,249,0.86))] p-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="wedding-kicker">Visible Table Totals</p>
+                            <p className="mt-1 text-sm text-stone-500">Tap a table card to jump back into the seating board filtered to that table.</p>
+                          </div>
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-stone-600 ring-1 ring-stone-200">
+                            {filteredTableSeatTotals.size} table{filteredTableSeatTotals.size === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                          {Array.from(filteredTableSeatTotals.entries())
+                            .sort((left, right) => left[0] - right[0])
+                            .map(([table, seats]) => (
+                              <button
+                                key={table}
+                                type="button"
+                                onClick={() => {
+                                  setSeatingTableFilter(table);
+                                  setSeatingTab("board");
+                                }}
+                                className={`rounded-[22px] border px-4 py-4 text-left transition ${
+                                  seatingTableFilter === table
+                                    ? "border-stone-900 bg-stone-900 text-white"
+                                    : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
+                                }`}
+                              >
+                                <p
+                                  className={`text-[10px] font-bold uppercase tracking-[0.18em] ${
+                                    seatingTableFilter === table ? "text-white/75" : "text-stone-400"
+                                  }`}
+                                >
+                                  Table {table}
+                                </p>
+                                <p className="mt-2 font-serif text-3xl leading-none">
+                                  {seats}
+                                </p>
+                                <p className={`mt-2 text-sm ${seatingTableFilter === table ? "text-white/85" : "text-stone-500"}`}>
+                                  assigned seat{seats === 1 ? "" : "s"}
+                                </p>
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-5">
+                        <EmptyState
+                          title={isSeatingGuestCountAvailable ? "No visible table totals yet" : "Add guest_count to seating first"}
+                          description={
+                            isSeatingGuestCountAvailable
+                              ? "Once seating assignments are visible here, each table total will show up automatically."
+                              : "Add a guest_count column to public.seating if you want table seat totals to be tracked."
+                          }
+                        />
+                      </div>
+                    )}
+                  </StudioPanel>
                 )}
 
                 {seatingTab === "composer" && (
@@ -2090,6 +2608,18 @@ export default function AdminDashboardV2() {
                           className="wedding-inline-edit-input"
                         />
                       </FormField>
+
+                      {isSeatingGuestCountAvailable && (
+                        <FormField label="Guest Count">
+                          <input
+                            type="number"
+                            min={1}
+                            value={seatingGuestCount}
+                            onChange={(event) => setSeatingGuestCount(Math.max(1, parseInt(event.target.value, 10) || 1))}
+                            className="wedding-inline-edit-input"
+                          />
+                        </FormField>
+                      )}
 
                       <div className="flex flex-col gap-3 pt-2">
                         <button className="wedding-button-primary w-full">
@@ -2196,6 +2726,57 @@ export default function AdminDashboardV2() {
           </main>
         </div>
       </div>
+
+      {activeView === "invitations" && invitationTab === "manage" && selectedGuestIds.length > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-[85] border-t border-white/70 bg-white/92 px-4 py-3 shadow-[0_-12px_30px_rgba(28,25,23,0.08)] backdrop-blur md:hidden">
+          <div className="mx-auto max-w-[1600px] space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="wedding-kicker">Selected Guests</p>
+                <p className="text-sm text-stone-600">
+                  {selectedGuestIds.length} selected · {selectedGuestSeatCount} seat{selectedGuestSeatCount === 1 ? "" : "s"}
+                </p>
+              </div>
+              <button type="button" onClick={() => setSelectedGuestIds([])} className="wedding-button-secondary">
+                Clear
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                value={bulkTableNumber}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  if (nextValue === "") {
+                    setBulkTableNumber("");
+                    return;
+                  }
+                  setBulkTableNumber(Math.max(1, parseInt(nextValue, 10) || 1));
+                }}
+                onBlur={() => {
+                  if (bulkTableNumber === "") setBulkTableNumber(1);
+                }}
+                className="wedding-inline-edit-input"
+                placeholder="Table #"
+              />
+              <button type="button" onClick={() => void bulkAssignSelectedToTable()} className="wedding-button-primary">
+                Assign
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => void bulkRemoveSelectedSeating()} className="wedding-button-secondary">
+                Remove Seating
+              </button>
+              <button type="button" onClick={() => void bulkMarkSelectedAsSent()} className="wedding-button-secondary">
+                Mark Sent
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Toasts toasts={toasts} />
 
@@ -2491,11 +3072,11 @@ function InvitationCard({
   children: ReactNode;
 }) {
   return (
-    <section className="min-w-0 overflow-hidden rounded-[34px] border border-white/75 bg-white/88 shadow-[0_12px_30px_rgba(28,25,23,0.05)]">
-      <div className="border-b border-stone-100 px-5 py-5 md:px-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+    <section className="min-w-0 overflow-hidden rounded-[26px] border border-white/75 bg-white/88 shadow-[0_10px_24px_rgba(28,25,23,0.05)] md:rounded-[34px]">
+      <div className="border-b border-stone-100 px-4 py-4 md:px-6 md:py-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
-            <label className="mb-3 inline-flex items-center gap-3 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-600">
+            <label className="mb-2 inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs text-stone-600 md:mb-3 md:gap-3 md:px-4 md:py-2 md:text-sm">
               <input
                 type="checkbox"
                 checked={selected}
@@ -2504,17 +3085,17 @@ function InvitationCard({
               />
               Select for bulk actions
             </label>
-            <div className="flex flex-wrap items-center gap-3">
-              <h3 className="font-serif text-2xl tracking-tight text-stone-900 md:text-3xl">{title}</h3>
+            <div className="flex flex-wrap items-center gap-2 md:gap-3">
+              <h3 className="font-serif text-[1.55rem] tracking-tight text-stone-900 md:text-3xl">{title}</h3>
               <span className="wedding-code">{subtitle}</span>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">{badges}</div>
+            <div className="mt-2 flex flex-wrap gap-2 md:mt-3">{badges}</div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">{actions}</div>
         </div>
       </div>
-      <div className="px-5 py-5 md:px-6">{children}</div>
+      <div className="px-4 py-4 md:px-6 md:py-5">{children}</div>
     </section>
   );
 }
