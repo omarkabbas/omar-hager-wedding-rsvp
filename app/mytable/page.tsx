@@ -193,7 +193,7 @@ export default function MyTablePage() {
                   value={searchQuery}
                   onChange={(e) => void handleSearchQueryChange(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Enter your full name"
+                  placeholder="Start typing your name"
                   className="wedding-input"
                   enterKeyHint="search"
                 />
