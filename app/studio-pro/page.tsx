@@ -3,7 +3,6 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, WheelEvent } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
 import { SITE_URL } from "@/lib/wedding";
@@ -39,6 +38,7 @@ type Toast = {
 };
 
 type AdminView = "overview" | "invitations" | "seating" | "settings";
+type OverviewWorkspaceTab = "summary" | "follow_up" | "needs_seating" | "activity";
 type InvitationWorkspaceTab = "manage" | "bulk" | "composer";
 type SeatingWorkspaceTab = "board" | "tables" | "composer";
 type GuestStatusFilter = "pending" | "attending" | "declined";
@@ -283,6 +283,7 @@ export default function StudioProPage() {
   const [error, setError] = useState("");
 
   const [activeView, setActiveView] = useState<AdminView>("overview");
+  const [overviewTab, setOverviewTab] = useState<OverviewWorkspaceTab>("summary");
   const [invitationTab, setInvitationTab] = useState<InvitationWorkspaceTab>("manage");
   const [seatingTab, setSeatingTab] = useState<SeatingWorkspaceTab>("board");
 
@@ -339,6 +340,7 @@ export default function StudioProPage() {
   const [guestSummaryOpen, setGuestSummaryOpen] = useState(false);
   const [seatingControlsOpen, setSeatingControlsOpen] = useState(true);
   const [tableToolsOpen, setTableToolsOpen] = useState(false);
+  const [followUpSentBefore, setFollowUpSentBefore] = useState("");
 
   const invitationFormRef = useRef<HTMLElement | null>(null);
   const seatingFormRef = useRef<HTMLElement | null>(null);
@@ -409,6 +411,7 @@ export default function StudioProPage() {
       try {
         const parsed = JSON.parse(savedState) as {
           activeView?: AdminView;
+          overviewTab?: OverviewWorkspaceTab;
           invitationTab?: InvitationWorkspaceTab;
           seatingTab?: SeatingWorkspaceTab;
           guestSearch?: string;
@@ -417,14 +420,16 @@ export default function StudioProPage() {
           guestSort?: GuestSort;
         seatingSearch?: string;
         seatingSort?: SeatingSort;
-        seatingTableFilter?: number | "all";
-        guestFiltersOpen?: boolean;
-        guestSummaryOpen?: boolean;
-        seatingControlsOpen?: boolean;
-        tableToolsOpen?: boolean;
+          seatingTableFilter?: number | "all";
+          guestFiltersOpen?: boolean;
+          guestSummaryOpen?: boolean;
+          seatingControlsOpen?: boolean;
+          tableToolsOpen?: boolean;
+          followUpSentBefore?: string;
       };
 
         if (parsed.activeView) setActiveView(parsed.activeView);
+        if (parsed.overviewTab) setOverviewTab(parsed.overviewTab);
         if (parsed.invitationTab) setInvitationTab(parsed.invitationTab);
         if (parsed.seatingTab) setSeatingTab(parsed.seatingTab);
         if (parsed.guestSearch !== undefined) setGuestSearch(parsed.guestSearch);
@@ -438,6 +443,7 @@ export default function StudioProPage() {
         if (parsed.guestSummaryOpen !== undefined) setGuestSummaryOpen(parsed.guestSummaryOpen);
         if (parsed.seatingControlsOpen !== undefined) setSeatingControlsOpen(parsed.seatingControlsOpen);
         if (parsed.tableToolsOpen !== undefined) setTableToolsOpen(parsed.tableToolsOpen);
+        if (typeof parsed.followUpSentBefore === "string") setFollowUpSentBefore(parsed.followUpSentBefore);
       } catch {
         window.sessionStorage.removeItem("studio_pro_workspace_state_v1");
       }
@@ -453,6 +459,7 @@ export default function StudioProPage() {
       "studio_pro_workspace_state_v1",
       JSON.stringify({
         activeView,
+        overviewTab,
         invitationTab,
         seatingTab,
         guestSearch,
@@ -466,6 +473,7 @@ export default function StudioProPage() {
         guestSummaryOpen,
         seatingControlsOpen,
         tableToolsOpen,
+        followUpSentBefore,
       }),
     );
   }, [
@@ -476,6 +484,7 @@ export default function StudioProPage() {
     guestSort,
     guestStatusFilters,
     hasRestoredWorkspaceState,
+    overviewTab,
     invitationTab,
     seatingSearch,
     seatingSort,
@@ -485,6 +494,7 @@ export default function StudioProPage() {
     guestSummaryOpen,
     seatingControlsOpen,
     tableToolsOpen,
+    followUpSentBefore,
   ]);
 
   const fetchResponses = useCallback(async () => {
@@ -958,6 +968,16 @@ export default function StudioProPage() {
     scrollToSection(seatingFormRef);
   };
 
+  const beginSeatingPlacementForGuest = (guest: GuestResponse) => {
+    const existingAssignment = seatingAssignmentLookup.get(normalizeNameKey(guest.guest_name));
+    if (existingAssignment) {
+      beginSeatingFormEdit(existingAssignment);
+      return;
+    }
+
+    beginSeatingCreateForGuest(guest);
+  };
+
   const confirmRemoveSeatingAssignment = (assignment: SeatingAssignment) => {
     askConfirm({
       title: "Remove Seating Assignment?",
@@ -1015,11 +1035,46 @@ export default function StudioProPage() {
     return map;
   }, [seatingAssignments]);
 
-  const acceptedWithoutSeating = useMemo(() => {
-    return responses.filter(
-      (guest) => guest.attending === true && !seatingLookup.has(normalizeNameKey(guest.guest_name)),
-    );
-  }, [responses, seatingLookup]);
+  const acceptedGuestsNeedingSeating = useMemo(() => {
+    return responses
+      .filter((guest) => guest.attending === true)
+      .map((guest) => {
+        const assignment = seatingAssignmentLookup.get(normalizeNameKey(guest.guest_name));
+        const accepted = Math.max(1, guest.confirmed_guests || 1);
+        const assigned = assignment
+          ? isSeatingGuestCountAvailable
+            ? Math.max(1, assignment.guest_count || 1)
+            : accepted
+          : 0;
+        const remaining = Math.max(0, accepted - assigned);
+
+        if (remaining === 0) return null;
+
+        return {
+          guest,
+          assignment,
+          accepted,
+          assigned,
+          remaining,
+        };
+      })
+      .filter(
+        (
+          item,
+        ): item is {
+          guest: GuestResponse;
+          assignment: SeatingAssignment | undefined;
+          accepted: number;
+          assigned: number;
+          remaining: number;
+        } => Boolean(item),
+      );
+  }, [isSeatingGuestCountAvailable, responses, seatingAssignmentLookup]);
+
+  const guestsNeedingSeatingKeys = useMemo(
+    () => new Set(acceptedGuestsNeedingSeating.map(({ guest }) => normalizeNameKey(guest.guest_name))),
+    [acceptedGuestsNeedingSeating],
+  );
 
   const toggleGuestStatusFilter = (filter: GuestStatusFilter) => {
     setGuestStatusFilters((prev) =>
@@ -1081,10 +1136,10 @@ export default function StudioProPage() {
       declinedInvitations,
       acceptedGuests,
       acceptedGuestsSeated,
-      acceptedWithoutSeating: acceptedWithoutSeating.length,
+      acceptedNeedingSeating: acceptedGuestsNeedingSeating.length,
       uniqueTables,
     };
-  }, [acceptedWithoutSeating.length, isSeatingGuestCountAvailable, responses, seatingAssignmentLookup, seatingAssignments]);
+  }, [acceptedGuestsNeedingSeating.length, isSeatingGuestCountAvailable, responses, seatingAssignmentLookup, seatingAssignments]);
 
   const filteredResponses = useMemo(() => {
     const query = deferredGuestSearch.trim().toLowerCase();
@@ -1113,7 +1168,7 @@ export default function StudioProPage() {
         if (filter === "not_sent") return guest.invitation_sent !== true;
         if (filter === "has_children") return guest.has_children === true;
         if (filter === "sent_awaiting_response") return guest.invitation_sent === true && guest.attending === null;
-        return guest.attending === true && !seatingLookup.has(normalizeNameKey(guest.guest_name));
+        return guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name));
       });
     });
 
@@ -1130,7 +1185,7 @@ export default function StudioProPage() {
     }
 
     return sorted;
-  }, [deferredGuestSearch, guestExtraFilters, guestSort, guestStatusFilters, responses, seatingLookup]);
+  }, [deferredGuestSearch, guestExtraFilters, guestSort, guestStatusFilters, guestsNeedingSeatingKeys, responses]);
 
   const filteredInvitationStats = useMemo(() => {
     const acceptedGuests = filteredResponses.reduce(
@@ -1139,9 +1194,7 @@ export default function StudioProPage() {
     );
     const invitedGuests = filteredResponses.reduce((sum, guest) => sum + (guest.max_guests || 0), 0);
     const awaiting = filteredResponses.filter((guest) => guest.attending === null).length;
-    const needsSeating = filteredResponses.filter(
-      (guest) => guest.attending === true && !seatingLookup.has(normalizeNameKey(guest.guest_name)),
-    ).length;
+    const needsSeating = filteredResponses.filter((guest) => guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name))).length;
 
     return {
       invitations: filteredResponses.length,
@@ -1150,7 +1203,7 @@ export default function StudioProPage() {
       awaiting,
       needsSeating,
     };
-  }, [filteredResponses, seatingLookup]);
+  }, [filteredResponses, guestsNeedingSeatingKeys]);
 
   const filteredSeatingAssignments = useMemo(() => {
     const query = deferredSeatingSearch.trim().toLowerCase();
@@ -1213,6 +1266,27 @@ export default function StudioProPage() {
   }, [availableTableNumbers]);
 
   const recentActivity = useMemo(() => buildRecentActivity(responses), [responses]);
+
+  const followUpGuests = useMemo(() => {
+    const sentBeforeTimestamp =
+      followUpSentBefore.trim().length > 0
+        ? new Date(`${followUpSentBefore}T23:59:59`).getTime()
+        : null;
+
+    return responses
+      .filter((guest) => guest.invitation_sent === true && guest.attending === null)
+      .filter((guest) => {
+        if (sentBeforeTimestamp === null) return true;
+        if (!guest.invitation_sent_at) return false;
+        const sentAt = new Date(guest.invitation_sent_at).getTime();
+        return !Number.isNaN(sentAt) && sentAt <= sentBeforeTimestamp;
+      })
+      .sort((left, right) => {
+        const leftSentAt = left.invitation_sent_at ? new Date(left.invitation_sent_at).getTime() : 0;
+        const rightSentAt = right.invitation_sent_at ? new Date(right.invitation_sent_at).getTime() : 0;
+        return leftSentAt - rightSentAt || left.guest_name.localeCompare(right.guest_name);
+      });
+  }, [followUpSentBefore, responses]);
 
   const selectedVisibleGuestCount = useMemo(
     () => filteredResponses.filter((guest) => selectedGuestIds.includes(guest.id)).length,
@@ -1665,25 +1739,13 @@ export default function StudioProPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={exportInvitationCsv}
-                  className="inline-flex items-center justify-center rounded-full border border-stone-200 bg-stone-50 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-stone-700 transition hover:bg-white"
-                >
-                  Export CSV
-                </button>
-                <Link
-                  href="/admin"
-                  className="inline-flex items-center justify-center rounded-full border border-stone-200 bg-stone-50 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-stone-700 transition hover:bg-white"
-                >
-                  Admin
-                </Link>
-                <Link
-                  href="/studio"
-                  className="inline-flex items-center justify-center rounded-full border border-stone-200 bg-stone-50 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-stone-700 transition hover:bg-white"
-                >
-                  Studio
-                </Link>
+              <button
+                type="button"
+                onClick={exportInvitationCsv}
+                className="inline-flex items-center justify-center rounded-full border border-stone-200 bg-stone-50 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-stone-700 transition hover:bg-white"
+              >
+                Export CSV
+              </button>
             </div>
           </div>
         </header>
@@ -1704,54 +1766,180 @@ export default function StudioProPage() {
         <main className="mt-4 min-w-0 space-y-4 pb-8 md:space-y-5">
             {activeView === "overview" && (
               <div className="space-y-5">
-                <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
+                <WorkspaceTabs
+                  tabs={[
+                    { key: "summary", label: "Overview" },
+                    { key: "follow_up", label: "Follow Up" },
+                    { key: "needs_seating", label: `Needs Seating (${stats.acceptedNeedingSeating})` },
+                    { key: "activity", label: "Recent Activity" },
+                  ]}
+                  activeTab={overviewTab}
+                  onChange={(nextTab) => setOverviewTab(nextTab as OverviewWorkspaceTab)}
+                />
+
+                {overviewTab === "summary" && (
+                  <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
+                    <StudioPanel>
+                      <SectionHeading
+                        kicker="Overview"
+                        title="Overview"
+                        description="The main invitation, RSVP, and seating numbers in one place."
+                      />
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        <StatTile label="Invitations Sent" value={stats.sentInvitations} tone="sky" />
+                        <StatTile label="Pending Invitations" value={stats.pendingInvitations} tone="stone" />
+                        <StatTile label="Accepted Guests" value={stats.acceptedGuests} tone="emerald" />
+                        <StatTile label="Awaiting Response" value={stats.awaitingResponse} tone="stone" />
+                        <StatTile label="Needs Seating" value={stats.acceptedNeedingSeating} tone="amber" />
+                        <StatTile label="Total Invited Guests" value={stats.totalInvitedGuests} tone="stone" />
+                      </div>
+                    </StudioPanel>
+
+                    <StudioPanel>
+                      <SectionHeading
+                        kicker="Progress"
+                        title="Progress"
+                        description="A quick read on sending, replies, accepted guests, and seating coverage."
+                      />
+                      <div className="mt-5 space-y-4">
+                        <ProgressLine label="Invitations Sent" value={stats.sentInvitations} total={stats.totalInvitations} tone="sky" />
+                        <ProgressLine
+                          label="RSVP Replies Received"
+                          value={stats.totalInvitations - stats.awaitingResponse}
+                          total={stats.totalInvitations}
+                          tone="stone"
+                        />
+                        <ProgressLine label="Accepted Guests" value={stats.acceptedGuests} total={stats.totalInvitedGuests} tone="emerald" />
+                        <ProgressLine
+                          label="Accepted Guests Seated"
+                          value={stats.acceptedGuestsSeated}
+                          total={Math.max(stats.acceptedGuests, 1)}
+                          tone="amber"
+                        />
+                      </div>
+                    </StudioPanel>
+                  </div>
+                )}
+
+                {overviewTab === "follow_up" && (
                   <StudioPanel>
                     <SectionHeading
-                      kicker="Overview"
-                      title="Overview"
-                      description="A quick view of sent invitations, guest responses, accepted guests, and seating status."
+                      kicker="Follow Up"
+                      title="Sent But Still Awaiting Reply"
+                      description="Review invitations that have been sent but have not been answered yet."
                     />
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                      <StatTile label="Invitations Sent" value={stats.sentInvitations} tone="sky" />
-                      <StatTile label="Pending Invitations" value={stats.pendingInvitations} tone="stone" />
-                      <StatTile label="Accepted Guests" value={stats.acceptedGuests} tone="emerald" />
-                      <StatTile label="Awaiting Response" value={stats.awaitingResponse} tone="stone" />
-                      <StatTile label="Needs Seating" value={stats.acceptedWithoutSeating} tone="amber" />
-                      <StatTile label="Total Invited Guests" value={stats.totalInvitedGuests} tone="stone" />
+
+                    <div className="mt-5 grid gap-3 rounded-[22px] border border-stone-100 bg-stone-50 p-3 md:grid-cols-[minmax(0,220px)_auto] md:items-end">
+                      <FormField label="Invitation Sent On Or Before">
+                        <input
+                          type="date"
+                          value={followUpSentBefore}
+                          max={new Date().toISOString().slice(0, 10)}
+                          onChange={(event) => setFollowUpSentBefore(event.target.value)}
+                          className="wedding-inline-edit-input"
+                        />
+                      </FormField>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setFollowUpSentBefore("")}
+                          className="wedding-button-secondary"
+                        >
+                          Show All Sent
+                        </button>
+                        <span className="inline-flex items-center rounded-full border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600">
+                          {followUpGuests.length} awaiting reply
+                        </span>
+                      </div>
+                    </div>
+
+                    {isInvitationSentAtAvailable === false && (
+                      <div className="mt-4">
+                        <EmptyState
+                          title="Add invitation_sent_at to use sent-date filtering"
+                          description="The follow-up date filter works from the invitation_sent_at column."
+                        />
+                      </div>
+                    )}
+
+                    <div className="mt-5 grid gap-3">
+                      {followUpGuests.length === 0 ? (
+                        <EmptyState
+                          title="No sent invitations match this follow-up view"
+                          description={
+                            followUpSentBefore
+                              ? "Try a different sent date or clear the filter."
+                              : "Sent invitations waiting for a reply will appear here."
+                          }
+                        />
+                      ) : (
+                        followUpGuests.map((guest) => (
+                          <div key={guest.id} className="rounded-[22px] border border-stone-100 bg-stone-50 px-4 py-4">
+                            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-serif text-xl text-stone-900">{guest.guest_name}</p>
+                                  <span className="wedding-code">{guest.invite_code}</span>
+                                </div>
+                                <p className="mt-1.5 text-sm text-stone-500">
+                                  Sent {formatAdminDateTime(guest.invitation_sent_at) ?? "recently"} · Invited {guest.max_guests} guest
+                                  {guest.max_guests === 1 ? "" : "s"}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button type="button" onClick={() => void copyInviteLink(guest)} className="wedding-button-secondary">
+                                  Copy RSVP Link
+                                </button>
+                                <button type="button" onClick={() => void copyInvitation(guest)} className="wedding-button-secondary">
+                                  Copy Invitation
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </StudioPanel>
+                )}
 
+                {overviewTab === "needs_seating" && (
                   <StudioPanel>
                     <SectionHeading
-                      kicker="Progress"
-                      title="Progress"
-                      description="These bars show sending progress, responses received, accepted guests, and seating coverage."
+                      kicker="Needs Seating"
+                      title="Accepted Guests Still Needing Seating"
+                      description="Guests who replied yes and still need seats added to their table assignment."
                     />
-                    <div className="mt-5 space-y-4">
-                      <ProgressLine label="Sent Invitations" value={stats.sentInvitations} total={stats.totalInvitations} tone="sky" />
-                      <ProgressLine
-                        label="Responses Received"
-                        value={stats.totalInvitations - stats.awaitingResponse}
-                        total={stats.totalInvitations}
-                        tone="stone"
-                      />
-                      <ProgressLine label="Accepted Guests" value={stats.acceptedGuests} total={stats.totalInvitedGuests} tone="emerald" />
-                      <ProgressLine
-                        label="Accepted Guests Seated"
-                        value={stats.acceptedGuestsSeated}
-                        total={Math.max(stats.acceptedGuests, 1)}
-                        tone="amber"
-                      />
+                    <div className="mt-5 grid gap-3">
+                      {acceptedGuestsNeedingSeating.length === 0 ? (
+                        <EmptyState
+                          title="All accepted guests are fully seated"
+                          description="Your current seating assignments cover every accepted guest count."
+                        />
+                      ) : (
+                        acceptedGuestsNeedingSeating.map(({ guest, assignment, accepted, assigned, remaining }) => (
+                          <WatchlistCard
+                            key={guest.id}
+                            title={guest.guest_name}
+                            subtitle={
+                              assignment
+                                ? `Accepted ${accepted} guest${accepted === 1 ? "" : "s"} · ${assigned} seated · ${remaining} still needed · Table ${assignment.table_number}`
+                                : `Accepted ${accepted} guest${accepted === 1 ? "" : "s"} · ${remaining} still needed · ${guest.invite_code}`
+                            }
+                            actionLabel={assignment ? "Finish Seating" : "Add Seating"}
+                            onAction={() => beginSeatingPlacementForGuest(guest)}
+                          />
+                        ))
+                      )}
                     </div>
                   </StudioPanel>
-                </div>
+                )}
 
-                <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+                {overviewTab === "activity" && (
                   <StudioPanel>
                     <SectionHeading
                       kicker="Recent Activity"
                       title="Recent Activity"
-                      description="Recent invitation updates and guest responses."
+                      description="Recent invitation updates, sent invitations, and RSVP replies."
                     />
                     <div className="mt-5 space-y-3">
                       {recentActivity.length === 0 ? (
@@ -1763,33 +1951,7 @@ export default function StudioProPage() {
                       )}
                     </div>
                   </StudioPanel>
-
-                  <StudioPanel>
-                    <SectionHeading
-                      kicker="Needs Seating"
-                      title="Accepted Guests Without Tables"
-                      description="Accepted guests who still need a table assignment."
-                    />
-                    <div className="mt-5 grid gap-3">
-                      {acceptedWithoutSeating.length === 0 ? (
-                        <EmptyState
-                          title="All accepted guests have seating"
-                          description="Your current seating assignments cover everyone who has RSVP’d yes."
-                        />
-                      ) : (
-                        acceptedWithoutSeating.map((guest) => (
-                          <WatchlistCard
-                            key={guest.id}
-                            title={guest.guest_name}
-                            subtitle={`Accepted ${guest.confirmed_guests || 0} guest${guest.confirmed_guests === 1 ? "" : "s"} · ${guest.invite_code}`}
-                            actionLabel="Add Seating"
-                            onAction={() => beginSeatingCreateForGuest(guest)}
-                          />
-                        ))
-                      )}
-                    </div>
-                  </StudioPanel>
-                </div>
+                )}
               </div>
             )}
 
@@ -2211,7 +2373,7 @@ export default function StudioProPage() {
                                               children_count: event.target.checked
                                                 ? Math.min(
                                                     Math.max(1, prev[guest.id].children_count || 1),
-                                                    Math.max(1, prev[guest.id].max_guests),
+                                                    Math.max(1, Number(prev[guest.id].max_guests) || 1),
                                                   )
                                                 : 1,
                                             },
@@ -2766,7 +2928,7 @@ export default function StudioProPage() {
                               label={isSeatingGuestCountAvailable ? "Seated Guests" : "Tables"}
                               value={isSeatingGuestCountAvailable ? filteredSeatingGuestCount : stats.uniqueTables}
                             />
-                            <MiniMetric label="Needs Seating" value={stats.acceptedWithoutSeating} />
+                            <MiniMetric label="Needs Seating" value={stats.acceptedNeedingSeating} />
                           </div>
                         </div>
                       </CompactDisclosure>
