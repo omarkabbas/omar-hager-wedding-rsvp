@@ -269,6 +269,7 @@ export default function AdminDashboardV2() {
   const [inlineGuestEdits, setInlineGuestEdits] = useState<Record<string, InlineGuestDraft>>({});
   const [inlineSeatingEdits, setInlineSeatingEdits] = useState<Record<number, InlineSeatingDraft>>({});
   const [quickTableDrafts, setQuickTableDrafts] = useState<Record<string, number | "">>({});
+  const [inlineTableEdits, setInlineTableEdits] = useState<Record<string, true>>({});
   const [selectedGuestIds, setSelectedGuestIds] = useState<string[]>([]);
   const [bulkTableNumber, setBulkTableNumber] = useState<number | "">(1);
 
@@ -654,6 +655,11 @@ export default function AdminDashboardV2() {
   };
 
   const startInlineGuestEdit = (guest: GuestResponse) => {
+    setInlineTableEdits((prev) => {
+      const next = { ...prev };
+      delete next[guest.id];
+      return next;
+    });
     setInlineGuestEdits((prev) => ({
       ...prev,
       [guest.id]: {
@@ -671,7 +677,8 @@ export default function AdminDashboardV2() {
   };
 
   const startInlineTableEdit = (guest: GuestResponse) => {
-    startInlineGuestEdit(guest);
+    cancelInlineGuestEdit(guest.id);
+    setInlineTableEdits((prev) => ({ ...prev, [guest.id]: true }));
     setQuickTableDrafts((prev) => ({
       ...prev,
       [guest.id]: prev[guest.id] ?? seatingLookup.get(normalizeNameKey(guest.guest_name)) ?? "",
@@ -680,6 +687,14 @@ export default function AdminDashboardV2() {
 
   const cancelInlineGuestEdit = (guestId: string) => {
     setInlineGuestEdits((prev) => {
+      const next = { ...prev };
+      delete next[guestId];
+      return next;
+    });
+  };
+
+  const cancelInlineTableEdit = (guestId: string) => {
+    setInlineTableEdits((prev) => {
       const next = { ...prev };
       delete next[guestId];
       return next;
@@ -1095,6 +1110,7 @@ export default function AdminDashboardV2() {
     }
 
     setQuickTableDrafts((prev) => ({ ...prev, [guest.id]: nextTableNumber }));
+    cancelInlineTableEdit(guest.id);
     showToast(`${guest.guest_name} assigned to table ${nextTableNumber}.`, "success");
   };
 
@@ -1112,6 +1128,7 @@ export default function AdminDashboardV2() {
     }
 
     setQuickTableDrafts((prev) => ({ ...prev, [guest.id]: "" }));
+    cancelInlineTableEdit(guest.id);
     showToast(`Removed seating for ${guest.guest_name}.`, "success");
   };
 
@@ -1795,6 +1812,7 @@ export default function AdminDashboardV2() {
                       filteredResponses.map((guest) => {
                         const draft = inlineGuestEdits[guest.id];
                         const isEditing = Boolean(draft);
+                        const isTableEditing = Boolean(inlineTableEdits[guest.id]);
                         const acceptedCount = guest.attending === true ? guest.confirmed_guests || 0 : 0;
                         const guestInviteUrl = getGuestInviteUrl(guest);
                         const seatingTable = seatingLookup.get(normalizeNameKey(guest.guest_name));
@@ -2094,6 +2112,54 @@ export default function AdminDashboardV2() {
                                     <button type="button" onClick={() => cancelInlineGuestEdit(guest.id)} className="wedding-button-secondary">
                                       Cancel
                                     </button>
+                                  </div>
+                                </div>
+                              ) : isTableEditing ? (
+                                <div className="rounded-[20px] border border-stone-100 bg-stone-50 p-3">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <p className="wedding-kicker">Table Assignment</p>
+                                    <p className="text-xs font-medium uppercase tracking-[0.14em] text-stone-500">
+                                      {seatingTable ? `Currently Table ${seatingTable}` : "No table yet"}
+                                    </p>
+                                  </div>
+                                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={quickTableValue}
+                                      onChange={(event) =>
+                                        setQuickTableDrafts((prev) => ({
+                                          ...prev,
+                                          [guest.id]:
+                                            event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1),
+                                        }))
+                                      }
+                                      className="wedding-inline-edit-input"
+                                      placeholder="Table #"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => void assignGuestToTable(guest, Math.max(1, Number(quickTableValue) || 1))}
+                                      className="wedding-button-secondary w-full sm:w-auto"
+                                    >
+                                      {seatingTable ? "Move Seating" : "Assign Seating"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => cancelInlineTableEdit(guest.id)}
+                                      className="wedding-button-secondary w-full sm:w-auto"
+                                    >
+                                      Cancel
+                                    </button>
+                                    {seatingTable && (
+                                      <button
+                                        type="button"
+                                        onClick={() => void removeGuestSeating(guest)}
+                                        className="wedding-button-secondary w-full sm:w-auto"
+                                      >
+                                        Remove
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                               ) : (
