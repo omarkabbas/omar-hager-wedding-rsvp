@@ -11,6 +11,9 @@ type GuestResponse = {
   id: string;
   invite_code: string;
   guest_name: string;
+  phone_number?: string | null;
+  email?: string | null;
+  request_contact_details?: boolean | null;
   max_guests: number;
   confirmed_guests: number | null;
   attending: boolean | null;
@@ -27,6 +30,8 @@ type GuestResponse = {
 type SeatingAssignment = {
   id: number;
   name: string;
+  name_aliases?: string | null;
+  invite_code?: string | null;
   table_number: number;
   guest_count?: number | null;
 };
@@ -38,17 +43,23 @@ type Toast = {
 };
 
 type AdminView = "overview" | "invitations" | "seating" | "settings";
-type OverviewWorkspaceTab = "summary" | "follow_up" | "needs_seating" | "activity";
+type OverviewWorkspaceTab = "summary" | "follow_up" | "needs_seating" | "activity" | "checks";
+type ChecksWorkspaceTab = "seating" | "rsvp" | "records";
 type InvitationWorkspaceTab = "manage" | "bulk" | "composer";
 type SeatingWorkspaceTab = "board" | "tables" | "composer";
+type SeatingBoardMode = "assignments" | "invites";
 type GuestStatusFilter = "pending" | "attending" | "declined";
 type GuestExtraFilter = "sent" | "not_sent" | "has_children" | "needs_seating" | "sent_awaiting_response";
 type GuestSort = "recent" | "name" | "invite_code" | "largest_party";
 type SeatingSort = "table" | "name";
+type SeatingTableFilter = number[] | "all";
 
 type InlineGuestDraft = {
   guest_name: string;
   invite_code: string;
+  phone_number: string;
+  email: string;
+  request_contact_details: boolean;
   max_guests: number | "";
   attending: boolean | null;
   confirmed_guests: number | "" | null;
@@ -60,6 +71,8 @@ type InlineGuestDraft = {
 
 type InlineSeatingDraft = {
   name: string;
+  name_aliases: string;
+  invite_code: string;
   table_number: number | "";
   guest_count: number | "";
 };
@@ -70,6 +83,9 @@ type ConfirmDialogState = {
   actionLabel: string;
   actionTone?: "danger" | "default";
   onConfirm: () => Promise<void> | void;
+  secondaryActionLabel?: string;
+  secondaryActionTone?: "danger" | "default";
+  onSecondaryAction?: () => Promise<void> | void;
 };
 
 type RowMenuItem = {
@@ -87,7 +103,17 @@ type ActivityItem = {
   sortValue: number;
 };
 
-const INVITE_BASE_URL = SITE_URL;
+type WorkspaceLocation = {
+  activeView: AdminView;
+  overviewTab: OverviewWorkspaceTab;
+  checksTab: ChecksWorkspaceTab;
+  invitationTab: InvitationWorkspaceTab;
+  seatingTab: SeatingWorkspaceTab;
+  seatingBoardMode: SeatingBoardMode;
+};
+
+const INVITE_BASE_URL = SITE_URL.replace(/\/+$/, "");
+const INVITATION_IMAGE_PATH = "/O&H_invitation.jpeg";
 
 const pemToArrayBuffer = (pem: string) => {
   const base64 = pem.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, "");
@@ -153,6 +179,110 @@ const getLatestGuestTimestamp = (guest: GuestResponse) => {
 const getGuestInviteUrl = (guest: GuestResponse) => `${INVITE_BASE_URL}/${guest.invite_code.toLowerCase()}`;
 const getSeatingGuestCount = (guest: GuestResponse) =>
   guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : Math.max(1, guest.max_guests || 1);
+const normalizeInviteCode = (value?: string | null) => (value || "").trim().toUpperCase();
+const normalizePhoneForSmsLink = (value?: string | null) => (value || "").replace(/[^\d+]/g, "");
+const parseNameAliases = (value?: string | null) =>
+  (value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const buildGuestInviteMessage = (guest: GuestResponse) =>
+  `Dear ${guest.guest_name}, with great joy, Omar & Hager invite you to celebrate their wedding. Please RSVP here: ${getGuestInviteUrl(guest)}`;
+
+const buildGuestReminderMessage = (guest: GuestResponse) =>
+  `Dear ${guest.guest_name}, this is a kind reminder from Omar & Hager to please RSVP when you have a moment. You can reply here: ${getGuestInviteUrl(guest)}`;
+
+const formatPhoneNumberInput = (value?: string | null) => {
+  const digits = (value || "").replace(/\D/g, "").slice(0, 11);
+  const normalized = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+
+  if (!normalized) return "";
+  if (normalized.length <= 3) return normalized;
+  if (normalized.length <= 6) return `(${normalized.slice(0, 3)}) ${normalized.slice(3)}`;
+  return `(${normalized.slice(0, 3)}) ${normalized.slice(3, 6)}-${normalized.slice(6, 10)}`;
+};
+
+const escapeClipboardHtml = (value: string) =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
+const blobToDataUrl = async (blob: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error("Could not prepare the invitation image."));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Could not prepare the invitation image."));
+    reader.readAsDataURL(blob);
+  });
+
+let invitationImageBlobPromise: Promise<Blob> | null = null;
+let invitationImageDataUrlPromise: Promise<string> | null = null;
+
+const getClipboardReadyInvitationImageBlob = async () => {
+  if (!invitationImageBlobPromise) {
+    invitationImageBlobPromise = (async () => {
+      const response = await fetch(INVITATION_IMAGE_PATH, { cache: "force-cache" });
+      if (!response.ok) {
+        throw new Error("Could not load the invitation image.");
+      }
+
+      const sourceBlob = await response.blob();
+      if (sourceBlob.type === "image/png") return sourceBlob;
+
+      const bitmap = await createImageBitmap(sourceBlob);
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        throw new Error("Could not prepare the invitation image.");
+      }
+
+      context.drawImage(bitmap, 0, 0);
+
+      return new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+            return;
+          }
+
+          reject(new Error("Could not prepare the invitation image."));
+        }, "image/png");
+      });
+    })().catch((error) => {
+      invitationImageBlobPromise = null;
+      throw error;
+    });
+  }
+
+  return invitationImageBlobPromise;
+};
+
+const getClipboardReadyInvitationImageDataUrl = async () => {
+  if (!invitationImageDataUrlPromise) {
+    invitationImageDataUrlPromise = getClipboardReadyInvitationImageBlob()
+      .then((blob) => blobToDataUrl(blob))
+      .catch((error) => {
+        invitationImageDataUrlPromise = null;
+        throw error;
+      });
+  }
+
+  return invitationImageDataUrlPromise;
+};
 
 const preventNumberInputScroll = (event: WheelEvent<HTMLInputElement>) => {
   if (document.activeElement === event.currentTarget) {
@@ -284,11 +414,15 @@ export default function StudioProPage() {
 
   const [activeView, setActiveView] = useState<AdminView>("overview");
   const [overviewTab, setOverviewTab] = useState<OverviewWorkspaceTab>("summary");
+  const [checksTab, setChecksTab] = useState<ChecksWorkspaceTab>("seating");
   const [invitationTab, setInvitationTab] = useState<InvitationWorkspaceTab>("manage");
   const [seatingTab, setSeatingTab] = useState<SeatingWorkspaceTab>("board");
 
   const [newName, setNewName] = useState("");
   const [newCode, setNewCode] = useState("");
+  const [newPhoneNumber, setNewPhoneNumber] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [requestContactDetails, setRequestContactDetails] = useState(false);
   const [newLimit, setNewLimit] = useState<number | "">(1);
   const [attendanceStatus, setAttendanceStatus] = useState<"pending" | "attending" | "declined">("pending");
   const [confirmedGuests, setConfirmedGuests] = useState(1);
@@ -299,6 +433,8 @@ export default function StudioProPage() {
   const [editingGuestId, setEditingGuestId] = useState<string | null>(null);
 
   const [seatingName, setSeatingName] = useState("");
+  const [seatingNameAliases, setSeatingNameAliases] = useState("");
+  const [seatingInviteCode, setSeatingInviteCode] = useState("");
   const [tableNumber, setTableNumber] = useState<number | "">(1);
   const [seatingGuestCount, setSeatingGuestCount] = useState<number | "">(1);
   const [editingSeatingId, setEditingSeatingId] = useState<number | null>(null);
@@ -311,7 +447,8 @@ export default function StudioProPage() {
 
   const [seatingSearch, setSeatingSearch] = useState("");
   const [seatingSort, setSeatingSort] = useState<SeatingSort>("table");
-  const [seatingTableFilter, setSeatingTableFilter] = useState<number | "all">("all");
+  const [seatingTableFilter, setSeatingTableFilter] = useState<SeatingTableFilter>("all");
+  const [seatingBoardMode, setSeatingBoardMode] = useState<SeatingBoardMode>("assignments");
   const [tableMoveFrom, setTableMoveFrom] = useState<number | "">("");
   const [tableMoveTo, setTableMoveTo] = useState<number | "">("");
   const deferredSeatingSearch = useDeferredValue(seatingSearch);
@@ -331,7 +468,12 @@ export default function StudioProPage() {
   const [isHomeDressCodeEnabled, setIsHomeDressCodeEnabled] = useState(false);
   const [isGuestNotesAvailable, setIsGuestNotesAvailable] = useState<boolean | null>(null);
   const [isSeatingGuestCountAvailable, setIsSeatingGuestCountAvailable] = useState<boolean | null>(null);
+  const [isSeatingAliasesAvailable, setIsSeatingAliasesAvailable] = useState<boolean | null>(null);
   const [isInvitationSentAtAvailable, setIsInvitationSentAtAvailable] = useState<boolean | null>(null);
+  const [isGuestPhoneAvailable, setIsGuestPhoneAvailable] = useState<boolean | null>(null);
+  const [isGuestEmailAvailable, setIsGuestEmailAvailable] = useState<boolean | null>(null);
+  const [isRequestContactDetailsAvailable, setIsRequestContactDetailsAvailable] = useState<boolean | null>(null);
+  const [isSeatingInviteCodeAvailable, setIsSeatingInviteCodeAvailable] = useState<boolean | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
@@ -341,6 +483,8 @@ export default function StudioProPage() {
   const [seatingControlsOpen, setSeatingControlsOpen] = useState(true);
   const [tableToolsOpen, setTableToolsOpen] = useState(false);
   const [followUpSentBefore, setFollowUpSentBefore] = useState("");
+  const [guestComposerReturnLocation, setGuestComposerReturnLocation] = useState<WorkspaceLocation | null>(null);
+  const [seatingComposerReturnLocation, setSeatingComposerReturnLocation] = useState<WorkspaceLocation | null>(null);
 
   const invitationFormRef = useRef<HTMLElement | null>(null);
   const seatingFormRef = useRef<HTMLElement | null>(null);
@@ -412,15 +556,17 @@ export default function StudioProPage() {
         const parsed = JSON.parse(savedState) as {
           activeView?: AdminView;
           overviewTab?: OverviewWorkspaceTab;
+          checksTab?: ChecksWorkspaceTab;
           invitationTab?: InvitationWorkspaceTab;
           seatingTab?: SeatingWorkspaceTab;
+          seatingBoardMode?: SeatingBoardMode;
           guestSearch?: string;
           guestStatusFilters?: GuestStatusFilter[];
           guestExtraFilters?: GuestExtraFilter[];
           guestSort?: GuestSort;
         seatingSearch?: string;
         seatingSort?: SeatingSort;
-          seatingTableFilter?: number | "all";
+          seatingTableFilter?: SeatingTableFilter | number;
           guestFiltersOpen?: boolean;
           guestSummaryOpen?: boolean;
           seatingControlsOpen?: boolean;
@@ -430,15 +576,30 @@ export default function StudioProPage() {
 
         if (parsed.activeView) setActiveView(parsed.activeView);
         if (parsed.overviewTab) setOverviewTab(parsed.overviewTab);
+        if (parsed.checksTab) setChecksTab(parsed.checksTab);
         if (parsed.invitationTab) setInvitationTab(parsed.invitationTab);
         if (parsed.seatingTab) setSeatingTab(parsed.seatingTab);
+        if (parsed.seatingBoardMode) setSeatingBoardMode(parsed.seatingBoardMode);
         if (parsed.guestSearch !== undefined) setGuestSearch(parsed.guestSearch);
         if (Array.isArray(parsed.guestStatusFilters)) setGuestStatusFilters(parsed.guestStatusFilters);
         if (Array.isArray(parsed.guestExtraFilters)) setGuestExtraFilters(parsed.guestExtraFilters);
         if (parsed.guestSort) setGuestSort(parsed.guestSort);
         if (parsed.seatingSearch !== undefined) setSeatingSearch(parsed.seatingSearch);
         if (parsed.seatingSort) setSeatingSort(parsed.seatingSort);
-        if (parsed.seatingTableFilter !== undefined) setSeatingTableFilter(parsed.seatingTableFilter);
+        if (parsed.seatingTableFilter !== undefined) {
+          if (parsed.seatingTableFilter === "all") {
+            setSeatingTableFilter("all");
+          } else if (typeof parsed.seatingTableFilter === "number") {
+            setSeatingTableFilter([parsed.seatingTableFilter]);
+          } else if (Array.isArray(parsed.seatingTableFilter)) {
+            setSeatingTableFilter(
+              parsed.seatingTableFilter
+                .map((value) => Number(value))
+                .filter((value) => Number.isFinite(value))
+                .sort((left, right) => left - right),
+            );
+          }
+        }
         if (parsed.guestFiltersOpen !== undefined) setGuestFiltersOpen(parsed.guestFiltersOpen);
         if (parsed.guestSummaryOpen !== undefined) setGuestSummaryOpen(parsed.guestSummaryOpen);
         if (parsed.seatingControlsOpen !== undefined) setSeatingControlsOpen(parsed.seatingControlsOpen);
@@ -460,8 +621,10 @@ export default function StudioProPage() {
       JSON.stringify({
         activeView,
         overviewTab,
+        checksTab,
         invitationTab,
         seatingTab,
+        seatingBoardMode,
         guestSearch,
         guestStatusFilters,
         guestExtraFilters,
@@ -484,11 +647,13 @@ export default function StudioProPage() {
     guestSort,
     guestStatusFilters,
     hasRestoredWorkspaceState,
+    checksTab,
     overviewTab,
     invitationTab,
     seatingSearch,
     seatingSort,
     seatingTab,
+    seatingBoardMode,
     seatingTableFilter,
     guestFiltersOpen,
     guestSummaryOpen,
@@ -573,9 +738,34 @@ export default function StudioProPage() {
     setIsSeatingGuestCountAvailable(!guestCountError);
   }, []);
 
+  const detectSeatingAliasesColumn = useCallback(async () => {
+    const { error: aliasesError } = await supabase.from("seating").select("name_aliases").limit(1);
+    setIsSeatingAliasesAvailable(!aliasesError);
+  }, []);
+
   const detectInvitationSentAtColumn = useCallback(async () => {
     const { error: invitationSentAtError } = await supabase.from("rsvp_list").select("invitation_sent_at").limit(1);
     setIsInvitationSentAtAvailable(!invitationSentAtError);
+  }, []);
+
+  const detectGuestPhoneColumn = useCallback(async () => {
+    const { error: phoneError } = await supabase.from("rsvp_list").select("phone_number").limit(1);
+    setIsGuestPhoneAvailable(!phoneError);
+  }, []);
+
+  const detectGuestEmailColumn = useCallback(async () => {
+    const { error: emailError } = await supabase.from("rsvp_list").select("email").limit(1);
+    setIsGuestEmailAvailable(!emailError);
+  }, []);
+
+  const detectRequestContactDetailsColumn = useCallback(async () => {
+    const { error: requestContactDetailsError } = await supabase.from("rsvp_list").select("request_contact_details").limit(1);
+    setIsRequestContactDetailsAvailable(!requestContactDetailsError);
+  }, []);
+
+  const detectSeatingInviteCodeColumn = useCallback(async () => {
+    const { error: inviteCodeError } = await supabase.from("seating").select("invite_code").limit(1);
+    setIsSeatingInviteCodeAvailable(!inviteCodeError);
   }, []);
 
   useEffect(() => {
@@ -588,7 +778,12 @@ export default function StudioProPage() {
         fetchSeatingAssignments(),
         detectGuestNotesColumn(),
         detectSeatingGuestCountColumn(),
+        detectSeatingAliasesColumn(),
         detectInvitationSentAtColumn(),
+        detectGuestPhoneColumn(),
+        detectGuestEmailColumn(),
+        detectRequestContactDetailsColumn(),
+        detectSeatingInviteCodeColumn(),
       ]);
     };
 
@@ -607,7 +802,12 @@ export default function StudioProPage() {
   }, [
     authorized,
     detectGuestNotesColumn,
+    detectGuestEmailColumn,
+    detectGuestPhoneColumn,
     detectInvitationSentAtColumn,
+    detectRequestContactDetailsColumn,
+    detectSeatingInviteCodeColumn,
+    detectSeatingAliasesColumn,
     detectSeatingGuestCountColumn,
     fetchResponses,
     fetchSeatingAssignments,
@@ -615,12 +815,64 @@ export default function StudioProPage() {
   ]);
 
   useEffect(() => {
+    if (!authorized) return;
+
+    const prewarm = window.setTimeout(() => {
+      void getClipboardReadyInvitationImageDataUrl().catch(() => {
+        // Best effort only. If this fails, the copy flow still falls back safely.
+      });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(prewarm);
+    };
+  }, [authorized]);
+
+  useEffect(() => {
     setSelectedGuestIds((prev) => prev.filter((guestId) => responses.some((guest) => guest.id === guestId)));
   }, [responses]);
+
+  useEffect(() => {
+    if (!(activeView === "invitations" && invitationTab === "composer") && guestComposerReturnLocation) {
+      setGuestComposerReturnLocation(null);
+    }
+  }, [activeView, guestComposerReturnLocation, invitationTab]);
+
+  useEffect(() => {
+    if (!(activeView === "seating" && seatingTab === "composer") && seatingComposerReturnLocation) {
+      setSeatingComposerReturnLocation(null);
+    }
+  }, [activeView, seatingComposerReturnLocation, seatingTab]);
+
+  const captureWorkspaceLocation = useCallback(
+    (): WorkspaceLocation => ({
+      activeView,
+      overviewTab,
+      checksTab,
+      invitationTab,
+      seatingTab,
+      seatingBoardMode,
+    }),
+    [activeView, checksTab, invitationTab, overviewTab, seatingBoardMode, seatingTab],
+  );
+
+  const restoreWorkspaceLocation = useCallback((location: WorkspaceLocation | null) => {
+    if (!location) return;
+
+    setActiveView(location.activeView);
+    setOverviewTab(location.overviewTab);
+    setChecksTab(location.checksTab);
+    setInvitationTab(location.invitationTab);
+    setSeatingTab(location.seatingTab);
+    setSeatingBoardMode(location.seatingBoardMode);
+  }, []);
 
   const resetGuestForm = () => {
     setNewName("");
     setNewCode("");
+    setNewPhoneNumber("");
+    setNewEmail("");
+    setRequestContactDetails(false);
     setNewLimit(1);
     setAttendanceStatus("pending");
     setConfirmedGuests(1);
@@ -629,14 +881,52 @@ export default function StudioProPage() {
     setChildrenCount(1);
     setGuestNotes("");
     setEditingGuestId(null);
+    setGuestComposerReturnLocation(null);
   };
 
   const resetSeatingForm = () => {
     setSeatingName("");
+    setSeatingNameAliases("");
+    setSeatingInviteCode("");
     setTableNumber(1);
     setSeatingGuestCount(1);
     setEditingSeatingId(null);
+    setSeatingComposerReturnLocation(null);
   };
+
+  const cancelGuestComposer = () => {
+    const returnLocation = guestComposerReturnLocation;
+    resetGuestForm();
+    restoreWorkspaceLocation(returnLocation);
+  };
+
+  const cancelSeatingComposer = () => {
+    const returnLocation = seatingComposerReturnLocation;
+    resetSeatingForm();
+    restoreWorkspaceLocation(returnLocation);
+  };
+
+  const findGuestByName = useCallback(
+    (name: string) => responses.find((guest) => normalizeNameKey(guest.guest_name) === normalizeNameKey(name)) ?? null,
+    [responses],
+  );
+
+  const findGuestByInviteCode = useCallback(
+    (inviteCode: string) => responses.find((guest) => normalizeInviteCode(guest.invite_code) === normalizeInviteCode(inviteCode)) ?? null,
+    [responses],
+  );
+
+  const findLinkedGuestForSeating = useCallback(
+    ({ name, inviteCode }: { name: string; inviteCode?: string | null }) => {
+      const cleanedInviteCode = normalizeInviteCode(inviteCode);
+      if (cleanedInviteCode) {
+        return findGuestByInviteCode(cleanedInviteCode);
+      }
+
+      return findGuestByName(name.trim());
+    },
+    [findGuestByInviteCode, findGuestByName],
+  );
 
   const addGuest = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -654,6 +944,9 @@ export default function StudioProPage() {
     const payload = {
       guest_name: cleanedName,
       invite_code: cleanedCode.toUpperCase(),
+      ...(isGuestPhoneAvailable ? { phone_number: formatPhoneNumberInput(newPhoneNumber) || null } : {}),
+      ...(isGuestEmailAvailable ? { email: newEmail.trim() || null } : {}),
+      ...(isRequestContactDetailsAvailable ? { request_contact_details: requestContactDetails } : {}),
       max_guests: maxGuests,
       attending: attendingValue,
       confirmed_guests: finalConfirmed,
@@ -664,12 +957,17 @@ export default function StudioProPage() {
       ...(isGuestNotesAvailable ? { notes: guestNotes.trim() || null } : {}),
     };
 
-    if (editingGuestId) {
-      const existingGuest = responses.find((guest) => guest.id === editingGuestId);
+    const persistGuestComposerUpdate = async ({
+      existingGuest,
+      removeSeatingAfterSave,
+    }: {
+      existingGuest: GuestResponse;
+      removeSeatingAfterSave: boolean;
+    }) => {
       const respondedAt =
         attendingValue === null
           ? null
-          : existingGuest?.attending !== attendingValue || !existingGuest?.responded_at
+          : existingGuest.attending !== attendingValue || !existingGuest.responded_at
             ? now
             : existingGuest.responded_at;
 
@@ -689,15 +987,61 @@ export default function StudioProPage() {
           responded_at: respondedAt,
           updated_at: now,
         })
-        .eq("id", editingGuestId);
+        .eq("id", existingGuest.id);
 
       if (updateError) {
         showToast(updateError.message, "error");
         return;
       }
 
+      if (removeSeatingAfterSave) {
+        const deleteError = await removeSeatingAssignmentsForGuest(existingGuest);
+        if (deleteError) {
+          showToast("Invitation updated, but seating could not be removed.", "error");
+          return;
+        }
+      } else if (
+        normalizeNameKey(existingGuest.guest_name) !== normalizeNameKey(cleanedName) ||
+        normalizeInviteCode(existingGuest.invite_code) !== normalizeInviteCode(cleanedCode)
+      ) {
+        const renameError = await syncSeatingAssignmentsForGuest(existingGuest, cleanedCode);
+        if (renameError) {
+          showToast("Invitation updated, but seating could not be kept in sync with the new guest details.", "error");
+          return;
+        }
+      }
+
       showToast("Invitation updated.", "success");
       resetGuestForm();
+    };
+
+    if (editingGuestId) {
+      const existingGuest = responses.find((guest) => guest.id === editingGuestId);
+      if (!existingGuest) {
+        showToast("Invitation could not be found.", "error");
+        return;
+      }
+
+      const hasSeating = getSeatingAssignmentsForGuest(existingGuest).length > 0;
+      if (hasSeating && attendingValue !== true) {
+        askConfirm({
+          title: "Guest Still Has Seating Assigned",
+          message: `${existingGuest.guest_name} still has a seating assignment. You can keep the seating as-is, or remove it while saving this RSVP change.`,
+          actionLabel: "Save & Keep Seating",
+          actionTone: "default",
+          onConfirm: async () => {
+            await persistGuestComposerUpdate({ existingGuest, removeSeatingAfterSave: false });
+          },
+          secondaryActionLabel: "Save & Remove Seating",
+          secondaryActionTone: "danger",
+          onSecondaryAction: async () => {
+            await persistGuestComposerUpdate({ existingGuest, removeSeatingAfterSave: true });
+          },
+        });
+        return;
+      }
+
+      await persistGuestComposerUpdate({ existingGuest, removeSeatingAfterSave: false });
       return;
     }
 
@@ -724,8 +1068,36 @@ export default function StudioProPage() {
     const cleanedName = seatingName.trim();
     if (!cleanedName) return;
 
-      const payload = {
+    const cleanedInviteCode = normalizeInviteCode(seatingInviteCode);
+    const matchingGuestByCode = cleanedInviteCode ? findGuestByInviteCode(cleanedInviteCode) : null;
+    if (cleanedInviteCode && !matchingGuestByCode) {
+      showToast("No invitation matches that RSVP code yet.", "error");
+      return;
+    }
+
+    const matchingGuest = findGuestByName(cleanedName);
+    const existingAssignment = editingSeatingId !== null ? seatingAssignments.find((assignment) => assignment.id === editingSeatingId) : null;
+    const resolvedInviteCode =
+      cleanedInviteCode || normalizeInviteCode(matchingGuest?.invite_code) || normalizeInviteCode(existingAssignment?.invite_code) || null;
+    const capacityCheck = getSeatingCapacityCheck({
       name: cleanedName,
+      inviteCode: resolvedInviteCode,
+      guestCount: seatingGuestCount,
+      editingAssignmentId: editingSeatingId,
+    });
+
+    if (capacityCheck?.wouldExceed) {
+      showToast(
+        `This would assign ${capacityCheck.totalAfterSave} seats to ${capacityCheck.linkedGuest.guest_name}, but only ${capacityCheck.allowedSeats} are allowed.`,
+        "error",
+      );
+      return;
+    }
+
+    const payload = {
+      name: cleanedName,
+      ...(isSeatingAliasesAvailable ? { name_aliases: seatingNameAliases.trim() || null } : {}),
+      ...(isSeatingInviteCodeAvailable ? { invite_code: resolvedInviteCode } : {}),
       table_number: Math.max(1, Number(tableNumber) || 1),
       ...(isSeatingGuestCountAvailable ? { guest_count: Math.max(1, Number(seatingGuestCount) || 1) } : {}),
     };
@@ -765,6 +1137,9 @@ export default function StudioProPage() {
       [guest.id]: {
         guest_name: guest.guest_name,
         invite_code: guest.invite_code,
+        phone_number: formatPhoneNumberInput(guest.phone_number || ""),
+        email: guest.email || "",
+        request_contact_details: Boolean(guest.request_contact_details),
         max_guests: guest.max_guests,
         attending: guest.attending,
         confirmed_guests: guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : guest.confirmed_guests,
@@ -777,11 +1152,16 @@ export default function StudioProPage() {
   };
 
   const startInlineTableEdit = (guest: GuestResponse) => {
+    if (getSeatingAssignmentsForGuest(guest).length > 1) {
+      openSeatingBoardForGuest(guest);
+      showToast("This invitation has seating on multiple tables. Review it from the seating board.", "info");
+      return;
+    }
     cancelInlineGuestEdit(guest.id);
     setInlineTableEdits((prev) => ({ ...prev, [guest.id]: true }));
     setQuickTableDrafts((prev) => ({
       ...prev,
-      [guest.id]: prev[guest.id] ?? seatingLookup.get(normalizeNameKey(guest.guest_name)) ?? "",
+      [guest.id]: prev[guest.id] ?? getTableForGuest(guest) ?? "",
     }));
   };
 
@@ -806,6 +1186,10 @@ export default function StudioProPage() {
     if (!draft) return;
 
     const existingGuest = responses.find((guest) => guest.id === guestId);
+    if (!existingGuest) {
+      showToast("Invitation could not be found.", "error");
+      return;
+    }
     const now = new Date().toISOString();
     const maxGuests = Math.max(1, draft.max_guests || 1);
     const confirmed =
@@ -820,37 +1204,81 @@ export default function StudioProPage() {
       existingGuest,
       now,
     });
+    const nextGuestName = draft.guest_name.trim();
 
-    const { error: updateError } = await supabase
-      .from("rsvp_list")
-      .update({
-        guest_name: draft.guest_name.trim(),
-        invite_code: draft.invite_code.trim().toUpperCase(),
-        max_guests: maxGuests,
-        attending: draft.attending,
-        confirmed_guests: confirmed,
-        invitation_sent: draft.invitation_sent,
-        ...(isInvitationSentAtAvailable ? { invitation_sent_at: nextInvitationSentAt } : {}),
-        has_children: draft.has_children,
-        children_count: children,
-        ...(isGuestNotesAvailable ? { notes: draft.notes.trim() || null } : {}),
-        responded_at:
-          draft.attending === null
-            ? null
-            : existingGuest?.attending !== draft.attending || !existingGuest?.responded_at
-              ? now
-              : existingGuest.responded_at,
-        updated_at: now,
-      })
-      .eq("id", guestId);
+    const persistInlineGuestUpdate = async (removeSeatingAfterSave: boolean) => {
+      const { error: updateError } = await supabase
+        .from("rsvp_list")
+        .update({
+          guest_name: nextGuestName,
+          invite_code: draft.invite_code.trim().toUpperCase(),
+          ...(isGuestPhoneAvailable ? { phone_number: formatPhoneNumberInput(draft.phone_number) || null } : {}),
+          ...(isGuestEmailAvailable ? { email: draft.email.trim() || null } : {}),
+          ...(isRequestContactDetailsAvailable ? { request_contact_details: draft.request_contact_details } : {}),
+          max_guests: maxGuests,
+          attending: draft.attending,
+          confirmed_guests: confirmed,
+          invitation_sent: draft.invitation_sent,
+          ...(isInvitationSentAtAvailable ? { invitation_sent_at: nextInvitationSentAt } : {}),
+          has_children: draft.has_children,
+          children_count: children,
+          ...(isGuestNotesAvailable ? { notes: draft.notes.trim() || null } : {}),
+          responded_at:
+            draft.attending === null
+              ? null
+              : existingGuest.attending !== draft.attending || !existingGuest.responded_at
+                ? now
+                : existingGuest.responded_at,
+          updated_at: now,
+        })
+        .eq("id", guestId);
 
-    if (updateError) {
-      showToast(updateError.message, "error");
+      if (updateError) {
+        showToast(updateError.message, "error");
+        return;
+      }
+
+      if (removeSeatingAfterSave) {
+        const deleteError = await removeSeatingAssignmentsForGuest(existingGuest);
+        if (deleteError) {
+          showToast("Invitation updated, but seating could not be removed.", "error");
+          return;
+        }
+      } else if (
+        normalizeNameKey(existingGuest.guest_name) !== normalizeNameKey(nextGuestName) ||
+        normalizeInviteCode(existingGuest.invite_code) !== normalizeInviteCode(draft.invite_code)
+      ) {
+        const renameError = await syncSeatingAssignmentsForGuest(existingGuest, draft.invite_code);
+        if (renameError) {
+          showToast("Invitation updated, but seating could not be kept in sync with the new guest details.", "error");
+          return;
+        }
+      }
+
+      cancelInlineGuestEdit(guestId);
+      showToast("Invitation updated.", "success");
+    };
+
+    const hasSeating = getSeatingAssignmentsForGuest(existingGuest).length > 0;
+    if (hasSeating && draft.attending !== true) {
+      askConfirm({
+        title: "Guest Still Has Seating Assigned",
+        message: `${existingGuest.guest_name} still has a seating assignment. You can keep the seating as-is, or remove it while saving this RSVP change.`,
+        actionLabel: "Save & Keep Seating",
+        actionTone: "default",
+        onConfirm: async () => {
+          await persistInlineGuestUpdate(false);
+        },
+        secondaryActionLabel: "Save & Remove Seating",
+        secondaryActionTone: "danger",
+        onSecondaryAction: async () => {
+          await persistInlineGuestUpdate(true);
+        },
+      });
       return;
     }
 
-    cancelInlineGuestEdit(guestId);
-    showToast("Invitation updated.", "success");
+    await persistInlineGuestUpdate(false);
   };
 
   const startInlineSeatingEdit = (assignment: SeatingAssignment) => {
@@ -858,6 +1286,8 @@ export default function StudioProPage() {
       ...prev,
       [assignment.id]: {
         name: assignment.name,
+        name_aliases: assignment.name_aliases || "",
+        invite_code: normalizeInviteCode(assignment.invite_code),
         table_number: assignment.table_number,
         guest_count: Math.max(1, assignment.guest_count || 1),
       },
@@ -875,11 +1305,39 @@ export default function StudioProPage() {
   const saveInlineSeatingEdit = async (assignmentId: number) => {
     const draft = inlineSeatingEdits[assignmentId];
     if (!draft) return;
+    const existingAssignment = seatingAssignments.find((assignment) => assignment.id === assignmentId);
+    const cleanedInviteCode = normalizeInviteCode(draft.invite_code);
+    const matchingGuestByCode = cleanedInviteCode ? findGuestByInviteCode(cleanedInviteCode) : null;
+    if (cleanedInviteCode && !matchingGuestByCode) {
+      showToast("No invitation matches that RSVP code yet.", "error");
+      return;
+    }
+    const resolvedInviteCode =
+      cleanedInviteCode ||
+      normalizeInviteCode(findGuestByName(draft.name.trim())?.invite_code) ||
+      normalizeInviteCode(existingAssignment?.invite_code) ||
+      null;
+    const capacityCheck = getSeatingCapacityCheck({
+      name: draft.name.trim(),
+      inviteCode: resolvedInviteCode,
+      guestCount: draft.guest_count,
+      editingAssignmentId: assignmentId,
+    });
+
+    if (capacityCheck?.wouldExceed) {
+      showToast(
+        `This would assign ${capacityCheck.totalAfterSave} seats to ${capacityCheck.linkedGuest.guest_name}, but only ${capacityCheck.allowedSeats} are allowed.`,
+        "error",
+      );
+      return;
+    }
 
     const { error: updateError } = await supabase
       .from("seating")
       .update({
         name: draft.name.trim(),
+        ...(isSeatingAliasesAvailable ? { name_aliases: draft.name_aliases.trim() || null } : {}),
+        ...(isSeatingInviteCodeAvailable ? { invite_code: resolvedInviteCode } : {}),
         table_number: Math.max(1, draft.table_number || 1),
         ...(isSeatingGuestCountAvailable ? { guest_count: Math.max(1, draft.guest_count || 1) } : {}),
       })
@@ -903,21 +1361,99 @@ export default function StudioProPage() {
     }
   };
 
-  const copyInvitation = async (guest: GuestResponse) => {
-    const message = `Dear ${guest.guest_name}, with great joy, Omar & Hager invite you to celebrate their wedding. Please RSVP here: ${INVITE_BASE_URL}/${guest.invite_code.toLowerCase()}`;
+  const copyInvitationToClipboard = async (guest: GuestResponse) => {
+    const message = buildGuestInviteMessage(guest);
 
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      try {
+        const invitationImageDataUrl = await getClipboardReadyInvitationImageDataUrl();
+        const html = `
+          <div style="font-family: ui-serif, Georgia, serif; color: #1c1917; line-height: 1.6;">
+            <img
+              src="${invitationImageDataUrl}"
+              alt="Omar & Hager invitation"
+              style="display: block; max-width: 100%; height: auto; border-radius: 16px;"
+            />
+            <p style="margin: 16px 0 0 0;">${escapeClipboardHtml(message)}</p>
+          </div>
+        `.trim();
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/plain": new Blob([message], { type: "text/plain" }),
+            "text/html": new Blob([html], { type: "text/html" }),
+          }),
+        ]);
+        return { mode: "rich_html" as const };
+      } catch (error) {
+        if (!(error instanceof Error)) {
+          throw error;
+        }
+      }
+    }
+
+    await navigator.clipboard.writeText(message);
+    return { mode: "text" as const };
+  };
+
+  const copyInvitation = async (guest: GuestResponse) => {
     try {
-      await navigator.clipboard.writeText(message);
-      showToast("Invitation text copied.", "success");
+      const result = await copyInvitationToClipboard(guest);
+      showToast(
+        result.mode === "rich_html" ? "Invitation image and text copied." : "Invitation text copied. Attach the image manually if needed.",
+        result.mode === "rich_html" ? "success" : "info",
+      );
     } catch (copyError) {
       showToast(copyError instanceof Error ? copyError.message : "Could not copy invitation.", "error");
     }
   };
 
+  const openInvitationImage = () => {
+    window.open(INVITATION_IMAGE_PATH, "_blank", "noopener,noreferrer");
+  };
+
+  const textGuestFromPhone = async (guest: GuestResponse) => {
+    const rawPhone = guest.phone_number?.trim();
+    if (!rawPhone) {
+      showToast("No phone number is saved for this guest yet.", "info");
+      return;
+    }
+
+    const isReminder = Boolean(guest.invitation_sent);
+    const message = isReminder ? buildGuestReminderMessage(guest) : buildGuestInviteMessage(guest);
+
+    try {
+      if (isReminder) {
+        await navigator.clipboard.writeText(message);
+        showToast("Reminder text copied. Opening Messages now.", "success");
+      } else {
+        const result = await copyInvitationToClipboard(guest);
+        showToast(
+          result.mode === "rich_html"
+            ? "Invitation image and text copied. Opening Messages now."
+            : "Invitation text copied. Opening Messages now.",
+          "success",
+        );
+      }
+    } catch {
+      showToast("Opening Messages now. Copy the message manually if needed.", "info");
+    }
+
+    const smsTarget = normalizePhoneForSmsLink(rawPhone);
+    window.setTimeout(() => {
+      window.location.href = `sms:${smsTarget}`;
+    }, 120);
+  };
+
   const beginGuestFormEdit = (guest: GuestResponse) => {
+    setGuestComposerReturnLocation(
+      activeView === "invitations" && invitationTab === "composer" ? null : captureWorkspaceLocation(),
+    );
     setEditingGuestId(guest.id);
     setNewName(guest.guest_name);
     setNewCode(guest.invite_code);
+    setNewPhoneNumber(formatPhoneNumberInput(guest.phone_number || ""));
+    setNewEmail(guest.email || "");
+    setRequestContactDetails(Boolean(guest.request_contact_details));
     setNewLimit(guest.max_guests);
     setAttendanceStatus(guest.attending === null ? "pending" : guest.attending ? "attending" : "declined");
     setConfirmedGuests(guest.confirmed_guests || 0);
@@ -931,10 +1467,14 @@ export default function StudioProPage() {
   };
 
   const confirmRemoveGuest = (guest: GuestResponse) => {
+    const hasLinkedSeating = getSeatingAssignmentsForGuest(guest).length > 0;
+
     askConfirm({
       title: "Remove Invitation?",
-      message: `${guest.guest_name} will be removed from the invitation list.`,
-      actionLabel: "Remove",
+      message: hasLinkedSeating
+        ? `${guest.guest_name} will be removed from the invitation list. This guest also has linked seating assignments.`
+        : `${guest.guest_name} will be removed from the invitation list.`,
+      actionLabel: hasLinkedSeating ? "Remove Invitation & Seating" : "Remove",
       actionTone: "danger",
       onConfirm: async () => {
         const { error: deleteError } = await supabase.from("rsvp_list").delete().eq("id", guest.id);
@@ -942,14 +1482,44 @@ export default function StudioProPage() {
           showToast(deleteError.message, "error");
           return;
         }
+
+        if (hasLinkedSeating) {
+          const seatingDeleteError = await removeSeatingAssignmentsForGuest(guest);
+          if (seatingDeleteError) {
+            showToast("Invitation removed, but linked seating could not be removed.", "error");
+            return;
+          }
+          showToast("Invitation and linked seating removed.", "success");
+          return;
+        }
+
         showToast("Invitation removed.", "success");
       },
+      ...(hasLinkedSeating
+        ? {
+            secondaryActionLabel: "Remove Invitation Only",
+            onSecondaryAction: async () => {
+              const { error: deleteError } = await supabase.from("rsvp_list").delete().eq("id", guest.id);
+              if (deleteError) {
+                showToast(deleteError.message, "error");
+                return;
+              }
+
+              showToast("Invitation removed. Linked seating was kept.", "success");
+            },
+          }
+        : {}),
     });
   };
 
   const beginSeatingFormEdit = (assignment: SeatingAssignment) => {
+    setSeatingComposerReturnLocation(
+      activeView === "seating" && seatingTab === "composer" ? null : captureWorkspaceLocation(),
+    );
     setEditingSeatingId(assignment.id);
     setSeatingName(assignment.name);
+    setSeatingNameAliases(assignment.name_aliases || "");
+    setSeatingInviteCode(normalizeInviteCode(assignment.invite_code));
     setTableNumber(assignment.table_number);
     setSeatingGuestCount(Math.max(1, assignment.guest_count || 1));
     setActiveView("seating");
@@ -957,11 +1527,16 @@ export default function StudioProPage() {
     scrollToSection(seatingFormRef);
   };
 
-  const beginSeatingCreateForGuest = (guest: GuestResponse) => {
+  const beginSeatingCreateForGuest = (guest: GuestResponse, options?: { guestCount?: number | ""; tableNumber?: number | "" }) => {
+    setSeatingComposerReturnLocation(
+      activeView === "seating" && seatingTab === "composer" ? null : captureWorkspaceLocation(),
+    );
     setEditingSeatingId(null);
     setSeatingName(guest.guest_name);
-    setTableNumber(1);
-    setSeatingGuestCount(getSeatingGuestCount(guest));
+    setSeatingNameAliases("");
+    setSeatingInviteCode(normalizeInviteCode(guest.invite_code));
+    setTableNumber(options?.tableNumber ?? 1);
+    setSeatingGuestCount(options?.guestCount ?? getSeatingGuestCount(guest));
     setSeatingSearch("");
     setActiveView("seating");
     setSeatingTab("composer");
@@ -969,9 +1544,12 @@ export default function StudioProPage() {
   };
 
   const beginSeatingPlacementForGuest = (guest: GuestResponse) => {
-    const existingAssignment = seatingAssignmentLookup.get(normalizeNameKey(guest.guest_name));
-    if (existingAssignment) {
-      beginSeatingFormEdit(existingAssignment);
+    const accepted = guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : getSeatingGuestCount(guest);
+    const assigned = getAssignedSeatCountForGuest(guest);
+    const remaining = Math.max(0, accepted - assigned);
+
+    if (remaining > 0) {
+      beginSeatingCreateForGuest(guest, { guestCount: remaining });
       return;
     }
 
@@ -995,6 +1573,157 @@ export default function StudioProPage() {
     });
   };
 
+  const getSeatingAssignmentsForGuestName = useCallback(
+    (guestName: string) =>
+      seatingAssignments.filter((assignment) => normalizeNameKey(assignment.name) === normalizeNameKey(guestName)),
+    [seatingAssignments],
+  );
+
+  const getSeatingAssignmentsForGuest = useCallback(
+    (guest: GuestResponse) => {
+      const byInviteCode =
+        isSeatingInviteCodeAvailable === true
+          ? seatingAssignments.filter((assignment) => normalizeInviteCode(assignment.invite_code) === normalizeInviteCode(guest.invite_code))
+          : [];
+
+      if (byInviteCode.length > 0) return byInviteCode;
+      return getSeatingAssignmentsForGuestName(guest.guest_name);
+    },
+    [getSeatingAssignmentsForGuestName, isSeatingInviteCodeAvailable, seatingAssignments],
+  );
+
+  const getSeatingCapacityCheck = useCallback(
+    ({
+      name,
+      inviteCode,
+      guestCount,
+      editingAssignmentId,
+    }: {
+      name: string;
+      inviteCode?: string | null;
+      guestCount: number | "";
+      editingAssignmentId?: number | null;
+    }) => {
+      if (!isSeatingGuestCountAvailable) return null;
+
+      const linkedGuest = findLinkedGuestForSeating({ name, inviteCode });
+      if (!linkedGuest) return null;
+
+      const allowedSeats =
+        linkedGuest.attending === true ? Math.max(1, linkedGuest.confirmed_guests || 1) : Math.max(1, linkedGuest.max_guests || 1);
+      const requestedSeats = Math.max(1, Number(guestCount) || 1);
+      const alreadyAssignedSeats = getSeatingAssignmentsForGuest(linkedGuest)
+        .filter((assignment) => assignment.id !== editingAssignmentId)
+        .reduce((sum, assignment) => sum + Math.max(1, assignment.guest_count || 1), 0);
+      const totalAfterSave = alreadyAssignedSeats + requestedSeats;
+
+      return {
+        linkedGuest,
+        allowedSeats,
+        alreadyAssignedSeats,
+        requestedSeats,
+        totalAfterSave,
+        overflow: Math.max(0, totalAfterSave - allowedSeats),
+        wouldExceed: totalAfterSave > allowedSeats,
+      };
+    },
+    [findLinkedGuestForSeating, getSeatingAssignmentsForGuest, isSeatingGuestCountAvailable],
+  );
+
+  const getAssignedSeatCountForGuest = useCallback(
+    (guest: GuestResponse) => {
+      const assignments = getSeatingAssignmentsForGuest(guest);
+      if (assignments.length === 0) return 0;
+
+      if (isSeatingGuestCountAvailable) {
+        return assignments.reduce((sum, assignment) => sum + Math.max(1, assignment.guest_count || 1), 0);
+      }
+
+      return Math.max(1, guest.confirmed_guests || guest.max_guests || 1);
+    },
+    [getSeatingAssignmentsForGuest, isSeatingGuestCountAvailable],
+  );
+
+  const getTableNumbersForGuest = useCallback(
+    (guest: GuestResponse) =>
+      Array.from(new Set(getSeatingAssignmentsForGuest(guest).map((assignment) => assignment.table_number))).sort((left, right) => left - right),
+    [getSeatingAssignmentsForGuest],
+  );
+
+  const getTableLabelForGuest = useCallback(
+    (guest: GuestResponse) => {
+      const tableNumbers = getTableNumbersForGuest(guest);
+      if (tableNumbers.length === 0) return null;
+      if (tableNumbers.length === 1) return `Table ${tableNumbers[0]}`;
+      return `Tables ${tableNumbers.join(", ")}`;
+    },
+    [getTableNumbersForGuest],
+  );
+
+  const removeSeatingAssignmentsForGuest = useCallback(
+    async (guest: GuestResponse) => {
+      const matchingAssignments = getSeatingAssignmentsForGuest(guest);
+      if (matchingAssignments.length === 0) return null;
+
+      const { error: deleteError } = await supabase
+        .from("seating")
+        .delete()
+        .in(
+          "id",
+          matchingAssignments.map((assignment) => assignment.id),
+        );
+
+      return deleteError;
+    },
+    [getSeatingAssignmentsForGuest],
+  );
+
+  const syncSeatingAssignmentsForGuest = useCallback(
+    async (guest: GuestResponse, nextInviteCode: string) => {
+      const matchingAssignments = getSeatingAssignmentsForGuest(guest);
+      if (matchingAssignments.length === 0) return null;
+
+      const { error: syncError } = await supabase
+        .from("seating")
+        .update({
+          ...(isSeatingInviteCodeAvailable ? { invite_code: normalizeInviteCode(nextInviteCode) || null } : {}),
+        })
+        .in(
+          "id",
+          matchingAssignments.map((assignment) => assignment.id),
+        );
+
+      return syncError;
+    },
+    [getSeatingAssignmentsForGuest, isSeatingInviteCodeAvailable],
+  );
+
+  const openSeatingBoardForName = (guestName: string) => {
+    setActiveView("seating");
+    setSeatingTab("board");
+    setSeatingBoardMode("assignments");
+    setSeatingTableFilter("all");
+    setSeatingSearch(guestName);
+  };
+
+  const openSeatingBoardForGuest = useCallback(
+    (guest: GuestResponse) => {
+      const guestTables = getTableNumbersForGuest(guest);
+      setActiveView("seating");
+      setSeatingTab("board");
+      if (guestTables.length > 1) {
+        setSeatingBoardMode("invites");
+      }
+      setSeatingTableFilter(guestTables.length > 0 ? guestTables : "all");
+      setSeatingSearch(
+        isSeatingInviteCodeAvailable === true && normalizeInviteCode(guest.invite_code)
+          ? normalizeInviteCode(guest.invite_code)
+          : guest.guest_name,
+      );
+    },
+    [getTableNumbersForGuest, isSeatingInviteCodeAvailable],
+  );
+
   const updateSetting = async (key: string, nextValue: boolean, successMessage: string) => {
     const { error: updateError } = await supabase.from("settings").update({ value: String(nextValue) }).eq("key", key);
 
@@ -1013,68 +1742,175 @@ export default function StudioProPage() {
     showToast(successMessage, "success");
   };
 
-  const seatingLookup = useMemo(() => {
-    const map = new Map<string, number>();
-    seatingAssignments.forEach((assignment) => {
-      const key = normalizeNameKey(assignment.name);
-      if (key && !map.has(key)) {
-        map.set(key, assignment.table_number);
-      }
-    });
-    return map;
-  }, [seatingAssignments]);
-
-  const seatingAssignmentLookup = useMemo(() => {
-    const map = new Map<string, SeatingAssignment>();
-    seatingAssignments.forEach((assignment) => {
-      const key = normalizeNameKey(assignment.name);
-      if (key && !map.has(key)) {
-        map.set(key, assignment);
-      }
-    });
-    return map;
-  }, [seatingAssignments]);
+  const getTableForGuest = useCallback(
+    (guest: GuestResponse) => {
+      const tableNumbers = getTableNumbersForGuest(guest);
+      return tableNumbers[0];
+    },
+    [getTableNumbersForGuest],
+  );
 
   const acceptedGuestsNeedingSeating = useMemo(() => {
     return responses
       .filter((guest) => guest.attending === true)
-      .map((guest) => {
-        const assignment = seatingAssignmentLookup.get(normalizeNameKey(guest.guest_name));
+      .flatMap((guest) => {
+        const assignments = getSeatingAssignmentsForGuest(guest);
+        const assignment = assignments[0];
         const accepted = Math.max(1, guest.confirmed_guests || 1);
-        const assigned = assignment
-          ? isSeatingGuestCountAvailable
-            ? Math.max(1, assignment.guest_count || 1)
-            : accepted
-          : 0;
+        const assigned = getAssignedSeatCountForGuest(guest);
         const remaining = Math.max(0, accepted - assigned);
+        const tableNumbers = Array.from(new Set(assignments.map((item) => item.table_number))).sort((left, right) => left - right);
 
-        if (remaining === 0) return null;
+        if (remaining === 0) return [];
 
-        return {
-          guest,
-          assignment,
-          accepted,
-          assigned,
-          remaining,
-        };
-      })
-      .filter(
-        (
-          item,
-        ): item is {
+        const item: {
           guest: GuestResponse;
+          assignments: SeatingAssignment[];
           assignment: SeatingAssignment | undefined;
           accepted: number;
           assigned: number;
           remaining: number;
-        } => Boolean(item),
-      );
-  }, [isSeatingGuestCountAvailable, responses, seatingAssignmentLookup]);
+          tableNumbers: number[];
+        } = {
+          guest,
+          assignments,
+          assignment,
+          accepted,
+          assigned,
+          remaining,
+          tableNumbers,
+        };
+
+        return [item];
+      });
+  }, [getAssignedSeatCountForGuest, getSeatingAssignmentsForGuest, responses]);
 
   const guestsNeedingSeatingKeys = useMemo(
     () => new Set(acceptedGuestsNeedingSeating.map(({ guest }) => normalizeNameKey(guest.guest_name))),
     [acceptedGuestsNeedingSeating],
   );
+
+  const seatedPendingOrDeclinedGuests = useMemo(() => {
+    return responses
+      .filter((guest) => guest.attending !== true)
+      .flatMap((guest) => {
+        const assignments = getSeatingAssignmentsForGuest(guest);
+        const assignment = assignments[0];
+        if (!assignment) return [];
+
+        const item: {
+          guest: GuestResponse;
+          assignments: SeatingAssignment[];
+          assignment: SeatingAssignment;
+          assigned: number;
+          tableNumbers: number[];
+        } = {
+          guest,
+          assignments,
+          assignment,
+          assigned: getAssignedSeatCountForGuest(guest),
+          tableNumbers: Array.from(new Set(assignments.map((item) => item.table_number))).sort((left, right) => left - right),
+        };
+
+        return [item];
+      });
+  }, [getAssignedSeatCountForGuest, getSeatingAssignmentsForGuest, responses]);
+
+  const seatedPendingOrDeclinedKeys = useMemo(
+    () => new Set(seatedPendingOrDeclinedGuests.map(({ guest }) => normalizeNameKey(guest.guest_name))),
+    [seatedPendingOrDeclinedGuests],
+  );
+
+  const acceptedSeatOverages = useMemo(() => {
+    return responses
+      .filter((guest) => guest.attending === true)
+      .flatMap((guest) => {
+        const assignments = getSeatingAssignmentsForGuest(guest);
+        const assignment = assignments[0];
+        if (!assignment) return [];
+
+        const accepted = Math.max(1, guest.confirmed_guests || 1);
+        const assigned = getAssignedSeatCountForGuest(guest);
+        if (assigned <= accepted) return [];
+
+        const item: {
+          guest: GuestResponse;
+          assignments: SeatingAssignment[];
+          assignment: SeatingAssignment;
+          accepted: number;
+          assigned: number;
+          overflow: number;
+          tableNumbers: number[];
+        } = {
+          guest,
+          assignments,
+          assignment,
+          accepted,
+          assigned,
+          overflow: assigned - accepted,
+          tableNumbers: Array.from(new Set(assignments.map((item) => item.table_number))).sort((left, right) => left - right),
+        };
+
+        return [item];
+      });
+  }, [getAssignedSeatCountForGuest, getSeatingAssignmentsForGuest, responses]);
+
+  const acceptedSeatOverageKeys = useMemo(
+    () => new Set(acceptedSeatOverages.map(({ guest }) => normalizeNameKey(guest.guest_name))),
+    [acceptedSeatOverages],
+  );
+
+  const guestCountIntegrityIssues = useMemo(() => {
+    return responses.filter((guest) => {
+      const confirmedTooHigh = typeof guest.confirmed_guests === "number" && guest.confirmed_guests > guest.max_guests;
+      const childrenTooHigh = typeof guest.children_count === "number" && guest.children_count > guest.max_guests;
+      return confirmedTooHigh || childrenTooHigh;
+    });
+  }, [responses]);
+
+  const guestCountIntegrityIssueKeys = useMemo(
+    () => new Set(guestCountIntegrityIssues.map((guest) => normalizeNameKey(guest.guest_name))),
+    [guestCountIntegrityIssues],
+  );
+
+  const seatingWithoutMatchingInvite = useMemo(
+    () =>
+      seatingAssignments.filter(
+        (assignment) =>
+          !responses.some((guest) =>
+            isSeatingInviteCodeAvailable === true && normalizeInviteCode(assignment.invite_code)
+              ? normalizeInviteCode(guest.invite_code) === normalizeInviteCode(assignment.invite_code)
+              : normalizeNameKey(guest.guest_name) === normalizeNameKey(assignment.name),
+          ),
+      ),
+    [isSeatingInviteCodeAvailable, responses, seatingAssignments],
+  );
+
+  const duplicateSeatingNameGroups = useMemo(() => {
+    const grouped = new Map<string, SeatingAssignment[]>();
+
+    seatingAssignments.forEach((assignment) => {
+      const key =
+        normalizeInviteCode(assignment.invite_code)
+          ? ""
+          : `name:${normalizeNameKey(assignment.name)}`;
+      if (!key) return;
+      grouped.set(key, [...(grouped.get(key) || []), assignment]);
+    });
+
+    return Array.from(grouped.entries())
+      .map(([key, assignments]) => ({ key, assignments }))
+      .filter(({ assignments }) => assignments.length > 1)
+      .sort((left, right) => left.assignments[0].name.localeCompare(right.assignments[0].name));
+  }, [seatingAssignments]);
+
+  const integrityIssueCount =
+    acceptedGuestsNeedingSeating.length +
+    seatedPendingOrDeclinedGuests.length +
+    acceptedSeatOverages.length +
+    guestCountIntegrityIssues.length +
+    seatingWithoutMatchingInvite.length +
+    duplicateSeatingNameGroups.length;
 
   const toggleGuestStatusFilter = (filter: GuestStatusFilter) => {
     setGuestStatusFilters((prev) =>
@@ -1118,11 +1954,8 @@ export default function StudioProPage() {
     );
     const acceptedGuestsSeated = responses.reduce((sum, guest) => {
       if (guest.attending !== true) return sum;
-      const assignment = seatingAssignmentLookup.get(normalizeNameKey(guest.guest_name));
-      if (!assignment) return sum;
-
       const confirmed = Math.max(1, guest.confirmed_guests || 1);
-      const seatedCount = isSeatingGuestCountAvailable ? Math.max(1, assignment.guest_count || 1) : confirmed;
+      const seatedCount = getAssignedSeatCountForGuest(guest);
       return sum + Math.min(confirmed, seatedCount);
     }, 0);
     const totalInvitedGuests = responses.reduce((sum, guest) => sum + (guest.max_guests || 0), 0);
@@ -1139,7 +1972,7 @@ export default function StudioProPage() {
       acceptedNeedingSeating: acceptedGuestsNeedingSeating.length,
       uniqueTables,
     };
-  }, [acceptedGuestsNeedingSeating.length, isSeatingGuestCountAvailable, responses, seatingAssignmentLookup, seatingAssignments]);
+  }, [acceptedGuestsNeedingSeating.length, getAssignedSeatCountForGuest, responses, seatingAssignments]);
 
   const filteredResponses = useMemo(() => {
     const query = deferredGuestSearch.trim().toLowerCase();
@@ -1209,22 +2042,35 @@ export default function StudioProPage() {
     const query = deferredSeatingSearch.trim().toLowerCase();
     const byQuery = query
       ? seatingAssignments.filter(
-          (assignment) =>
-            assignment.name.toLowerCase().includes(query) || String(assignment.table_number).includes(query),
+          (assignment) => {
+            const linkedGuestName =
+              findLinkedGuestForSeating({
+                name: assignment.name,
+                inviteCode: assignment.invite_code,
+              })?.guest_name.toLowerCase() || "";
+
+            return (
+              assignment.name.toLowerCase().includes(query) ||
+              linkedGuestName.includes(query) ||
+              parseNameAliases(assignment.name_aliases).some((alias) => alias.toLowerCase().includes(query)) ||
+              normalizeInviteCode(assignment.invite_code).toLowerCase().includes(query) ||
+              String(assignment.table_number).includes(query)
+            );
+          },
         )
       : seatingAssignments;
 
     const byTable =
       seatingTableFilter === "all"
         ? byQuery
-        : byQuery.filter((assignment) => assignment.table_number === seatingTableFilter);
+        : byQuery.filter((assignment) => seatingTableFilter.includes(assignment.table_number));
 
     return [...byTable].sort((left, right) =>
       seatingSort === "name"
         ? left.name.localeCompare(right.name)
         : left.table_number - right.table_number || left.name.localeCompare(right.name),
     );
-  }, [deferredSeatingSearch, seatingAssignments, seatingSort, seatingTableFilter]);
+  }, [deferredSeatingSearch, findLinkedGuestForSeating, seatingAssignments, seatingSort, seatingTableFilter]);
 
   const filteredSeatingGuestCount = useMemo(
     () => filteredSeatingAssignments.reduce((sum, assignment) => sum + Math.max(1, assignment.guest_count || 1), 0),
@@ -1247,12 +2093,86 @@ export default function StudioProPage() {
     [seatingAssignments],
   );
 
+  const groupedSeatingAssignments = useMemo(() => {
+    const grouped = new Map<
+      string,
+      {
+        key: string;
+        inviteCode: string | null;
+        linkedGuest: GuestResponse | null;
+        displayName: string;
+        assignments: SeatingAssignment[];
+        tableNumbers: number[];
+        assignedSeats: number;
+      }
+    >();
+
+    filteredSeatingAssignments.forEach((assignment) => {
+      const inviteCode = normalizeInviteCode(assignment.invite_code) || null;
+      const key = inviteCode ? `invite:${inviteCode}` : `name:${normalizeNameKey(assignment.name)}`;
+      const existing = grouped.get(key);
+      const linkedGuest =
+        existing?.linkedGuest ||
+        findLinkedGuestForSeating({
+          name: assignment.name,
+          inviteCode,
+        });
+      const nextAssignments = [...(existing?.assignments || []), assignment];
+      const nextTableNumbers = Array.from(new Set(nextAssignments.map((item) => item.table_number))).sort((left, right) => left - right);
+      const assignedSeats = nextAssignments.reduce((sum, item) => sum + Math.max(1, item.guest_count || 1), 0);
+
+      grouped.set(key, {
+        key,
+        inviteCode,
+        linkedGuest,
+        displayName: linkedGuest?.guest_name || assignment.name,
+        assignments: nextAssignments.sort((left, right) => left.table_number - right.table_number || left.name.localeCompare(right.name)),
+        tableNumbers: nextTableNumbers,
+        assignedSeats,
+      });
+    });
+
+    return Array.from(grouped.values()).sort((left, right) => {
+      const leftPrimaryTable = left.tableNumbers[0] ?? Number.MAX_SAFE_INTEGER;
+      const rightPrimaryTable = right.tableNumbers[0] ?? Number.MAX_SAFE_INTEGER;
+      return leftPrimaryTable - rightPrimaryTable || left.displayName.localeCompare(right.displayName);
+    });
+  }, [filteredSeatingAssignments, findLinkedGuestForSeating]);
+
+  const selectedSeatingTableNumbers = useMemo(
+    () => (seatingTableFilter === "all" ? [] : seatingTableFilter),
+    [seatingTableFilter],
+  );
+
+  const isSeatingTableSelected = useCallback(
+    (table: number) => seatingTableFilter !== "all" && seatingTableFilter.includes(table),
+    [seatingTableFilter],
+  );
+
+  const toggleSeatingTableFilter = useCallback((table: number) => {
+    setSeatingTableFilter((prev) => {
+      if (prev === "all") return [table];
+      if (prev.includes(table)) {
+        const next = prev.filter((value) => value !== table);
+        return next.length === 0 ? "all" : next;
+      }
+      return [...prev, table].sort((left, right) => left - right);
+    });
+  }, []);
+
   useEffect(() => {
     if (availableTableNumbers.length === 0) {
+      setSeatingTableFilter("all");
       setTableMoveFrom("");
       setTableMoveTo("");
       return;
     }
+
+    setSeatingTableFilter((prev) => {
+      if (prev === "all") return prev;
+      const next = prev.filter((table) => availableTableNumbers.includes(table));
+      return next.length === 0 ? "all" : next;
+    });
 
     setTableMoveFrom((prev) => {
       if (typeof prev === "number" && availableTableNumbers.includes(prev)) return prev;
@@ -1288,6 +2208,13 @@ export default function StudioProPage() {
       });
   }, [followUpSentBefore, responses]);
 
+  const seatingComposerCapacityCheck = getSeatingCapacityCheck({
+    name: seatingName.trim(),
+    inviteCode: seatingInviteCode,
+    guestCount: seatingGuestCount,
+    editingAssignmentId: editingSeatingId,
+  });
+
   const selectedVisibleGuestCount = useMemo(
     () => filteredResponses.filter((guest) => selectedGuestIds.includes(guest.id)).length,
     [filteredResponses, selectedGuestIds],
@@ -1304,11 +2231,18 @@ export default function StudioProPage() {
   );
 
   const assignGuestToTable = async (guest: GuestResponse, nextTableNumber: number) => {
+    const matchingAssignments = getSeatingAssignmentsForGuest(guest);
+    if (matchingAssignments.length > 1) {
+      openSeatingBoardForGuest(guest);
+      showToast("This invitation has multiple seating rows. Update it from the seating board.", "info");
+      return;
+    }
+
     const assignmentPayload = {
+      ...(isSeatingInviteCodeAvailable ? { invite_code: normalizeInviteCode(guest.invite_code) || null } : {}),
       table_number: Math.max(1, nextTableNumber),
-      ...(isSeatingGuestCountAvailable ? { guest_count: getSeatingGuestCount(guest) } : {}),
     };
-    const existingAssignment = seatingAssignmentLookup.get(normalizeNameKey(guest.guest_name));
+    const existingAssignment = matchingAssignments[0];
 
     if (existingAssignment) {
       const { error: updateError } = await supabase.from("seating").update(assignmentPayload).eq("id", existingAssignment.id);
@@ -1332,13 +2266,19 @@ export default function StudioProPage() {
   };
 
   const removeGuestSeating = async (guest: GuestResponse) => {
-    const existingAssignment = seatingAssignmentLookup.get(normalizeNameKey(guest.guest_name));
-    if (!existingAssignment) {
+    const matchingAssignments = getSeatingAssignmentsForGuest(guest);
+    if (matchingAssignments.length === 0) {
       showToast(`${guest.guest_name} does not have a seating assignment yet.`, "info");
       return;
     }
 
-    const { error: deleteError } = await supabase.from("seating").delete().eq("id", existingAssignment.id);
+    const { error: deleteError } = await supabase
+      .from("seating")
+      .delete()
+      .in(
+        "id",
+        matchingAssignments.map((assignment) => assignment.id),
+      );
     if (deleteError) {
       showToast(deleteError.message, "error");
       return;
@@ -1369,6 +2309,13 @@ export default function StudioProPage() {
   const bulkMarkSelectedAsSent = async () => {
     if (selectedGuestIds.length === 0) return;
 
+    await bulkMarkGuestsAsSent(selectedGuestIds);
+    setSelectedGuestIds([]);
+  };
+
+  const bulkMarkGuestsAsSent = async (guestIds: string[]) => {
+    if (guestIds.length === 0) return;
+
     const now = new Date().toISOString();
     const { error: updateError } = await supabase
       .from("rsvp_list")
@@ -1377,15 +2324,14 @@ export default function StudioProPage() {
         ...(isInvitationSentAtAvailable ? { invitation_sent_at: now } : {}),
         updated_at: now,
       })
-      .in("id", selectedGuestIds);
+      .in("id", guestIds);
 
     if (updateError) {
       showToast(updateError.message, "error");
       return;
     }
 
-    showToast(`${selectedGuestIds.length} invitation${selectedGuestIds.length === 1 ? "" : "s"} marked sent.`, "success");
-    setSelectedGuestIds([]);
+    showToast(`${guestIds.length} invitation${guestIds.length === 1 ? "" : "s"} marked sent.`, "success");
   };
 
   const bulkMarkSelectedAsNotSent = async () => {
@@ -1426,12 +2372,7 @@ export default function StudioProPage() {
   const copySelectedInvitations = async () => {
     if (selectedGuests.length === 0) return;
 
-    const invitations = selectedGuests
-      .map(
-        (guest) =>
-          `Dear ${guest.guest_name}, with great joy, Omar & Hager invite you to celebrate their wedding. Please RSVP here: ${INVITE_BASE_URL}/${guest.invite_code.toLowerCase()}`,
-      )
-      .join("\n\n");
+    const invitations = selectedGuests.map((guest) => buildGuestInviteMessage(guest)).join("\n\n");
 
     try {
       await navigator.clipboard.writeText(invitations);
@@ -1444,48 +2385,99 @@ export default function StudioProPage() {
   const bulkResetSelectedRsvpToPending = async () => {
     if (selectedGuestIds.length === 0) return;
 
-    const now = new Date().toISOString();
-    const { error: updateError } = await supabase
-      .from("rsvp_list")
-      .update({
-        attending: null,
-        confirmed_guests: null,
-        responded_at: null,
-        updated_at: now,
-      })
-      .in("id", selectedGuestIds);
+    const seatedSelectedGuests = selectedGuests.filter((guest) => getSeatingAssignmentsForGuest(guest).length > 0);
+    const resetSelectedRsvps = async (removeSeatingAfterSave: boolean) => {
+      const now = new Date().toISOString();
+      const { error: updateError } = await supabase
+        .from("rsvp_list")
+        .update({
+          attending: null,
+          confirmed_guests: null,
+          responded_at: null,
+          updated_at: now,
+        })
+        .in("id", selectedGuestIds);
 
-    if (updateError) {
-      showToast(updateError.message, "error");
+      if (updateError) {
+        showToast(updateError.message, "error");
+        return;
+      }
+
+      if (removeSeatingAfterSave && seatedSelectedGuests.length > 0) {
+        const seatingDeleteError = await supabase
+          .from("seating")
+          .delete()
+          .in(
+            "id",
+            Array.from(
+              new Map(
+                seatedSelectedGuests
+                  .flatMap((guest) => getSeatingAssignmentsForGuest(guest))
+                  .map((assignment) => [assignment.id, assignment]),
+              ).values(),
+            ).map((assignment) => assignment.id),
+          );
+
+        if (seatingDeleteError.error) {
+          showToast("RSVPs were reset, but seating could not be removed.", "error");
+          return;
+        }
+
+        showToast(
+          `${selectedGuestIds.length} RSVP${selectedGuestIds.length === 1 ? "" : "s"} reset to pending and seating removed.`,
+          "success",
+        );
+      } else {
+        showToast(
+          `${selectedGuestIds.length} RSVP${selectedGuestIds.length === 1 ? "" : "s"} reset to pending.`,
+          "success",
+        );
+      }
+
+      setSelectedGuestIds([]);
+    };
+
+    if (seatedSelectedGuests.length > 0) {
+      askConfirm({
+        title: "Selected Guests Still Have Seating Assigned",
+        message: `${seatedSelectedGuests.length} selected guest${seatedSelectedGuests.length === 1 ? "" : "s"} still have seating assigned. You can reset their RSVP to pending and keep their seating, or remove those seating assignments too.`,
+        actionLabel: "Reset & Keep Seating",
+        actionTone: "default",
+        onConfirm: async () => {
+          await resetSelectedRsvps(false);
+        },
+        secondaryActionLabel: "Reset & Remove Seating",
+        secondaryActionTone: "danger",
+        onSecondaryAction: async () => {
+          await resetSelectedRsvps(true);
+        },
+      });
       return;
     }
 
-    showToast(
-      `${selectedGuestIds.length} RSVP${selectedGuestIds.length === 1 ? "" : "s"} reset to pending.`,
-      "success",
-    );
-    setSelectedGuestIds([]);
+    await resetSelectedRsvps(false);
   };
 
   const bulkAssignSelectedToTable = async () => {
     if (selectedGuests.length === 0) return;
 
     const nextTableNumber = Math.max(1, Number(bulkTableNumber) || 1);
-    const existingAssignmentsByName = new Map(
-      seatingAssignments.map((assignment) => [normalizeNameKey(assignment.name), assignment]),
-    );
 
     for (const guest of selectedGuests) {
-      const existingAssignment = existingAssignmentsByName.get(normalizeNameKey(guest.guest_name));
+      const existingAssignments = getSeatingAssignmentsForGuest(guest);
+      const existingAssignment = existingAssignments[0];
 
       if (existingAssignment) {
         const { error: updateError } = await supabase
           .from("seating")
           .update({
+            ...(isSeatingInviteCodeAvailable ? { invite_code: normalizeInviteCode(guest.invite_code) || null } : {}),
             table_number: nextTableNumber,
-            ...(isSeatingGuestCountAvailable ? { guest_count: getSeatingGuestCount(guest) } : {}),
           })
-          .eq("id", existingAssignment.id);
+          .in(
+            "id",
+            existingAssignments.map((assignment) => assignment.id),
+          );
 
         if (updateError) {
           showToast(updateError.message, "error");
@@ -1497,6 +2489,7 @@ export default function StudioProPage() {
           .insert([
             {
               name: guest.guest_name.trim(),
+              ...(isSeatingInviteCodeAvailable ? { invite_code: normalizeInviteCode(guest.invite_code) || null } : {}),
               table_number: nextTableNumber,
               ...(isSeatingGuestCountAvailable ? { guest_count: getSeatingGuestCount(guest) } : {}),
             },
@@ -1519,39 +2512,58 @@ export default function StudioProPage() {
   const bulkRemoveSelectedSeating = async () => {
     if (selectedGuests.length === 0) return;
 
-    const assignmentsToRemove = seatingAssignments.filter((assignment) =>
-      selectedGuests.some((guest) => normalizeNameKey(guest.guest_name) === normalizeNameKey(assignment.name)),
+    const assignmentsToRemove = Array.from(
+      new Map(
+        selectedGuests
+          .flatMap((guest) => getSeatingAssignmentsForGuest(guest))
+          .map((assignment) => [assignment.id, assignment]),
+      ).values(),
     );
 
     if (assignmentsToRemove.length === 0) {
       showToast("None of the selected guests currently have a seating assignment.", "info");
       return;
     }
+    const guestsAffected = selectedGuests.filter((guest) => getSeatingAssignmentsForGuest(guest).length > 0).length;
+    const totalSeatsAffected = assignmentsToRemove.reduce((sum, assignment) => sum + Math.max(1, assignment.guest_count || 1), 0);
 
-    const { error: deleteError } = await supabase
-      .from("seating")
-      .delete()
-      .in(
-        "id",
-        assignmentsToRemove.map((assignment) => assignment.id),
-      );
+    askConfirm({
+      title: "Remove Selected Seating?",
+      message: `This will remove seating for ${guestsAffected} guest${guestsAffected === 1 ? "" : "s"} across ${assignmentsToRemove.length} seating row${
+        assignmentsToRemove.length === 1 ? "" : "s"
+      }, covering ${totalSeatsAffected} seat${totalSeatsAffected === 1 ? "" : "s"}.`,
+      actionLabel: "Remove Seating",
+      actionTone: "danger",
+      onConfirm: async () => {
+        const { error: deleteError } = await supabase
+          .from("seating")
+          .delete()
+          .in(
+            "id",
+            assignmentsToRemove.map((assignment) => assignment.id),
+          );
 
-    if (deleteError) {
-      showToast(deleteError.message, "error");
-      return;
-    }
+        if (deleteError) {
+          showToast(deleteError.message, "error");
+          return;
+        }
 
-    showToast(
-      `Removed seating for ${assignmentsToRemove.length} selected guest${assignmentsToRemove.length === 1 ? "" : "s"}.`,
-      "success",
-    );
-    setSelectedGuestIds([]);
+        showToast(
+          `Removed seating for ${guestsAffected} guest${guestsAffected === 1 ? "" : "s"}.`,
+          "success",
+        );
+        setSelectedGuestIds([]);
+      },
+    });
   };
 
   const exportInvitationCsv = () => {
     const headers = [
       "guest_name",
       "invite_code",
+      ...(isGuestPhoneAvailable ? ["phone_number"] : []),
+      ...(isGuestEmailAvailable ? ["email"] : []),
+      ...(isRequestContactDetailsAvailable ? ["request_contact_details"] : []),
       "max_guests",
       "confirmed_guests",
       "attending",
@@ -1577,13 +2589,16 @@ export default function StudioProPage() {
     };
 
     const rows = filteredResponses.map((guest) => {
-      const matchingAssignment = seatingAssignments.find(
-        (assignment) => normalizeNameKey(assignment.name) === normalizeNameKey(guest.guest_name),
-      );
-      const tableNumber = matchingAssignment?.table_number ?? "";
+      const matchingAssignments = getSeatingAssignmentsForGuest(guest);
+      const tableNumber = Array.from(new Set(matchingAssignments.map((assignment) => assignment.table_number)))
+        .sort((left, right) => left - right)
+        .join(", ");
       return [
         guest.guest_name,
         guest.invite_code,
+        ...(isGuestPhoneAvailable ? [guest.phone_number ?? ""] : []),
+        ...(isGuestEmailAvailable ? [guest.email ?? ""] : []),
+        ...(isRequestContactDetailsAvailable ? [Boolean(guest.request_contact_details)] : []),
         guest.max_guests,
         guest.confirmed_guests ?? "",
         guest.attending === null ? "pending" : guest.attending ? "attending" : "declined",
@@ -1595,7 +2610,7 @@ export default function StudioProPage() {
         guest.updated_at ?? "",
         guest.created_at ?? "",
         tableNumber,
-        matchingAssignment?.guest_count ?? "",
+        matchingAssignments.length > 0 ? getAssignedSeatCountForGuest(guest) : "",
         isGuestNotesAvailable ? guest.notes ?? "" : "",
         getGuestInviteUrl(guest),
       ]
@@ -1648,7 +2663,7 @@ export default function StudioProPage() {
           return;
         }
 
-        setSeatingTableFilter(targetTable);
+        setSeatingTableFilter([targetTable]);
         setSeatingTab("board");
         showToast(
           `Moved ${assignmentsToMove.length} seating assignment${assignmentsToMove.length === 1 ? "" : "s"} from table ${sourceTable} to table ${targetTable}.`,
@@ -1741,6 +2756,13 @@ export default function StudioProPage() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
+                onClick={openInvitationImage}
+                className="inline-flex items-center justify-center rounded-full border border-stone-200 bg-stone-50 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-stone-700 transition hover:bg-white"
+              >
+                Open Invitation Image
+              </button>
+              <button
+                type="button"
                 onClick={exportInvitationCsv}
                 className="inline-flex items-center justify-center rounded-full border border-stone-200 bg-stone-50 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-stone-700 transition hover:bg-white"
               >
@@ -1772,6 +2794,7 @@ export default function StudioProPage() {
                     { key: "follow_up", label: "Follow Up" },
                     { key: "needs_seating", label: `Needs Seating (${stats.acceptedNeedingSeating})` },
                     { key: "activity", label: "Recent Activity" },
+                    { key: "checks", label: `Checks (${integrityIssueCount})` },
                   ]}
                   activeTab={overviewTab}
                   onChange={(nextTab) => setOverviewTab(nextTab as OverviewWorkspaceTab)}
@@ -1893,6 +2916,11 @@ export default function StudioProPage() {
                                 <button type="button" onClick={() => void copyInvitation(guest)} className="wedding-button-secondary">
                                   Copy Invitation
                                 </button>
+                                {isGuestPhoneAvailable && guest.phone_number ? (
+                                  <button type="button" onClick={() => void textGuestFromPhone(guest)} className="wedding-button-secondary">
+                                    Send Reminder
+                                  </button>
+                                ) : null}
                               </div>
                             </div>
                           </div>
@@ -1922,10 +2950,10 @@ export default function StudioProPage() {
                             title={guest.guest_name}
                             subtitle={
                               assignment
-                                ? `Accepted ${accepted} guest${accepted === 1 ? "" : "s"} · ${assigned} seated · ${remaining} still needed · Table ${assignment.table_number}`
+                                ? `Accepted ${accepted} guest${accepted === 1 ? "" : "s"} · ${assigned} seated · ${remaining} still needed · ${getTableLabelForGuest(guest)}`
                                 : `Accepted ${accepted} guest${accepted === 1 ? "" : "s"} · ${remaining} still needed · ${guest.invite_code}`
                             }
-                            actionLabel={assignment ? "Finish Seating" : "Add Seating"}
+                            actionLabel={assigned > 0 ? "Add Remaining Seating" : "Add Seating"}
                             onAction={() => beginSeatingPlacementForGuest(guest)}
                           />
                         ))
@@ -1948,6 +2976,184 @@ export default function StudioProPage() {
                         recentActivity.map((item) => (
                           <ActivityRow key={item.id} title={item.title} detail={item.detail} timestamp={item.timestamp} />
                         ))
+                      )}
+                    </div>
+                  </StudioPanel>
+                )}
+
+                {overviewTab === "checks" && (
+                  <StudioPanel>
+                    <SectionHeading
+                      kicker="Checks"
+                      title="Integrity Checks"
+                      description="Use this tab to catch seating and RSVP states that need attention before they turn into planning mistakes."
+                    />
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      <StatTile label="Needs Seating" value={acceptedGuestsNeedingSeating.length} tone="amber" />
+                      <StatTile label="Seated While Pending/Declined" value={seatedPendingOrDeclinedGuests.length} tone="rose" />
+                      <StatTile label="Seat Count Over Accepted" value={acceptedSeatOverages.length} tone="rose" />
+                      <StatTile label="Guest Count Issues" value={guestCountIntegrityIssues.length} tone="rose" />
+                      <StatTile label="Seating Without Invite" value={seatingWithoutMatchingInvite.length} tone="rose" />
+                      <StatTile label="Duplicate Seating Rows" value={duplicateSeatingNameGroups.length} tone="rose" />
+                    </div>
+
+                    <div className="mt-5">
+                      <WorkspaceTabs
+                        tabs={[
+                          { key: "seating", label: `Seating (${acceptedGuestsNeedingSeating.length + acceptedSeatOverages.length})` },
+                          { key: "rsvp", label: `RSVP (${seatedPendingOrDeclinedGuests.length + guestCountIntegrityIssues.length})` },
+                          { key: "records", label: `Records (${seatingWithoutMatchingInvite.length + duplicateSeatingNameGroups.length})` },
+                        ]}
+                        activeTab={checksTab}
+                        onChange={(nextTab) => setChecksTab(nextTab as ChecksWorkspaceTab)}
+                      />
+                    </div>
+
+                    <div className="mt-4 space-y-4">
+                      {checksTab === "seating" && (
+                        <>
+                          <IntegritySection
+                            title="Accepted Guests Still Needing Seating"
+                            subtitle="Accepted guest counts that are not fully covered by seating yet."
+                            emptyTitle="No seating gaps"
+                            emptyDescription="All accepted guest counts are fully covered."
+                          >
+                            {acceptedGuestsNeedingSeating.map(({ guest, assignment, accepted, assigned, remaining }) => (
+                              <IssueCard
+                                key={`needs-${guest.id}`}
+                                title={guest.guest_name}
+                                detail={
+                                  assignment
+                                    ? `Accepted ${accepted} guests · ${assigned} seated · ${remaining} still needed · ${getTableLabelForGuest(guest)}`
+                                    : `Accepted ${accepted} guests · no table yet · ${remaining} still needed`
+                                }
+                                primaryActionLabel={assigned > 0 ? "Add Remaining Seating" : "Add Seating"}
+                                onPrimaryAction={() => beginSeatingPlacementForGuest(guest)}
+                              />
+                            ))}
+                          </IntegritySection>
+
+                          <IntegritySection
+                            title="Seat Count Over Accepted"
+                            subtitle="Seating rows with more seats assigned than the RSVP currently allows."
+                            emptyTitle="No seat count overages"
+                            emptyDescription="Assigned seats do not exceed accepted guest counts."
+                          >
+                            {acceptedSeatOverages.map(({ guest, accepted, assigned, overflow }) => (
+                              <IssueCard
+                                key={`over-${guest.id}`}
+                                title={guest.guest_name}
+                                detail={`Accepted ${accepted} guests · ${assigned} seats assigned · ${overflow} too many · ${getTableLabelForGuest(guest)}`}
+                                primaryActionLabel="Review Seating"
+                                onPrimaryAction={() => openSeatingBoardForGuest(guest)}
+                                secondaryActionLabel="Open Invitation"
+                                onSecondaryAction={() => beginGuestFormEdit(guest)}
+                              />
+                            ))}
+                          </IntegritySection>
+                        </>
+                      )}
+
+                      {checksTab === "rsvp" && (
+                        <>
+                          <IntegritySection
+                            title="Seated While Pending Or Declined"
+                            subtitle="Guests who are not attending right now but still have seats assigned."
+                            emptyTitle="No stale seating assignments"
+                            emptyDescription="Pending and declined guests are not holding any seats."
+                          >
+                            {seatedPendingOrDeclinedGuests.map(({ guest, assigned }) => (
+                              <IssueCard
+                                key={`stale-${guest.id}`}
+                                title={guest.guest_name}
+                                detail={`${guest.attending === false ? "Declined" : "Pending"} · ${getTableLabelForGuest(guest)} · ${assigned} assigned seat${
+                                  assigned === 1 ? "" : "s"
+                                }`}
+                                primaryActionLabel="Remove Seating"
+                                onPrimaryAction={() => void removeGuestSeating(guest)}
+                                secondaryActionLabel="Open Invitation"
+                                onSecondaryAction={() => beginGuestFormEdit(guest)}
+                              />
+                            ))}
+                          </IntegritySection>
+
+                          <IntegritySection
+                            title="Guest Count Issues"
+                            subtitle="Invitation counts that do not line up cleanly."
+                            emptyTitle="No invitation count issues"
+                            emptyDescription="Guest limits, confirmed guests, and children counts look consistent."
+                          >
+                            {guestCountIntegrityIssues.map((guest) => {
+                              const issueParts: string[] = [];
+                              if (typeof guest.confirmed_guests === "number" && guest.confirmed_guests > guest.max_guests) {
+                                issueParts.push(`Confirmed ${guest.confirmed_guests} exceeds limit ${guest.max_guests}`);
+                              }
+                              if (typeof guest.children_count === "number" && guest.children_count > guest.max_guests) {
+                                issueParts.push(`Children ${guest.children_count} exceeds limit ${guest.max_guests}`);
+                              }
+
+                              return (
+                                <IssueCard
+                                  key={`count-${guest.id}`}
+                                  title={guest.guest_name}
+                                  detail={issueParts.join(" · ")}
+                                  primaryActionLabel="Open Invitation"
+                                  onPrimaryAction={() => beginGuestFormEdit(guest)}
+                                />
+                              );
+                            })}
+                          </IntegritySection>
+                        </>
+                      )}
+
+                      {checksTab === "records" && (
+                        <>
+                          <IntegritySection
+                            title="Seating Without Matching Invitation"
+                            subtitle="Seating rows that do not match any current invitation."
+                            emptyTitle="No orphan seating rows"
+                            emptyDescription="Every seating row matches a current invitation."
+                          >
+                            {seatingWithoutMatchingInvite.map((assignment) => (
+                              <IssueCard
+                                key={`orphan-${assignment.id}`}
+                                title={assignment.name}
+                                detail={`Table ${assignment.table_number} · ${Math.max(1, assignment.guest_count || 1)} assigned seat${
+                                  Math.max(1, assignment.guest_count || 1) === 1 ? "" : "s"
+                                }`}
+                                primaryActionLabel="Open Seating"
+                                onPrimaryAction={() => beginSeatingFormEdit(assignment)}
+                                secondaryActionLabel="Remove"
+                                onSecondaryAction={() => confirmRemoveSeatingAssignment(assignment)}
+                                secondaryTone="danger"
+                              />
+                            ))}
+                          </IntegritySection>
+
+                          <IntegritySection
+                            title="Duplicate Seating Rows"
+                            subtitle="More than one seating row is pointing to the same guest."
+                            emptyTitle="No duplicate seating rows"
+                            emptyDescription="Each guest appears only once in seating."
+                          >
+                            {duplicateSeatingNameGroups.map(({ key, assignments }) => (
+                              <IssueCard
+                                key={`dup-${key}`}
+                                title={assignments[0]?.name || "Duplicate name"}
+                                detail={`${assignments.length} seating rows · ${assignments
+                                  .map((assignment) =>
+                                    assignment.invite_code
+                                      ? `Table ${assignment.table_number} · ${assignment.invite_code}`
+                                      : `Table ${assignment.table_number}`,
+                                  )
+                                  .join(" · ")}`}
+                                primaryActionLabel="Review Seating"
+                                onPrimaryAction={() => openSeatingBoardForName(assignments[0]?.name || "")}
+                              />
+                            ))}
+                          </IntegritySection>
+                        </>
                       )}
                     </div>
                   </StudioPanel>
@@ -2093,19 +3299,50 @@ export default function StudioProPage() {
                         const isTableEditing = Boolean(inlineTableEdits[guest.id]);
                         const acceptedCount = guest.attending === true ? guest.confirmed_guests || 0 : 0;
                         const guestInviteUrl = getGuestInviteUrl(guest);
-                        const seatingTable = seatingLookup.get(normalizeNameKey(guest.guest_name));
+                        const guestAssignments = getSeatingAssignmentsForGuest(guest);
+                        const seatingTable = guestAssignments[0]?.table_number;
+                        const tableLabel = getTableLabelForGuest(guest);
+                        const hasSplitSeating = guestAssignments.length > 1;
+                        const assignedSeatCount = getAssignedSeatCountForGuest(guest);
                         const quickTableValue = quickTableDrafts[guest.id] ?? (seatingTable || "");
                         const guestMenuItems: RowMenuItem[] = [
                           { label: "Open RSVP Page", href: guestInviteUrl },
                           { label: "Copy RSVP Link", onSelect: () => void copyInviteLink(guest) },
                           { label: "Copy Invitation", onSelect: () => void copyInvitation(guest) },
+                          ...(isGuestPhoneAvailable && guest.phone_number
+                            ? [
+                                {
+                                  label: guest.invitation_sent ? "Send Reminder" : "Send Invite Text",
+                                  onSelect: () => void textGuestFromPhone(guest),
+                                },
+                              ]
+                            : []),
+                          ...(!guest.invitation_sent
+                            ? [{ label: "Mark Invite Sent", onSelect: () => void bulkMarkGuestsAsSent([guest.id]) }]
+                            : []),
                           { label: "Open Composer", onSelect: () => beginGuestFormEdit(guest) },
                           {
-                            label: seatingTable ? "Quick Edit Table Assignment" : "Assign Table in Quick Edit",
-                            onSelect: () => startInlineTableEdit(guest),
+                            label: hasSplitSeating
+                              ? "Review Seating Assignments"
+                              : seatingTable
+                                ? "Quick Edit Table Assignment"
+                                : "Assign Table in Quick Edit",
+                            onSelect: () => {
+                              if (hasSplitSeating) {
+                                openSeatingBoardForGuest(guest);
+                                return;
+                              }
+                              startInlineTableEdit(guest);
+                            },
                           },
-                          ...(seatingTable
-                            ? [{ label: "Remove Seating", onSelect: () => void removeGuestSeating(guest), tone: "danger" as const }]
+                          ...(guestAssignments.length > 0
+                            ? [
+                                {
+                                  label: hasSplitSeating ? "Remove All Seating" : "Remove Seating",
+                                  onSelect: () => void removeGuestSeating(guest),
+                                  tone: "danger" as const,
+                                },
+                              ]
                             : []),
                           { label: "Remove", onSelect: () => confirmRemoveGuest(guest), tone: "danger" },
                         ];
@@ -2120,6 +3357,14 @@ export default function StudioProPage() {
                                 <InvitationSentBadge sent={Boolean(guest.invitation_sent)} />
                                 <StatusBadge attending={guest.attending} />
                                 {Boolean(guest.has_children) && <ChildrenCountBadge count={guest.children_count || 0} />}
+                                {guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name)) && <IssueBadge label="Needs Seating" tone="amber" />}
+                                {seatedPendingOrDeclinedKeys.has(normalizeNameKey(guest.guest_name)) && (
+                                  <IssueBadge label={guest.attending === false ? "Seated While Declined" : "Seated While Pending"} tone="rose" />
+                                )}
+                                {acceptedSeatOverageKeys.has(normalizeNameKey(guest.guest_name)) && <IssueBadge label="Seat Mismatch" tone="rose" />}
+                                {guestCountIntegrityIssueKeys.has(normalizeNameKey(guest.guest_name)) && (
+                                  <IssueBadge label="Count Check" tone="rose" />
+                                )}
                               </>
                             }
                             actions={
@@ -2171,6 +3416,45 @@ export default function StudioProPage() {
                                       <InlineFieldHint text="Unique RSVP code" />
                                     </div>
                                   </div>
+
+                                  {isGuestPhoneAvailable && (
+                                    <div className="space-y-1">
+                                      <input
+                                        type="tel"
+                                        value={draft.phone_number}
+                                        onChange={(event) =>
+                                          setInlineGuestEdits((prev) => ({
+                                            ...prev,
+                                            [guest.id]: { ...prev[guest.id], phone_number: formatPhoneNumberInput(event.target.value) },
+                                          }))
+                                        }
+                                        inputMode="tel"
+                                        autoComplete="tel"
+                                        className="wedding-inline-edit-input"
+                                        placeholder="Phone number"
+                                      />
+                                      <InlineFieldHint text="For text reminders and follow-up" />
+                                    </div>
+                                  )}
+
+                                  {isGuestEmailAvailable && (
+                                    <div className="space-y-1">
+                                      <input
+                                        type="email"
+                                        value={draft.email}
+                                        onChange={(event) =>
+                                          setInlineGuestEdits((prev) => ({
+                                            ...prev,
+                                            [guest.id]: { ...prev[guest.id], email: event.target.value },
+                                          }))
+                                        }
+                                        autoComplete="email"
+                                        className="wedding-inline-edit-input"
+                                        placeholder="Email address"
+                                      />
+                                      <InlineFieldHint text="Optional for wedding updates" />
+                                    </div>
+                                  )}
 
                                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                                     <div className="space-y-1">
@@ -2360,6 +3644,26 @@ export default function StudioProPage() {
                                       Invitation Sent
                                     </label>
 
+                                    {isRequestContactDetailsAvailable && (
+                                      <label className="inline-flex items-center gap-3 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-600">
+                                        <input
+                                          type="checkbox"
+                                          checked={draft.request_contact_details}
+                                          onChange={(event) =>
+                                            setInlineGuestEdits((prev) => ({
+                                              ...prev,
+                                              [guest.id]: {
+                                                ...prev[guest.id],
+                                                request_contact_details: event.target.checked,
+                                              },
+                                            }))
+                                          }
+                                          className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-300"
+                                        />
+                                        Request Contact Details
+                                      </label>
+                                    )}
+
                                     <label className="inline-flex items-center gap-3 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-600">
                                       <input
                                         type="checkbox"
@@ -2385,50 +3689,74 @@ export default function StudioProPage() {
                                     </label>
                                   </div>
 
-                                  {(draft.attending === true || seatingTable) && (
+                                  {(draft.attending === true || guestAssignments.length > 0) && (
                                     <div className="rounded-[20px] border border-stone-100 bg-stone-50 p-3">
                                       <div className="flex flex-wrap items-center justify-between gap-2">
                                         <p className="wedding-kicker">Table Assignment</p>
                                         <p className="text-xs font-medium uppercase tracking-[0.14em] text-stone-500">
-                                          {seatingTable ? `Currently Table ${seatingTable}` : "No table yet"}
+                                          {tableLabel ? `Currently ${tableLabel}` : "No table yet"}
                                         </p>
                                       </div>
-                                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                                        <div className="min-w-0 flex-1 space-y-1">
-                                          <input
-                                            type="number"
-                                            onWheel={preventNumberInputScroll}
-                                            min={1}
-                                            value={quickTableValue}
-                                            onChange={(event) =>
-                                              setQuickTableDrafts((prev) => ({
-                                                ...prev,
-                                                [guest.id]:
-                                                  event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1),
-                                              }))
-                                            }
-                                            className="wedding-inline-edit-input"
-                                            placeholder="Table #"
-                                          />
-                                          <InlineFieldHint text="Enter the table number" />
+                                      {hasSplitSeating ? (
+                                        <div className="mt-3 space-y-3">
+                                          <p className="text-sm text-stone-600">
+                                            This invitation is currently split across {guestAssignments.length} seating assignments.
+                                          </p>
+                                          <div className="flex flex-col gap-2 sm:flex-row">
+                                            <button
+                                              type="button"
+                                              onClick={() => openSeatingBoardForGuest(guest)}
+                                              className="wedding-button-secondary w-full sm:w-auto"
+                                            >
+                                              Review Seating Board
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => void removeGuestSeating(guest)}
+                                              className="wedding-button-secondary w-full sm:w-auto"
+                                            >
+                                              Remove All Seating
+                                            </button>
+                                          </div>
                                         </div>
-                                        <button
-                                          type="button"
-                                          onClick={() => void assignGuestToTable(guest, Math.max(1, Number(quickTableValue) || 1))}
-                                          className="wedding-button-secondary w-full sm:w-auto"
-                                        >
-                                          {seatingTable ? "Move Seating" : "Assign Seating"}
-                                        </button>
-                                        {seatingTable && (
+                                      ) : (
+                                        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                          <div className="min-w-0 flex-1 space-y-1">
+                                            <input
+                                              type="number"
+                                              onWheel={preventNumberInputScroll}
+                                              min={1}
+                                              value={quickTableValue}
+                                              onChange={(event) =>
+                                                setQuickTableDrafts((prev) => ({
+                                                  ...prev,
+                                                  [guest.id]:
+                                                    event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1),
+                                                }))
+                                              }
+                                              className="wedding-inline-edit-input"
+                                              placeholder="Table #"
+                                            />
+                                            <InlineFieldHint text="Enter the table number" />
+                                          </div>
                                           <button
                                             type="button"
-                                            onClick={() => void removeGuestSeating(guest)}
+                                            onClick={() => void assignGuestToTable(guest, Math.max(1, Number(quickTableValue) || 1))}
                                             className="wedding-button-secondary w-full sm:w-auto"
                                           >
-                                            Remove
+                                            {seatingTable ? "Move Seating" : "Assign Seating"}
                                           </button>
-                                        )}
-                                      </div>
+                                          {seatingTable && (
+                                            <button
+                                              type="button"
+                                              onClick={() => void removeGuestSeating(guest)}
+                                              className="wedding-button-secondary w-full sm:w-auto"
+                                            >
+                                              Remove
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
                                     </div>
                                   )}
 
@@ -2463,52 +3791,83 @@ export default function StudioProPage() {
                                   <div className="flex flex-wrap items-center justify-between gap-2">
                                     <p className="wedding-kicker">Table Assignment</p>
                                     <p className="text-xs font-medium uppercase tracking-[0.14em] text-stone-500">
-                                      {seatingTable ? `Currently Table ${seatingTable}` : "No table yet"}
+                                      {tableLabel ? `Currently ${tableLabel}` : "No table yet"}
                                     </p>
                                   </div>
-                                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                                    <div className="min-w-0 flex-1 space-y-1">
-                                      <input
-                                        type="number"
-                                        onWheel={preventNumberInputScroll}
-                                        min={1}
-                                        value={quickTableValue}
-                                        onChange={(event) =>
-                                          setQuickTableDrafts((prev) => ({
-                                            ...prev,
-                                            [guest.id]:
-                                              event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1),
-                                          }))
-                                        }
-                                        className="wedding-inline-edit-input"
-                                        placeholder="Table #"
-                                      />
-                                      <InlineFieldHint text="Enter the table number" />
+                                  {hasSplitSeating ? (
+                                    <div className="mt-3 space-y-3">
+                                      <p className="text-sm text-stone-600">
+                                        This invitation is split across {guestAssignments.length} seating assignments. Review it from the seating board.
+                                      </p>
+                                      <div className="flex flex-col gap-2 sm:flex-row">
+                                        <button
+                                          type="button"
+                                          onClick={() => openSeatingBoardForGuest(guest)}
+                                          className="wedding-button-secondary w-full sm:w-auto"
+                                        >
+                                          Review Seating Board
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => cancelInlineTableEdit(guest.id)}
+                                          className="wedding-button-secondary w-full sm:w-auto"
+                                        >
+                                          Cancel
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void removeGuestSeating(guest)}
+                                          className="wedding-button-secondary w-full sm:w-auto"
+                                        >
+                                          Remove All Seating
+                                        </button>
+                                      </div>
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => void assignGuestToTable(guest, Math.max(1, Number(quickTableValue) || 1))}
-                                      className="wedding-button-secondary w-full sm:w-auto"
-                                    >
-                                      {seatingTable ? "Move Seating" : "Assign Seating"}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => cancelInlineTableEdit(guest.id)}
-                                      className="wedding-button-secondary w-full sm:w-auto"
-                                    >
-                                      Cancel
-                                    </button>
-                                    {seatingTable && (
+                                  ) : (
+                                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                      <div className="min-w-0 flex-1 space-y-1">
+                                        <input
+                                          type="number"
+                                          onWheel={preventNumberInputScroll}
+                                          min={1}
+                                          value={quickTableValue}
+                                          onChange={(event) =>
+                                            setQuickTableDrafts((prev) => ({
+                                              ...prev,
+                                              [guest.id]:
+                                                event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1),
+                                            }))
+                                          }
+                                          className="wedding-inline-edit-input"
+                                          placeholder="Table #"
+                                        />
+                                        <InlineFieldHint text="Enter the table number" />
+                                      </div>
                                       <button
                                         type="button"
-                                        onClick={() => void removeGuestSeating(guest)}
+                                        onClick={() => void assignGuestToTable(guest, Math.max(1, Number(quickTableValue) || 1))}
                                         className="wedding-button-secondary w-full sm:w-auto"
                                       >
-                                        Remove
+                                        {seatingTable ? "Move Seating" : "Assign Seating"}
                                       </button>
-                                    )}
-                                  </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => cancelInlineTableEdit(guest.id)}
+                                        className="wedding-button-secondary w-full sm:w-auto"
+                                      >
+                                        Cancel
+                                      </button>
+                                      {seatingTable && (
+                                        <button
+                                          type="button"
+                                          onClick={() => void removeGuestSeating(guest)}
+                                          className="wedding-button-secondary w-full sm:w-auto"
+                                        >
+                                          Remove
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               ) : (
                                 <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
@@ -2526,14 +3885,20 @@ export default function StudioProPage() {
                                   <InfoPanel
                                     label="Seating"
                                     value={
-                                      seatingTable
-                                        ? `Table ${seatingTable}`
+                                      tableLabel
+                                        ? guest.attending === true
+                                          ? `${tableLabel} · ${assignedSeatCount} of ${acceptedCount} seated`
+                                          : `${tableLabel} · ${assignedSeatCount} seat${assignedSeatCount === 1 ? "" : "s"}`
                                         : guest.attending === true
                                           ? "Needs seating"
                                           : "Seat later"
                                     }
                                   />
                                   <InfoPanel label="Last Action" value={getGuestActionIndicators(guest)[0] ?? "No activity yet"} />
+                                  {isGuestPhoneAvailable && guest.phone_number && (
+                                    <InfoPanel label="Phone" value={formatPhoneNumberInput(guest.phone_number)} />
+                                  )}
+                                  {isGuestEmailAvailable && guest.email && <InfoPanel label="Email" value={guest.email} />}
                                   {isGuestNotesAvailable && guest.notes && (
                                     <div className="sm:col-span-2 xl:col-span-4">
                                       <InfoPanel label="Private Notes" value={guest.notes} />
@@ -2718,7 +4083,13 @@ export default function StudioProPage() {
                         />
                       </FormField>
 
-                      <div className="grid gap-4 md:grid-cols-[1fr_140px]">
+                      <div
+                        className={`grid gap-4 ${
+                          isGuestPhoneAvailable || isGuestEmailAvailable
+                            ? "md:grid-cols-2 xl:grid-cols-4"
+                            : "md:grid-cols-[1fr_140px]"
+                        }`}
+                      >
                         <FormField label="Invite Code">
                           <input
                             value={newCode}
@@ -2731,6 +4102,31 @@ export default function StudioProPage() {
                             placeholder="OMARHAGER"
                           />
                         </FormField>
+                        {isGuestPhoneAvailable && (
+                          <FormField label="Phone Number">
+                            <input
+                              type="tel"
+                              value={newPhoneNumber}
+                              onChange={(event) => setNewPhoneNumber(formatPhoneNumberInput(event.target.value))}
+                              inputMode="tel"
+                              autoComplete="tel"
+                              className="wedding-inline-edit-input"
+                              placeholder="For texts and reminders"
+                            />
+                          </FormField>
+                        )}
+                        {isGuestEmailAvailable && (
+                          <FormField label="Email (Optional)">
+                            <input
+                              type="email"
+                              value={newEmail}
+                              onChange={(event) => setNewEmail(event.target.value)}
+                              autoComplete="email"
+                              className="wedding-inline-edit-input"
+                              placeholder="For updates"
+                            />
+                          </FormField>
+                        )}
                         <FormField label="Guest Limit">
                           <input
                             type="number"
@@ -2793,6 +4189,14 @@ export default function StudioProPage() {
                           checked={invitationSent}
                           onChange={setInvitationSent}
                         />
+                        {isRequestContactDetailsAvailable && (
+                          <ToggleBox
+                            label="Request Contact Details"
+                            description="Ask for phone number and optional email on the RSVP page when this guest accepts."
+                            checked={requestContactDetails}
+                            onChange={setRequestContactDetails}
+                          />
+                        )}
                         <ToggleBox
                           label="Has Children"
                           description="Track children included inside the total invited guest count."
@@ -2849,9 +4253,9 @@ export default function StudioProPage() {
                         <button className="wedding-button-primary w-full">
                           {editingGuestId ? "Save Invitation" : "Add Invitation"}
                         </button>
-                        {editingGuestId && (
-                          <button type="button" onClick={resetGuestForm} className="wedding-button-secondary w-full">
-                            Cancel Edit
+                        {(editingGuestId || guestComposerReturnLocation) && (
+                          <button type="button" onClick={cancelGuestComposer} className="wedding-button-secondary w-full">
+                            {editingGuestId ? "Cancel Edit" : "Cancel"}
                           </button>
                         )}
                       </div>
@@ -2899,9 +4303,26 @@ export default function StudioProPage() {
                     </div>
 
                     <div className="mt-4">
+                      <WorkspaceTabs
+                        tabs={[
+                          { key: "assignments", label: "By Assignment" },
+                          { key: "invites", label: "By Invite" },
+                        ]}
+                        activeTab={seatingBoardMode}
+                        onChange={(nextTab) => setSeatingBoardMode(nextTab as SeatingBoardMode)}
+                      />
+                    </div>
+
+                    <div className="mt-4">
                       <CompactDisclosure
                         title="Table Filters"
-                        subtitle={`${availableTableNumbers.length} table${availableTableNumbers.length === 1 ? "" : "s"} available.`}
+                        subtitle={
+                          seatingTableFilter === "all"
+                            ? `${availableTableNumbers.length} table${availableTableNumbers.length === 1 ? "" : "s"} available. Select one or more.`
+                            : `Showing ${selectedSeatingTableNumbers.length} selected table${
+                                selectedSeatingTableNumbers.length === 1 ? "" : "s"
+                              }.`
+                        }
                         open={seatingControlsOpen}
                         onToggle={() => setSeatingControlsOpen((prev) => !prev)}
                       >
@@ -2916,8 +4337,8 @@ export default function StudioProPage() {
                               <Pill
                                 key={table}
                                 label={`Table ${table}`}
-                                active={seatingTableFilter === table}
-                                onClick={() => setSeatingTableFilter(table)}
+                                active={isSeatingTableSelected(table)}
+                                onClick={() => toggleSeatingTableFilter(table)}
                               />
                             ))}
                           </div>
@@ -2937,14 +4358,22 @@ export default function StudioProPage() {
                   </StudioPanel>
 
                   <div className="space-y-4">
-                    {filteredSeatingAssignments.length === 0 ? (
+                    {(seatingBoardMode === "assignments" ? filteredSeatingAssignments.length === 0 : groupedSeatingAssignments.length === 0) ? (
                       <StudioPanel>
                         <EmptyState title="No seating matches this view" description="Try a different guest name or table number." />
                       </StudioPanel>
-                    ) : (
+                    ) : seatingBoardMode === "assignments" ? (
                       filteredSeatingAssignments.map((assignment) => {
                         const draft = inlineSeatingEdits[assignment.id];
                         const isEditing = Boolean(draft);
+                        const inlineCapacityCheck = draft
+                          ? getSeatingCapacityCheck({
+                              name: draft.name,
+                              inviteCode: draft.invite_code,
+                              guestCount: draft.guest_count,
+                              editingAssignmentId: assignment.id,
+                            })
+                          : null;
                         const seatingMenuItems: RowMenuItem[] = [
                           { label: "Open Composer", onSelect: () => beginSeatingFormEdit(assignment) },
                           { label: "Remove", onSelect: () => confirmRemoveSeatingAssignment(assignment), tone: "danger" },
@@ -2956,7 +4385,17 @@ export default function StudioProPage() {
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
                                   <h3 className="font-serif text-xl tracking-tight text-stone-900 md:text-2xl">{assignment.name}</h3>
+                                  {isSeatingAliasesAvailable && parseNameAliases(assignment.name_aliases).length > 0 && (
+                                    <p className="mt-1 text-sm leading-relaxed text-stone-500">
+                                      Aliases: {parseNameAliases(assignment.name_aliases).join(", ")}
+                                    </p>
+                                  )}
                                   <div className="mt-2 flex flex-wrap gap-2">
+                                    {assignment.invite_code && (
+                                      <p className="inline-flex rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-700 ring-1 ring-stone-200">
+                                        {assignment.invite_code}
+                                      </p>
+                                    )}
                                     <p className="inline-flex rounded-full bg-stone-100 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-700">
                                       Table {assignment.table_number}
                                     </p>
@@ -2981,7 +4420,17 @@ export default function StudioProPage() {
 
                             {isEditing ? (
                               <div className="mt-5 space-y-3">
-                              <div className={`grid gap-3 ${isSeatingGuestCountAvailable ? "md:grid-cols-[minmax(0,1fr)_140px_140px]" : "md:grid-cols-[1fr_150px]"}`}>
+                              <div
+                                className={`grid gap-3 ${
+                                  isSeatingInviteCodeAvailable && isSeatingGuestCountAvailable
+                                    ? "md:grid-cols-[minmax(0,1fr)_160px_140px_140px]"
+                                    : isSeatingInviteCodeAvailable
+                                      ? "md:grid-cols-[minmax(0,1fr)_160px_140px]"
+                                      : isSeatingGuestCountAvailable
+                                        ? "md:grid-cols-[minmax(0,1fr)_140px_140px]"
+                                        : "md:grid-cols-[1fr_150px]"
+                                }`}
+                              >
                                   <div className="space-y-1">
                                     <input
                                       value={draft.name}
@@ -2996,6 +4445,28 @@ export default function StudioProPage() {
                                     />
                                     <InlineFieldHint text="Assigned guest name" />
                                   </div>
+                                  {isSeatingInviteCodeAvailable && (
+                                    <div className="space-y-1">
+                                      <input
+                                        value={draft.invite_code}
+                                        onChange={(event) =>
+                                          setInlineSeatingEdits((prev) => ({
+                                            ...prev,
+                                            [assignment.id]: {
+                                              ...prev[assignment.id],
+                                              invite_code: event.target.value.toUpperCase(),
+                                            },
+                                          }))
+                                        }
+                                        autoCapitalize="characters"
+                                        autoCorrect="off"
+                                        spellCheck={false}
+                                        className="wedding-inline-edit-input uppercase"
+                                        placeholder="RSVP code"
+                                      />
+                                      <InlineFieldHint text="Optional, but best for keeping seating linked" />
+                                    </div>
+                                  )}
                                   <div className="space-y-1">
                                     <input
                                       type="number"
@@ -3062,6 +4533,40 @@ export default function StudioProPage() {
                                   )}
                                 </div>
 
+                                {isSeatingAliasesAvailable && (
+                                  <div className="space-y-1">
+                                    <input
+                                      value={draft.name_aliases}
+                                      onChange={(event) =>
+                                        setInlineSeatingEdits((prev) => ({
+                                          ...prev,
+                                          [assignment.id]: {
+                                            ...prev[assignment.id],
+                                            name_aliases: event.target.value,
+                                          },
+                                        }))
+                                      }
+                                      className="wedding-inline-edit-input"
+                                      placeholder="Jane Doe, Joe Doe"
+                                    />
+                                    <InlineFieldHint text="Comma-separated search aliases" />
+                                  </div>
+                                )}
+
+                                {inlineCapacityCheck && (
+                                  <div
+                                    className={`rounded-[18px] border px-3 py-3 text-sm ${
+                                      inlineCapacityCheck.wouldExceed
+                                        ? "border-rose-200 bg-rose-50 text-rose-700"
+                                        : "border-stone-200 bg-stone-50 text-stone-600"
+                                    }`}
+                                  >
+                                    {inlineCapacityCheck.linkedGuest.guest_name} currently has {inlineCapacityCheck.alreadyAssignedSeats} seat
+                                    {inlineCapacityCheck.alreadyAssignedSeats === 1 ? "" : "s"} assigned. This row would bring the total to{" "}
+                                    {inlineCapacityCheck.totalAfterSave} of {inlineCapacityCheck.allowedSeats}.
+                                  </div>
+                                )}
+
                                 <div className="flex flex-col gap-3 sm:flex-row">
                                   <button type="button" onClick={() => void saveInlineSeatingEdit(assignment.id)} className="wedding-button-primary">
                                     Save Quick Edit
@@ -3072,6 +4577,281 @@ export default function StudioProPage() {
                                 </div>
                               </div>
                             ) : null}
+                          </StudioPanel>
+                        );
+                      })
+                    ) : (
+                      groupedSeatingAssignments.map((group) => {
+                        const linkedGuest = group.linkedGuest;
+                        const acceptedSeats =
+                          linkedGuest?.attending === true ? Math.max(1, linkedGuest.confirmed_guests || 1) : null;
+                        const remainingSeats = acceptedSeats === null ? null : Math.max(0, acceptedSeats - group.assignedSeats);
+                        const tableLabel =
+                          group.tableNumbers.length === 0
+                            ? "No table"
+                            : group.tableNumbers.length === 1
+                              ? `Table ${group.tableNumbers[0]}`
+                              : `Tables ${group.tableNumbers.join(", ")}`;
+
+                        return (
+                          <StudioPanel key={group.key} dense>
+                            <div className="space-y-4">
+                              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h3 className="font-serif text-xl tracking-tight text-stone-900 md:text-2xl">{group.displayName}</h3>
+                                    {group.inviteCode && (
+                                      <span className="inline-flex rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-700 ring-1 ring-stone-200">
+                                        {group.inviteCode}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="mt-1 text-sm text-stone-500">
+                                    {tableLabel} · {group.assignments.length} seating row{group.assignments.length === 1 ? "" : "s"} · {group.assignedSeats} assigned seat
+                                    {group.assignedSeats === 1 ? "" : "s"}
+                                    {acceptedSeats !== null
+                                      ? ` · ${acceptedSeats} accepted · ${remainingSeats === 0 ? "fully seated" : `${remainingSeats} still needed`}`
+                                      : ""}
+                                  </p>
+                                </div>
+
+                                <div className="flex shrink-0 flex-wrap gap-2">
+                                  {linkedGuest && (
+                                    <button type="button" onClick={() => beginGuestFormEdit(linkedGuest)} className="wedding-button-secondary">
+                                      Open Invitation
+                                    </button>
+                                  )}
+                                  {linkedGuest && remainingSeats !== null && remainingSeats > 0 && (
+                                    <button type="button" onClick={() => beginSeatingPlacementForGuest(linkedGuest)} className="wedding-button-secondary">
+                                      Add Remaining Seating
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="space-y-3">
+                                {group.assignments.map((assignment) => {
+                                  const draft = inlineSeatingEdits[assignment.id];
+                                  const isEditing = Boolean(draft);
+                                  const inlineCapacityCheck = draft
+                                    ? getSeatingCapacityCheck({
+                                        name: draft.name,
+                                        inviteCode: draft.invite_code,
+                                        guestCount: draft.guest_count,
+                                        editingAssignmentId: assignment.id,
+                                      })
+                                    : null;
+
+                                  return (
+                                    <div key={assignment.id} className="rounded-[20px] border border-stone-100 bg-stone-50 px-4 py-4">
+                                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                        <div className="min-w-0">
+                                          <div className="flex flex-wrap gap-2">
+                                            <span className="inline-flex rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-700 ring-1 ring-stone-200">
+                                              Table {assignment.table_number}
+                                            </span>
+                                            {isSeatingGuestCountAvailable && (
+                                              <span className="inline-flex rounded-full bg-sky-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">
+                                                {Math.max(1, assignment.guest_count || 1)} seat{Math.max(1, assignment.guest_count || 1) === 1 ? "" : "s"}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <p className="mt-2 font-serif text-lg text-stone-900">{assignment.name}</p>
+                                          {isSeatingAliasesAvailable && parseNameAliases(assignment.name_aliases).length > 0 && (
+                                            <p className="mt-1 text-sm text-stone-500">
+                                              Aliases: {parseNameAliases(assignment.name_aliases).join(", ")}
+                                            </p>
+                                          )}
+                                        </div>
+
+                                        <div className="flex shrink-0 flex-wrap gap-2">
+                                          {!isEditing && (
+                                            <button type="button" onClick={() => startInlineSeatingEdit(assignment)} className="wedding-button-secondary">
+                                              Quick Edit
+                                            </button>
+                                          )}
+                                          <button
+                                            type="button"
+                                            onClick={() => confirmRemoveSeatingAssignment(assignment)}
+                                            className="wedding-button-secondary border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                          >
+                                            Remove
+                                          </button>
+                                        </div>
+                                      </div>
+
+                                      {isEditing ? (
+                                        <div className="mt-4 space-y-3">
+                                          <div
+                                            className={`grid gap-3 ${
+                                              isSeatingInviteCodeAvailable && isSeatingGuestCountAvailable
+                                                ? "md:grid-cols-[minmax(0,1fr)_160px_140px_140px]"
+                                                : isSeatingInviteCodeAvailable
+                                                  ? "md:grid-cols-[minmax(0,1fr)_160px_140px]"
+                                                  : isSeatingGuestCountAvailable
+                                                    ? "md:grid-cols-[minmax(0,1fr)_140px_140px]"
+                                                    : "md:grid-cols-[1fr_150px]"
+                                            }`}
+                                          >
+                                            <div className="space-y-1">
+                                              <input
+                                                value={draft.name}
+                                                onChange={(event) =>
+                                                  setInlineSeatingEdits((prev) => ({
+                                                    ...prev,
+                                                    [assignment.id]: { ...prev[assignment.id], name: event.target.value },
+                                                  }))
+                                                }
+                                                className="wedding-inline-edit-input"
+                                                placeholder="Guest name"
+                                              />
+                                              <InlineFieldHint text="Assigned guest name" />
+                                            </div>
+                                            {isSeatingInviteCodeAvailable && (
+                                              <div className="space-y-1">
+                                                <input
+                                                  value={draft.invite_code}
+                                                  onChange={(event) =>
+                                                    setInlineSeatingEdits((prev) => ({
+                                                      ...prev,
+                                                      [assignment.id]: {
+                                                        ...prev[assignment.id],
+                                                        invite_code: event.target.value.toUpperCase(),
+                                                      },
+                                                    }))
+                                                  }
+                                                  autoCapitalize="characters"
+                                                  autoCorrect="off"
+                                                  spellCheck={false}
+                                                  className="wedding-inline-edit-input uppercase"
+                                                  placeholder="RSVP code"
+                                                />
+                                                <InlineFieldHint text="Optional, but best for keeping seating linked" />
+                                              </div>
+                                            )}
+                                            <div className="space-y-1">
+                                              <input
+                                                type="number"
+                                                min={1}
+                                                value={draft.table_number}
+                                                onChange={(event) =>
+                                                  setInlineSeatingEdits((prev) => ({
+                                                    ...prev,
+                                                    [assignment.id]: {
+                                                      ...prev[assignment.id],
+                                                      table_number:
+                                                        event.target.value === ""
+                                                          ? ""
+                                                          : Math.max(1, parseInt(event.target.value, 10) || 1),
+                                                    },
+                                                  }))
+                                                }
+                                                onBlur={() =>
+                                                  setInlineSeatingEdits((prev) => ({
+                                                    ...prev,
+                                                    [assignment.id]: {
+                                                      ...prev[assignment.id],
+                                                      table_number: prev[assignment.id].table_number === "" ? 1 : prev[assignment.id].table_number,
+                                                    },
+                                                  }))
+                                                }
+                                                className="wedding-inline-edit-input"
+                                                placeholder="Table"
+                                              />
+                                              <InlineFieldHint text="Table number" />
+                                            </div>
+                                            {isSeatingGuestCountAvailable && (
+                                              <div className="space-y-1">
+                                                <input
+                                                  type="number"
+                                                  min={1}
+                                                  value={draft.guest_count}
+                                                  onChange={(event) =>
+                                                    setInlineSeatingEdits((prev) => ({
+                                                      ...prev,
+                                                      [assignment.id]: {
+                                                        ...prev[assignment.id],
+                                                        guest_count:
+                                                          event.target.value === ""
+                                                            ? ""
+                                                            : Math.max(1, parseInt(event.target.value, 10) || 1),
+                                                      },
+                                                    }))
+                                                  }
+                                                  onBlur={() =>
+                                                    setInlineSeatingEdits((prev) => ({
+                                                      ...prev,
+                                                      [assignment.id]: {
+                                                        ...prev[assignment.id],
+                                                        guest_count: prev[assignment.id].guest_count === "" ? 1 : prev[assignment.id].guest_count,
+                                                      },
+                                                    }))
+                                                  }
+                                                  className="wedding-inline-edit-input"
+                                                  placeholder="Seats"
+                                                />
+                                                <InlineFieldHint text="Seats at this table" />
+                                              </div>
+                                            )}
+                                          </div>
+
+                                          {isSeatingAliasesAvailable && (
+                                            <div className="space-y-1">
+                                              <input
+                                                value={draft.name_aliases}
+                                                onChange={(event) =>
+                                                  setInlineSeatingEdits((prev) => ({
+                                                    ...prev,
+                                                    [assignment.id]: {
+                                                      ...prev[assignment.id],
+                                                      name_aliases: event.target.value,
+                                                    },
+                                                  }))
+                                                }
+                                                className="wedding-inline-edit-input"
+                                                placeholder="Jane Doe, Joe Doe"
+                                              />
+                                              <InlineFieldHint text="Comma-separated search aliases" />
+                                            </div>
+                                          )}
+
+                                          {inlineCapacityCheck && (
+                                            <div
+                                              className={`rounded-[18px] border px-3 py-3 text-sm ${
+                                                inlineCapacityCheck.wouldExceed
+                                                  ? "border-rose-200 bg-rose-50 text-rose-700"
+                                                  : "border-stone-200 bg-stone-50 text-stone-600"
+                                              }`}
+                                            >
+                                              {inlineCapacityCheck.linkedGuest.guest_name} currently has {inlineCapacityCheck.alreadyAssignedSeats} seat
+                                              {inlineCapacityCheck.alreadyAssignedSeats === 1 ? "" : "s"} assigned. This row would bring the total to{" "}
+                                              {inlineCapacityCheck.totalAfterSave} of {inlineCapacityCheck.allowedSeats}.
+                                            </div>
+                                          )}
+
+                                          <div className="flex flex-col gap-3 sm:flex-row">
+                                            <button
+                                              type="button"
+                                              onClick={() => void saveInlineSeatingEdit(assignment.id)}
+                                              className="wedding-button-primary"
+                                            >
+                                              Save Quick Edit
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => cancelInlineSeatingEdit(assignment.id)}
+                                              className="wedding-button-secondary"
+                                            >
+                                              Cancel
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
                           </StudioPanel>
                         );
                       })
@@ -3114,8 +4894,8 @@ export default function StudioProPage() {
                         <Pill
                           key={table}
                           label={`Table ${table}`}
-                          active={seatingTableFilter === table}
-                          onClick={() => setSeatingTableFilter(table)}
+                          active={isSeatingTableSelected(table)}
+                          onClick={() => toggleSeatingTableFilter(table)}
                         />
                       ))}
                     </div>
@@ -3187,18 +4967,18 @@ export default function StudioProPage() {
                                 key={table}
                                 type="button"
                                 onClick={() => {
-                                  setSeatingTableFilter(table);
+                                  toggleSeatingTableFilter(table);
                                   setSeatingTab("board");
                                 }}
                                 className={`rounded-[22px] border px-4 py-4 text-left transition ${
-                                  seatingTableFilter === table
+                                  isSeatingTableSelected(table)
                                     ? "border-stone-900 bg-stone-900 text-white"
                                     : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
                                 }`}
                               >
                                 <p
                                   className={`text-[10px] font-bold uppercase tracking-[0.18em] ${
-                                    seatingTableFilter === table ? "text-white/75" : "text-stone-400"
+                                    isSeatingTableSelected(table) ? "text-white/75" : "text-stone-400"
                                   }`}
                                 >
                                   Table {table}
@@ -3206,7 +4986,7 @@ export default function StudioProPage() {
                                 <p className="mt-2 font-serif text-3xl leading-none">
                                   {seats}
                                 </p>
-                                <p className={`mt-2 text-sm ${seatingTableFilter === table ? "text-white/85" : "text-stone-500"}`}>
+                                <p className={`mt-2 text-sm ${isSeatingTableSelected(table) ? "text-white/85" : "text-stone-500"}`}>
                                   assigned seat{seats === 1 ? "" : "s"}
                                 </p>
                               </button>
@@ -3246,6 +5026,35 @@ export default function StudioProPage() {
                           placeholder="Guest full name"
                         />
                       </FormField>
+
+                      {isSeatingAliasesAvailable && (
+                        <FormField label="Search Aliases">
+                          <input
+                            value={seatingNameAliases}
+                            onChange={(event) => setSeatingNameAliases(event.target.value)}
+                            className="wedding-inline-edit-input"
+                            placeholder="Jane Doe, Joe Doe"
+                          />
+                          <p className="mt-2 text-xs text-stone-500">Use comma-separated names that should also match this table search result.</p>
+                        </FormField>
+                      )}
+
+                      {isSeatingInviteCodeAvailable && (
+                        <FormField label="RSVP Code (Optional)">
+                          <input
+                            value={seatingInviteCode}
+                            onChange={(event) => setSeatingInviteCode(event.target.value.toUpperCase())}
+                            autoCapitalize="characters"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            className="wedding-inline-edit-input uppercase"
+                            placeholder="Link this seating row to an invitation"
+                          />
+                          <p className="mt-2 text-xs text-stone-500">
+                            If you opened this from a guest card, the RSVP code is already filled in. Keeping it here is the safest way to keep seating and RSVP linked.
+                          </p>
+                        </FormField>
+                      )}
 
                       <FormField label="Table Number">
                         <input
@@ -3293,13 +5102,27 @@ export default function StudioProPage() {
                         </FormField>
                       )}
 
+                      {seatingComposerCapacityCheck && (
+                        <div
+                          className={`rounded-[20px] border px-4 py-3 text-sm ${
+                            seatingComposerCapacityCheck.wouldExceed
+                              ? "border-rose-200 bg-rose-50 text-rose-700"
+                              : "border-stone-200 bg-stone-50 text-stone-600"
+                          }`}
+                        >
+                          {seatingComposerCapacityCheck.linkedGuest.guest_name} currently has {seatingComposerCapacityCheck.alreadyAssignedSeats} seat
+                          {seatingComposerCapacityCheck.alreadyAssignedSeats === 1 ? "" : "s"} assigned. This row would bring the total to{" "}
+                          {seatingComposerCapacityCheck.totalAfterSave} of {seatingComposerCapacityCheck.allowedSeats}.
+                        </div>
+                      )}
+
                       <div className="flex flex-col gap-3 pt-2">
                         <button className="wedding-button-primary w-full">
                           {editingSeatingId !== null ? "Save Assignment" : "Add Assignment"}
                         </button>
-                        {editingSeatingId !== null && (
-                          <button type="button" onClick={resetSeatingForm} className="wedding-button-secondary w-full">
-                            Cancel Edit
+                        {(editingSeatingId !== null || seatingComposerReturnLocation) && (
+                          <button type="button" onClick={cancelSeatingComposer} className="wedding-button-secondary w-full">
+                            {editingSeatingId !== null ? "Cancel Edit" : "Cancel"}
                           </button>
                         )}
                       </div>
@@ -3405,11 +5228,21 @@ export default function StudioProPage() {
           message={confirmDialog.message}
           actionLabel={confirmDialog.actionLabel}
           actionTone={confirmDialog.actionTone}
+          secondaryActionLabel={confirmDialog.secondaryActionLabel}
+          secondaryActionTone={confirmDialog.secondaryActionTone}
           onCancel={() => setConfirmDialog(null)}
           onConfirm={async () => {
             await confirmDialog.onConfirm();
             setConfirmDialog(null);
           }}
+          onSecondaryAction={
+            confirmDialog.onSecondaryAction
+              ? async () => {
+                  await confirmDialog.onSecondaryAction?.();
+                  setConfirmDialog(null);
+                }
+              : undefined
+          }
         />
       )}
     </div>
@@ -3608,6 +5441,79 @@ function WatchlistCard({
       <button type="button" onClick={onAction} className="wedding-button-secondary mt-4">
         {actionLabel}
       </button>
+    </div>
+  );
+}
+
+function IntegritySection({
+  title,
+  subtitle,
+  emptyTitle,
+  emptyDescription,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  emptyTitle: string;
+  emptyDescription: string;
+  children: ReactNode;
+}) {
+  const items = Array.isArray(children) ? children.filter(Boolean) : children ? [children] : [];
+
+  return (
+    <div className="rounded-[22px] border border-stone-100 bg-stone-50 p-4">
+      <div className="mb-3">
+        <p className="font-serif text-xl text-stone-900">{title}</p>
+        <p className="mt-1.5 text-sm text-stone-500">{subtitle}</p>
+      </div>
+      <div className="space-y-3">
+        {items.length > 0 ? items : <EmptyState title={emptyTitle} description={emptyDescription} />}
+      </div>
+    </div>
+  );
+}
+
+function IssueCard({
+  title,
+  detail,
+  primaryActionLabel,
+  onPrimaryAction,
+  secondaryActionLabel,
+  onSecondaryAction,
+  secondaryTone = "default",
+}: {
+  title: string;
+  detail: string;
+  primaryActionLabel: string;
+  onPrimaryAction: () => void;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
+  secondaryTone?: "default" | "danger";
+}) {
+  return (
+    <div className="rounded-[18px] border border-stone-200 bg-white px-4 py-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="font-serif text-lg text-stone-900">{title}</p>
+          <p className="mt-1.5 text-sm leading-relaxed text-stone-500">{detail}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <button type="button" onClick={onPrimaryAction} className="wedding-button-secondary">
+            {primaryActionLabel}
+          </button>
+          {secondaryActionLabel && onSecondaryAction ? (
+            <button
+              type="button"
+              onClick={onSecondaryAction}
+              className={`wedding-button-secondary ${
+                secondaryTone === "danger" ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" : ""
+              }`}
+            >
+              {secondaryActionLabel}
+            </button>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -3818,6 +5724,11 @@ function ChildrenCountBadge({ count }: { count: number }) {
   );
 }
 
+function IssueBadge({ label, tone }: { label: string; tone: "amber" | "rose" }) {
+  const styles = tone === "amber" ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700";
+  return <span className={`inline-flex whitespace-nowrap rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.2em] ${styles}`}>{label}</span>;
+}
+
 function RowMenu({ label, items }: { label: string; items: RowMenuItem[] }) {
   const [isOpen, setIsOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
@@ -3976,29 +5887,47 @@ function ConfirmDialog({
   message,
   actionLabel,
   actionTone = "default",
+  secondaryActionLabel,
+  secondaryActionTone = "default",
   onCancel,
   onConfirm,
+  onSecondaryAction,
 }: {
   title: string;
   message: string;
   actionLabel: string;
   actionTone?: "danger" | "default";
+  secondaryActionLabel?: string;
+  secondaryActionTone?: "danger" | "default";
   onCancel: () => void;
   onConfirm: () => Promise<void> | void;
+  onSecondaryAction?: () => Promise<void> | void;
 }) {
   return (
     <div className="fixed inset-0 z-[95] flex items-center justify-center bg-stone-900/35 px-4">
-      <div className="w-full max-w-md rounded-[30px] border border-stone-100 bg-white p-6 shadow-2xl md:p-8">
+      <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-[30px] border border-stone-100 bg-white p-6 shadow-2xl md:p-8">
         <p className="wedding-kicker mb-2">Confirm Action</p>
-        <h3 className="font-serif text-3xl text-stone-900">{title}</h3>
+        <h3 className="font-serif text-2xl text-stone-900 md:text-3xl">{title}</h3>
         <p className="mt-4 text-sm leading-relaxed text-stone-600">{message}</p>
-        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
-          <button onClick={onCancel} className="wedding-button-secondary w-full sm:w-auto">
+        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+          <button onClick={onCancel} className="wedding-button-secondary w-full whitespace-normal text-center leading-snug sm:w-auto sm:max-w-full">
             Cancel
           </button>
+          {secondaryActionLabel && onSecondaryAction ? (
+            <button
+              onClick={() => void onSecondaryAction()}
+              className={`wedding-button-secondary w-full whitespace-normal text-center leading-snug sm:w-auto sm:max-w-full ${
+                secondaryActionTone === "danger" ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" : ""
+              }`}
+            >
+              {secondaryActionLabel}
+            </button>
+          ) : null}
           <button
             onClick={() => void onConfirm()}
-            className={`wedding-button-primary w-full sm:w-auto ${actionTone === "danger" ? "bg-rose-700 hover:bg-rose-600" : ""}`}
+            className={`wedding-button-primary w-full whitespace-normal text-center leading-snug sm:w-auto sm:max-w-full ${
+              actionTone === "danger" ? "bg-rose-700 hover:bg-rose-600" : ""
+            }`}
           >
             {actionLabel}
           </button>

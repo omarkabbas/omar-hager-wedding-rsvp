@@ -24,9 +24,31 @@ type GuestData = {
   max_guests: number;
   attending: boolean | null;
   confirmed_guests: number | null;
+  phone_number?: string | null;
+  email?: string | null;
+  request_contact_details?: boolean | null;
 };
 
 const RSVP_BY_DATE = process.env.NEXT_PUBLIC_RSVP_BY_DATE || "May 1, 2026";
+
+const formatPhoneNumberInput = (value?: string | null) => {
+  const digits = (value || "").replace(/\D/g, "").slice(0, 11);
+  const normalized = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+
+  if (!normalized) return "";
+  if (normalized.length <= 3) return normalized;
+  if (normalized.length <= 6) return `(${normalized.slice(0, 3)}) ${normalized.slice(3)}`;
+  return `(${normalized.slice(0, 3)}) ${normalized.slice(3, 6)}-${normalized.slice(6, 10)}`;
+};
+
+const maskPhoneNumber = (value?: string | null) => {
+  const formatted = formatPhoneNumberInput(value);
+  const digits = formatted.replace(/\D/g, "");
+
+  if (digits.length < 4) return formatted;
+
+  return `Ending in ${digits.slice(-4)}`;
+};
 
 export default function GuestRSVP() {
   const params = useParams();
@@ -38,6 +60,9 @@ export default function GuestRSVP() {
   const [loading, setLoading] = useState(true);
   const [isAttending, setIsAttending] = useState("true");
   const [showConfetti, setShowConfetti] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [emailAddress, setEmailAddress] = useState("");
+  const [confirmSavedPhone, setConfirmSavedPhone] = useState(true);
   const confettiPieces = useMemo(() => Array.from({ length: 240 }, (_, i) => i), []);
   const rsvpByLabel = useMemo(() => {
     const parsed = new Date(RSVP_BY_DATE);
@@ -48,6 +73,7 @@ export default function GuestRSVP() {
   const mapLink = VENUE_MAP_LINK;
   const mapEmbedLink = VENUE_MAP_EMBED;
   const calendarLink = CALENDAR_FILE_PATH;
+  const shouldRequestContactDetails = guestData?.request_contact_details === true;
 
   useEffect(() => {
     async function fetchGuest() {
@@ -61,6 +87,9 @@ export default function GuestRSVP() {
 
       if (data) {
         setGuestData(data);
+        setPhoneNumber(formatPhoneNumberInput(data.phone_number || ""));
+        setEmailAddress(data.email || "");
+        setConfirmSavedPhone(Boolean(data.phone_number));
 
         if (data.attending !== null) {
           setSubmitted(true);
@@ -91,18 +120,37 @@ export default function GuestRSVP() {
         ? 1
         : parseInt(formData.get("count") as string, 10)
       : 0;
+    const nextPhoneNumber =
+      attendingValue && shouldRequestContactDetails
+        ? guestData.phone_number && confirmSavedPhone
+          ? formatPhoneNumberInput(guestData.phone_number)
+          : formatPhoneNumberInput(phoneNumber)
+        : guestData.phone_number ?? null;
+    const nextEmailAddress = attendingValue && shouldRequestContactDetails ? emailAddress.trim() || null : guestData.email ?? null;
+
+    if (attendingValue && shouldRequestContactDetails && !nextPhoneNumber) {
+      return;
+    }
 
     const { error } = await supabase
       .from("rsvp_list")
       .update({
         attending: attendingValue,
         confirmed_guests: countValue,
+        phone_number: nextPhoneNumber,
+        email: nextEmailAddress,
         responded_at: new Date().toISOString(),
       })
       .eq("id", guestData.id);
 
     if (!error) {
-      setGuestData({ ...guestData, attending: attendingValue, confirmed_guests: countValue });
+      setGuestData({
+        ...guestData,
+        attending: attendingValue,
+        confirmed_guests: countValue,
+        phone_number: nextPhoneNumber,
+        email: nextEmailAddress,
+      });
       setSubmitted(true);
       if (attendingValue) {
         setShowConfetti(true);
@@ -308,8 +356,8 @@ export default function GuestRSVP() {
                     required
                     className="wedding-select"
                   >
-                    <option value="true">Joyfully Accepts</option>
-                    <option value="false">Regretfully Declines</option>
+                    <option value="true">Happily Accept 😊</option>
+                    <option value="false">Regretfully Decline 😔 </option>
                   </select>
                 </div>
 
@@ -326,6 +374,76 @@ export default function GuestRSVP() {
                     <p className="ml-2 text-xs text-stone-500">
                       Please include children over age 2 in your total attending count.
                     </p>
+                  </div>
+                )}
+
+                {isAttending === "true" && shouldRequestContactDetails && (
+                  <div className="wedding-animate-up space-y-5 text-left">
+                    {guestData.phone_number ? (
+                      <div className="space-y-3 rounded-[24px] border border-stone-100 bg-stone-50 px-5 py-5">
+                        <div>
+                          <label className="wedding-kicker block">Phone Number</label>
+                          <p className="mt-2 text-sm leading-relaxed text-stone-600">
+                            We have your phone number <span className="font-semibold text-stone-800">{maskPhoneNumber(guestData.phone_number)} </span> 
+                            for RSVP confirmation texts and reminders.
+                          </p>
+                        </div>
+
+                        <label className="inline-flex items-center gap-3 text-sm text-stone-700">
+                          <input
+                            type="checkbox"
+                            checked={confirmSavedPhone}
+                            onChange={(event) => setConfirmSavedPhone(event.target.checked)}
+                            className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-300"
+                          />
+                          Yes, this is my phone number
+                        </label>
+
+                        {!confirmSavedPhone && (
+                          <div className="space-y-2">
+                            <label className="wedding-kicker block ml-2">Enter Your Phone Number</label>
+                            <input
+                              type="tel"
+                              value={phoneNumber}
+                              onChange={(event) => setPhoneNumber(formatPhoneNumberInput(event.target.value))}
+                              inputMode="tel"
+                              autoComplete="tel"
+                              required={!confirmSavedPhone}
+                              className="wedding-input"
+                              placeholder="(555) 555-5555"
+                            />
+                            <p className="ml-2 text-xs text-stone-500">For RSVP confirmation, reminders, and important wedding updates.</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <label className="wedding-kicker block ml-2">Phone Number</label>
+                        <input
+                          type="tel"
+                          value={phoneNumber}
+                          onChange={(event) => setPhoneNumber(formatPhoneNumberInput(event.target.value))}
+                          inputMode="tel"
+                          autoComplete="tel"
+                          required
+                          className="wedding-input"
+                          placeholder="(555) 555-5555"
+                        />
+                        <p className="ml-2 text-xs text-stone-500">For RSVP confirmation, reminders, and important wedding updates.</p>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <label className="wedding-kicker block ml-2">Email (Optional)</label>
+                      <input
+                        type="email"
+                        value={emailAddress}
+                        onChange={(event) => setEmailAddress(event.target.value)}
+                        autoComplete="email"
+                        className="wedding-input"
+                        placeholder="For updates"
+                      />
+                    </div>
                   </div>
                 )}
 
