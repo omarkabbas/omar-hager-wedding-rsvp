@@ -356,8 +356,8 @@ export default function GuestRSVP() {
                     required
                     className="wedding-select"
                   >
-                    <option value="true">Attending 😊</option>
-                    <option value="false">Not Attending 😔 </option>
+                    <option value="true">Happily Accept 😊</option>
+                    <option value="false">Regretfully Decline 😔 </option>
                   </select>
                 </div>
 
