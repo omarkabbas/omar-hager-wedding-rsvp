@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useMemo, useSyncExternalStore } from "react";
 
 const links = [
   { href: "/", label: "Home" },
@@ -9,13 +10,31 @@ const links = [
   { href: "/gallery", label: "Gallery" },
 ];
 
+const RSVP_SESSION_KEY = "active_rsvp_code";
+
 export default function Navigation() {
   const pathname = usePathname();
+  const activeRsvpCode = useSyncExternalStore(
+    (callback) => {
+      window.addEventListener("storage", callback);
+      return () => window.removeEventListener("storage", callback);
+    },
+    () => window.sessionStorage.getItem(RSVP_SESSION_KEY) || "",
+    () => "",
+  );
+
+  const visibleLinks = useMemo(
+    () =>
+      activeRsvpCode
+        ? [...links, { href: `/${activeRsvpCode.toLowerCase()}`, label: "Your RSVP", mobileLabel: "RSVP" }]
+        : links,
+    [activeRsvpCode],
+  );
 
   return (
     <nav className="wedding-nav-shell wedding-animate-fade">
       <div className="wedding-nav-inner">
-        {links.map((link) => {
+        {visibleLinks.map((link) => {
           const active = pathname === link.href;
 
           return (
@@ -24,7 +43,8 @@ export default function Navigation() {
               href={link.href}
               className={`wedding-nav-link ${active ? "wedding-nav-link-active" : "hover:text-stone-900"}`}
             >
-              {link.label}
+              <span className="md:hidden">{("mobileLabel" in link && link.mobileLabel) || link.label}</span>
+              <span className="hidden md:inline">{link.label}</span>
             </Link>
           );
         })}
