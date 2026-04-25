@@ -106,7 +106,7 @@ body {
   }
 
   .wedding-kicker {
-    @apply text-[10px] md:text-[11px] uppercase tracking-[0.32em] text-stone-400 font-bold;
+    @apply text-[10px] md:text-[11px] uppercase tracking-[0.32em] text-stone-600 font-bold;
   }
 
   .wedding-title {
@@ -240,7 +240,7 @@ body {
   }
 
   .wedding-nav-inner {
-    @apply mx-auto flex w-full max-w-3xl items-center justify-center gap-2 rounded-full border border-white/55 bg-[#D0E0F0]/82 px-2 py-2 shadow-[0_15px_40px_rgba(120,113,108,0.12)] backdrop-blur-md md:gap-4;
+    @apply mx-auto flex w-full max-w-3xl items-center justify-center gap-1.5 rounded-full border border-white/55 bg-[#D0E0F0]/82 px-2 py-2 shadow-[0_15px_40px_rgba(120,113,108,0.12)] backdrop-blur-md md:gap-4;
     transition:
       transform var(--motion-base) var(--easing-standard),
       box-shadow var(--motion-base) var(--easing-standard),
@@ -248,7 +248,7 @@ body {
   }
 
   .wedding-nav-link {
-    @apply inline-flex min-w-0 items-center justify-center rounded-full px-4 py-2 text-[10px] font-bold uppercase tracking-[0.24em] text-stone-600 md:px-6 md:py-3 md:text-xs;
+    @apply inline-flex min-w-0 shrink-0 items-center justify-center whitespace-nowrap rounded-full px-3 py-2 text-[9px] font-bold uppercase tracking-[0.18em] text-stone-600 md:px-6 md:py-3 md:text-xs md:tracking-[0.24em];
     transition:
       color var(--motion-fast) ease,
       background-color var(--motion-fast) ease,

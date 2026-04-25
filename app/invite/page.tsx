@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 const RSVP_BY_DATE = process.env.NEXT_PUBLIC_RSVP_BY_DATE || "May 1, 2026";
+const RSVP_SESSION_KEY = "active_rsvp_code";
 
 function InviteContent() {
   const searchParams = useSearchParams();
@@ -42,6 +43,7 @@ function InviteContent() {
 
       if (data) {
         setGuestName(data.guest_name);
+        window.sessionStorage.setItem(RSVP_SESSION_KEY, inviteCode.toUpperCase().trim());
 
         if (data.attending !== null) {
           router.push(`/${inviteCode}`);
@@ -108,7 +110,7 @@ function InviteContent() {
 
       <div className="wedding-panel wedding-animate-up relative z-10 mt-4 mb-8 flex w-full max-w-md flex-col items-center px-5 py-8 pb-12 pt-28 md:max-w-2xl md:px-8 md:py-10 md:pb-16 md:pt-34">
         <div className="absolute top-10 md:top-14 w-full px-4 text-center">
-          <p className="wedding-kicker mb-3">You’re invited,</p>
+          <p className="wedding-kicker mb-3 text-stone-600">You’re invited,</p>
           <h1 className="wedding-page-title italic leading-tight text-[#4E5E72]">{guestName}</h1>
         </div>
 
@@ -348,7 +350,7 @@ function InviteContent() {
           onClick={step === 0 ? handleInteraction : undefined}
         >
           {step === 0 && (
-            <div className="tap-top-instruction wedding-lead animate-pulse text-sm md:text-base">
+            <div className="tap-top-instruction wedding-lead animate-pulse text-lg text-stone-700 md:text-xl">
               Tap envelope to open
             </div>
           )}
@@ -392,7 +394,7 @@ function InviteContent() {
           ref={buttonRef}
           className={`relative z-30 w-full max-w-[280px] transition-all duration-1000 mt-12 md:mt-16 ${showButton ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4 pointer-events-none"}`}
         >
-          <p className="mb-3 text-center text-[13px] italic tracking-[0.01em] text-stone-500 md:text-sm">
+          <p className="mb-3 text-center text-base font-medium italic tracking-[0.01em] text-stone-700">
             Kindly reply by {rsvpByLabel}.
           </p>
           <button onClick={handleProceed} className="wedding-button-primary w-full">

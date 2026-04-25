@@ -30,6 +30,7 @@ type GuestData = {
 };
 
 const RSVP_BY_DATE = process.env.NEXT_PUBLIC_RSVP_BY_DATE || "May 1, 2026";
+const RSVP_SESSION_KEY = "active_rsvp_code";
 
 const formatPhoneNumberInput = (value?: string | null) => {
   const digits = (value || "").replace(/\D/g, "").slice(0, 11);
@@ -87,6 +88,7 @@ export default function GuestRSVP() {
 
       if (data) {
         setGuestData(data);
+        window.sessionStorage.setItem(RSVP_SESSION_KEY, inviteCode.toUpperCase().trim());
         setPhoneNumber(formatPhoneNumberInput(data.phone_number || ""));
         setEmailAddress(data.email || "");
         setConfirmSavedPhone(Boolean(data.phone_number));
@@ -177,6 +179,8 @@ export default function GuestRSVP() {
           background: #ffffff;
           color: #1c1917;
           padding: 10px;
+          font-size: 16px;
+          font-weight: 600;
         }
         @keyframes weddingConfettiFall {
           0% {
@@ -337,24 +341,24 @@ export default function GuestRSVP() {
               <form onSubmit={handleSubmit} className="space-y-7">
                 <div className="text-center">
                   <p className="wedding-kicker mb-3">RSVP</p>
-                  <p className="wedding-lead text-stone-400 text-xl mb-1">Welcome,</p>
+                  <p className="wedding-lead text-stone-600 text-xl font-medium mb-1">Welcome,</p>
                   <h2 className="wedding-title text-4xl text-[#4E5E72] md:text-5xl">{guestData.guest_name}</h2>
-                  <p className="mt-3 text-[13px] italic tracking-[0.01em] text-stone-500 md:text-sm">
+                  <p className="mt-3 text-sm font-semibold tracking-[0.01em] text-stone-800">
                     We have reserved {guestData.max_guests} {guestData.max_guests === 1 ? "seat" : "seats"} in your honor.
                   </p>
                 </div>
 
                 <div className="space-y-2 text-left">
-                  <p className="text-center text-[13px] italic tracking-[0.01em] text-stone-500 md:text-sm">
+                  <p className="text-center text-sm font-medium tracking-[0.01em] text-stone-700">
                     Kindly reply by {rsvpByLabel}.
                   </p>
-                  <label className="wedding-kicker block ml-2">Will you be attending?</label>
+                  <label className="wedding-kicker block ml-2 text-stone-600">Will you be attending?</label>
                   <select
                     name="attending"
                     value={isAttending}
                     onChange={(e) => setIsAttending(e.target.value)}
                     required
-                    className="wedding-select"
+                    className="wedding-select text-lg text-stone-900"
                   >
                     <option value="true">Happily Accept 😊</option>
                     <option value="false">Regretfully Decline 😔 </option>
@@ -363,15 +367,15 @@ export default function GuestRSVP() {
 
                 {isAttending === "true" && guestData.max_guests > 1 && (
                   <div className="wedding-animate-up space-y-2 text-left">
-                    <label className="wedding-kicker block ml-2">Total Attending in Your Party</label>
-                    <select name="count" required className="wedding-select">
+                    <label className="wedding-kicker block ml-2 text-stone-600">Total Attending in Your Party</label>
+                    <select name="count" required className="wedding-select text-lg text-stone-900">
                       {Array.from({ length: guestData.max_guests }, (_, i) => i + 1).map((count) => (
                         <option key={count} value={count}>
                           {count} {count === 1 ? "Guest" : "Guests"}
                         </option>
                       ))}
                     </select>
-                    <p className="ml-2 text-xs text-stone-500">
+                    <p className="ml-2 text-sm font-medium text-stone-700">
                       Please include children over age 2 in your total attending count.
                     </p>
                   </div>
@@ -381,9 +385,9 @@ export default function GuestRSVP() {
                   <div className="wedding-animate-up space-y-5 text-left">
                     {guestData.phone_number ? (
                       <div className="space-y-3 rounded-[24px] border border-stone-100 bg-stone-50 px-5 py-5">
-                        <div>
+                      <div>
                           <label className="wedding-kicker block">Phone Number</label>
-                          <p className="mt-2 text-sm leading-relaxed text-stone-600">
+                          <p className="mt-2 text-sm font-medium leading-relaxed text-stone-800">
                             We have your phone number <span className="font-semibold text-stone-800">{maskPhoneNumber(guestData.phone_number)} </span> 
                             for RSVP confirmation texts and reminders.
                           </p>
@@ -412,7 +416,9 @@ export default function GuestRSVP() {
                               className="wedding-input"
                               placeholder="(555) 555-5555"
                             />
-                            <p className="ml-2 text-xs text-stone-500">For RSVP confirmation, reminders, and important wedding updates.</p>
+                            <p className="ml-2 text-sm font-medium text-stone-700">
+                              For RSVP confirmation, reminders, and important wedding updates.
+                            </p>
                           </div>
                         )}
                       </div>
@@ -429,7 +435,9 @@ export default function GuestRSVP() {
                           className="wedding-input"
                           placeholder="(555) 555-5555"
                         />
-                        <p className="ml-2 text-xs text-stone-500">For RSVP confirmation, reminders, and important wedding updates.</p>
+                        <p className="ml-2 text-sm font-medium text-stone-700">
+                          For RSVP confirmation, reminders, and important wedding updates.
+                        </p>
                       </div>
                     )}
 
