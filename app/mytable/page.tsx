@@ -80,7 +80,7 @@ const getEntrySuggestionScore = (query: string, entry: SeatingSearchEntry) => {
 
 export default function MyTablePage() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResult, setSearchResult] = useState<{ name: string; table_number: number } | null>(null);
+  const [searchResults, setSearchResults] = useState<{ name: string; table_number: number }[]>([]);
   const [suggestions, setSuggestions] = useState<{ name: string }[]>([]);
   const [seatingEntries, setSeatingEntries] = useState<SeatingSearchEntry[]>([]);
   const [isSeatingAliasesAvailable, setIsSeatingAliasesAvailable] = useState<boolean | null>(null);
@@ -190,15 +190,17 @@ export default function MyTablePage() {
       .filter(({ score }) => score > 0)
       .sort((left, right) => right.score - left.score || left.entry.name.localeCompare(right.entry.name));
 
-    const exactMatch =
-      seatingEntries.find((entry) => normalizeLookupName(entry.name) === normalizedQuery) ||
-      seatingEntries.find((entry) => parseNameAliases(entry.name_aliases).some((alias) => normalizeLookupName(alias) === normalizedQuery)) ||
-      rankedMatches[0]?.entry ||
-      null;
+    const exactAliasMatches = seatingEntries.filter((entry) =>
+      parseNameAliases(entry.name_aliases).some((alias) => normalizeLookupName(alias) === normalizedQuery),
+    );
+    const exactNameMatches = seatingEntries.filter((entry) => normalizeLookupName(entry.name) === normalizedQuery);
+    const topScore = rankedMatches[0]?.score || 0;
+    const topRankedMatches = topScore > 0 ? rankedMatches.filter(({ score }) => score === topScore).map(({ entry }) => entry) : [];
+    const matches = exactAliasMatches.length > 0 ? exactAliasMatches : exactNameMatches.length > 0 ? exactNameMatches : topRankedMatches;
 
-    setSearchResult(exactMatch);
+    setSearchResults(matches);
     setSuggestions(
-      exactMatch
+      matches.length > 0
         ? []
         : rankedMatches
             .map(({ entry }) => entry.name)
@@ -217,7 +219,7 @@ export default function MyTablePage() {
     setSearchQuery(query);
     setActiveSuggestionIndex(0);
     if (clearSearchResult) {
-      setSearchResult(null);
+      setSearchResults([]);
     }
 
     if (query.trim().length === 0) {
@@ -263,7 +265,7 @@ export default function MyTablePage() {
 
   const resetSearch = () => {
     setSearchQuery("");
-    setSearchResult(null);
+    setSearchResults([]);
     setSuggestions([]);
     setSearchAttempted(false);
     setActiveSuggestionIndex(0);
@@ -375,7 +377,7 @@ export default function MyTablePage() {
               <button type="submit" className="wedding-button-primary w-full">
                 Find My Table
               </button>
-              {(searchQuery.trim().length > 0 || searchResult || searchAttempted) && (
+              {(searchQuery.trim().length > 0 || searchResults.length > 0 || searchAttempted) && (
                 <button type="button" onClick={resetSearch} className="wedding-button-secondary w-full sm:w-auto">
                   Start Over
                 </button>
@@ -383,22 +385,26 @@ export default function MyTablePage() {
             </div>
           </form>
 
-          {searchResult && (
+          {searchResults.length > 0 && (
             <div className="wedding-animate-up mt-8 md:mt-10">
               <div className="wedding-divider mb-8" />
-              <div className="wedding-subpanel px-6 py-7 md:px-8 md:py-8">
-                <p className="wedding-lead text-lg mb-2">Welcome, {searchResult.name}!</p>
-                <h2 className="wedding-title text-2xl leading-tight text-[#4E5E72] md:text-4xl">
-                  Please find your seat at
-                  <span className="block mt-3 text-4xl md:text-5xl underline underline-offset-8 decoration-stone-200">
-                    Table {searchResult.table_number}
-                  </span>
-                </h2>
+              <div className="space-y-4">
+                {searchResults.map((result, index) => (
+                  <div key={`${result.name}-${result.table_number}-${index}`} className="wedding-subpanel px-6 py-7 md:px-8 md:py-8">
+                    <p className="wedding-lead text-lg mb-2">Welcome, {result.name}!</p>
+                    <h2 className="wedding-title text-2xl leading-tight text-[#4E5E72] md:text-4xl">
+                      Please find your seat at
+                      <span className="block mt-3 text-4xl md:text-5xl underline underline-offset-8 decoration-stone-200">
+                        Table {result.table_number}
+                      </span>
+                    </h2>
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
-          {searchAttempted && !searchResult && searchQuery.trim().length > 0 && (
+          {searchAttempted && searchResults.length === 0 && searchQuery.trim().length > 0 && (
             <div className="wedding-animate-up mt-8 md:mt-10">
               <div className="wedding-divider mb-8" />
               <div className="wedding-subpanel px-6 py-7 text-center md:px-8 md:py-8">

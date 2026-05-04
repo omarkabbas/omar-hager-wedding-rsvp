@@ -22,6 +22,7 @@ type GuestResponse = {
   responded_at: string | null;
   invitation_sent: boolean | null;
   invitation_sent_at?: string | null;
+  virtual_guest?: boolean | null;
   has_children: boolean | null;
   children_count: number | null;
   notes?: string | null;
@@ -49,7 +50,7 @@ type InvitationWorkspaceTab = "manage" | "bulk" | "composer";
 type SeatingWorkspaceTab = "board" | "tables" | "composer";
 type SeatingBoardMode = "assignments" | "invites";
 type GuestStatusFilter = "pending" | "attending" | "declined";
-type GuestExtraFilter = "sent" | "not_sent" | "has_children" | "needs_seating" | "sent_awaiting_response";
+type GuestExtraFilter = "sent" | "not_sent" | "has_children" | "virtual" | "needs_seating" | "sent_awaiting_response";
 type GuestSort = "recent" | "name" | "invite_code" | "largest_party";
 type SeatingSort = "table" | "name";
 type SeatingTableFilter = number[] | "all";
@@ -64,6 +65,7 @@ type InlineGuestDraft = {
   attending: boolean | null;
   confirmed_guests: number | "" | null;
   invitation_sent: boolean;
+  virtual_guest: boolean;
   has_children: boolean;
   children_count: number | "";
   notes: string;
@@ -178,7 +180,7 @@ const getLatestGuestTimestamp = (guest: GuestResponse) => {
 
 const getGuestInviteUrl = (guest: GuestResponse) => `${INVITE_BASE_URL}/${guest.invite_code.toLowerCase()}`;
 const getSeatingGuestCount = (guest: GuestResponse) =>
-  guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : Math.max(1, guest.max_guests || 1);
+  guest.virtual_guest === true ? 0 : guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : Math.max(1, guest.max_guests || 1);
 const normalizeInviteCode = (value?: string | null) => (value || "").trim().toUpperCase();
 const normalizePhoneForSmsLink = (value?: string | null) => (value || "").replace(/[^\d+]/g, "");
 const parseNameAliases = (value?: string | null) =>
@@ -427,6 +429,7 @@ export default function StudioProPage() {
   const [attendanceStatus, setAttendanceStatus] = useState<"pending" | "attending" | "declined">("pending");
   const [confirmedGuests, setConfirmedGuests] = useState(1);
   const [invitationSent, setInvitationSent] = useState(false);
+  const [isVirtualGuest, setIsVirtualGuest] = useState(false);
   const [hasChildren, setHasChildren] = useState(false);
   const [childrenCount, setChildrenCount] = useState<number | "">(1);
   const [guestNotes, setGuestNotes] = useState("");
@@ -451,6 +454,7 @@ export default function StudioProPage() {
   const [seatingBoardMode, setSeatingBoardMode] = useState<SeatingBoardMode>("assignments");
   const [tableMoveFrom, setTableMoveFrom] = useState<number | "">("");
   const [tableMoveTo, setTableMoveTo] = useState<number | "">("");
+  const [tableMoveMode, setTableMoveMode] = useState<"move" | "swap">("swap");
   const deferredSeatingSearch = useDeferredValue(seatingSearch);
 
   const [inlineGuestEdits, setInlineGuestEdits] = useState<Record<string, InlineGuestDraft>>({});
@@ -463,6 +467,8 @@ export default function StudioProPage() {
   const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState(false);
   const [isGalleryEnabled, setIsGalleryEnabled] = useState(false);
   const [isGalleryFeedEnabled, setIsGalleryFeedEnabled] = useState(true);
+  const [isLivestreamEnabled, setIsLivestreamEnabled] = useState(false);
+  const [livestreamEmbedUrl, setLivestreamEmbedUrl] = useState("");
   const [isHomeVenueEnabled, setIsHomeVenueEnabled] = useState(false);
   const [isHomeCarouselEnabled, setIsHomeCarouselEnabled] = useState(true);
   const [isHomeDressCodeEnabled, setIsHomeDressCodeEnabled] = useState(false);
@@ -473,6 +479,7 @@ export default function StudioProPage() {
   const [isGuestPhoneAvailable, setIsGuestPhoneAvailable] = useState<boolean | null>(null);
   const [isGuestEmailAvailable, setIsGuestEmailAvailable] = useState<boolean | null>(null);
   const [isRequestContactDetailsAvailable, setIsRequestContactDetailsAvailable] = useState<boolean | null>(null);
+  const [isVirtualGuestAvailable, setIsVirtualGuestAvailable] = useState<boolean | null>(null);
   const [isSeatingInviteCodeAvailable, setIsSeatingInviteCodeAvailable] = useState<boolean | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -685,6 +692,8 @@ export default function StudioProPage() {
         "is_seating_chart_enabled",
         "is_gallery_enabled",
         "is_gallery_feed_enabled",
+        "is_livestream_enabled",
+        "livestream_embed_url",
         "is_home_venue_enabled",
         "is_home_carousel_enabled",
         "is_home_dress_code_enabled",
@@ -703,6 +712,8 @@ export default function StudioProPage() {
       setIsSeatingChartEnabled(settingsMap.is_seating_chart_enabled === "true");
       setIsGalleryEnabled(settingsMap.is_gallery_enabled === "true");
       setIsGalleryFeedEnabled(settingsMap.is_gallery_feed_enabled ? settingsMap.is_gallery_feed_enabled === "true" : true);
+      setIsLivestreamEnabled(settingsMap.is_livestream_enabled === "true");
+      setLivestreamEmbedUrl(settingsMap.livestream_embed_url || "");
       setIsHomeVenueEnabled(settingsMap.is_home_venue_enabled === "true");
       setIsHomeCarouselEnabled(settingsMap.is_home_carousel_enabled ? settingsMap.is_home_carousel_enabled === "true" : true);
       setIsHomeDressCodeEnabled(settingsMap.is_home_dress_code_enabled === "true");
@@ -763,6 +774,11 @@ export default function StudioProPage() {
     setIsRequestContactDetailsAvailable(!requestContactDetailsError);
   }, []);
 
+  const detectVirtualGuestColumn = useCallback(async () => {
+    const { error: virtualGuestError } = await supabase.from("rsvp_list").select("virtual_guest").limit(1);
+    setIsVirtualGuestAvailable(!virtualGuestError);
+  }, []);
+
   const detectSeatingInviteCodeColumn = useCallback(async () => {
     const { error: inviteCodeError } = await supabase.from("seating").select("invite_code").limit(1);
     setIsSeatingInviteCodeAvailable(!inviteCodeError);
@@ -783,6 +799,7 @@ export default function StudioProPage() {
         detectGuestPhoneColumn(),
         detectGuestEmailColumn(),
         detectRequestContactDetailsColumn(),
+        detectVirtualGuestColumn(),
         detectSeatingInviteCodeColumn(),
       ]);
     };
@@ -806,6 +823,7 @@ export default function StudioProPage() {
     detectGuestPhoneColumn,
     detectInvitationSentAtColumn,
     detectRequestContactDetailsColumn,
+    detectVirtualGuestColumn,
     detectSeatingInviteCodeColumn,
     detectSeatingAliasesColumn,
     detectSeatingGuestCountColumn,
@@ -877,6 +895,7 @@ export default function StudioProPage() {
     setAttendanceStatus("pending");
     setConfirmedGuests(1);
     setInvitationSent(false);
+    setIsVirtualGuest(false);
     setHasChildren(false);
     setChildrenCount(1);
     setGuestNotes("");
@@ -906,26 +925,18 @@ export default function StudioProPage() {
     restoreWorkspaceLocation(returnLocation);
   };
 
-  const findGuestByName = useCallback(
-    (name: string) => responses.find((guest) => normalizeNameKey(guest.guest_name) === normalizeNameKey(name)) ?? null,
-    [responses],
-  );
-
   const findGuestByInviteCode = useCallback(
     (inviteCode: string) => responses.find((guest) => normalizeInviteCode(guest.invite_code) === normalizeInviteCode(inviteCode)) ?? null,
     [responses],
   );
 
   const findLinkedGuestForSeating = useCallback(
-    ({ name, inviteCode }: { name: string; inviteCode?: string | null }) => {
+    ({ inviteCode }: { inviteCode?: string | null }) => {
       const cleanedInviteCode = normalizeInviteCode(inviteCode);
-      if (cleanedInviteCode) {
-        return findGuestByInviteCode(cleanedInviteCode);
-      }
-
-      return findGuestByName(name.trim());
+      if (!cleanedInviteCode) return null;
+      return findGuestByInviteCode(cleanedInviteCode);
     },
-    [findGuestByInviteCode, findGuestByName],
+    [findGuestByInviteCode],
   );
 
   const addGuest = async (event: React.FormEvent) => {
@@ -952,6 +963,7 @@ export default function StudioProPage() {
       confirmed_guests: finalConfirmed,
       invitation_sent: invitationSent,
       ...(isInvitationSentAtAvailable ? { invitation_sent_at: getInvitationSentAtValue({ nextInvitationSent: invitationSent, now }) } : {}),
+      ...(isVirtualGuestAvailable ? { virtual_guest: isVirtualGuest } : {}),
       has_children: hasChildren,
       children_count: hasChildren ? Math.min(Math.max(1, Number(childrenCount) || 1), maxGuests) : 0,
       ...(isGuestNotesAvailable ? { notes: guestNotes.trim() || null } : {}),
@@ -1069,19 +1081,24 @@ export default function StudioProPage() {
     if (!cleanedName) return;
 
     const cleanedInviteCode = normalizeInviteCode(seatingInviteCode);
-    const matchingGuestByCode = cleanedInviteCode ? findGuestByInviteCode(cleanedInviteCode) : null;
-    if (cleanedInviteCode && !matchingGuestByCode) {
+    if (isSeatingInviteCodeAvailable !== true) {
+      showToast("Add an invite_code column to seating before creating linked seating rows.", "error");
+      return;
+    }
+
+    if (!cleanedInviteCode) {
+      showToast("Seating assignments must include an RSVP code.", "error");
+      return;
+    }
+
+    const matchingGuestByCode = findGuestByInviteCode(cleanedInviteCode);
+    if (!matchingGuestByCode) {
       showToast("No invitation matches that RSVP code yet.", "error");
       return;
     }
 
-    const matchingGuest = findGuestByName(cleanedName);
-    const existingAssignment = editingSeatingId !== null ? seatingAssignments.find((assignment) => assignment.id === editingSeatingId) : null;
-    const resolvedInviteCode =
-      cleanedInviteCode || normalizeInviteCode(matchingGuest?.invite_code) || normalizeInviteCode(existingAssignment?.invite_code) || null;
     const capacityCheck = getSeatingCapacityCheck({
-      name: cleanedName,
-      inviteCode: resolvedInviteCode,
+      inviteCode: cleanedInviteCode,
       guestCount: seatingGuestCount,
       editingAssignmentId: editingSeatingId,
     });
@@ -1097,7 +1114,7 @@ export default function StudioProPage() {
     const payload = {
       name: cleanedName,
       ...(isSeatingAliasesAvailable ? { name_aliases: seatingNameAliases.trim() || null } : {}),
-      ...(isSeatingInviteCodeAvailable ? { invite_code: resolvedInviteCode } : {}),
+      invite_code: cleanedInviteCode,
       table_number: Math.max(1, Number(tableNumber) || 1),
       ...(isSeatingGuestCountAvailable ? { guest_count: Math.max(1, Number(seatingGuestCount) || 1) } : {}),
     };
@@ -1144,6 +1161,7 @@ export default function StudioProPage() {
         attending: guest.attending,
         confirmed_guests: guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : guest.confirmed_guests,
         invitation_sent: Boolean(guest.invitation_sent),
+        virtual_guest: Boolean(guest.virtual_guest),
         has_children: Boolean(guest.has_children),
         children_count: Math.min(Math.max(1, guest.children_count || 1), Math.max(1, guest.max_guests)),
         notes: guest.notes || "",
@@ -1220,6 +1238,7 @@ export default function StudioProPage() {
           confirmed_guests: confirmed,
           invitation_sent: draft.invitation_sent,
           ...(isInvitationSentAtAvailable ? { invitation_sent_at: nextInvitationSentAt } : {}),
+          ...(isVirtualGuestAvailable ? { virtual_guest: draft.virtual_guest } : {}),
           has_children: draft.has_children,
           children_count: children,
           ...(isGuestNotesAvailable ? { notes: draft.notes.trim() || null } : {}),
@@ -1305,21 +1324,26 @@ export default function StudioProPage() {
   const saveInlineSeatingEdit = async (assignmentId: number) => {
     const draft = inlineSeatingEdits[assignmentId];
     if (!draft) return;
-    const existingAssignment = seatingAssignments.find((assignment) => assignment.id === assignmentId);
     const cleanedInviteCode = normalizeInviteCode(draft.invite_code);
-    const matchingGuestByCode = cleanedInviteCode ? findGuestByInviteCode(cleanedInviteCode) : null;
-    if (cleanedInviteCode && !matchingGuestByCode) {
+
+    if (isSeatingInviteCodeAvailable !== true) {
+      showToast("Add an invite_code column to seating before editing linked seating rows.", "error");
+      return;
+    }
+
+    if (!cleanedInviteCode) {
+      showToast("Seating assignments must include an RSVP code.", "error");
+      return;
+    }
+
+    const matchingGuestByCode = findGuestByInviteCode(cleanedInviteCode);
+    if (!matchingGuestByCode) {
       showToast("No invitation matches that RSVP code yet.", "error");
       return;
     }
-    const resolvedInviteCode =
-      cleanedInviteCode ||
-      normalizeInviteCode(findGuestByName(draft.name.trim())?.invite_code) ||
-      normalizeInviteCode(existingAssignment?.invite_code) ||
-      null;
+
     const capacityCheck = getSeatingCapacityCheck({
-      name: draft.name.trim(),
-      inviteCode: resolvedInviteCode,
+      inviteCode: cleanedInviteCode,
       guestCount: draft.guest_count,
       editingAssignmentId: assignmentId,
     });
@@ -1337,7 +1361,7 @@ export default function StudioProPage() {
       .update({
         name: draft.name.trim(),
         ...(isSeatingAliasesAvailable ? { name_aliases: draft.name_aliases.trim() || null } : {}),
-        ...(isSeatingInviteCodeAvailable ? { invite_code: resolvedInviteCode } : {}),
+        invite_code: cleanedInviteCode,
         table_number: Math.max(1, draft.table_number || 1),
         ...(isSeatingGuestCountAvailable ? { guest_count: Math.max(1, draft.guest_count || 1) } : {}),
       })
@@ -1458,6 +1482,7 @@ export default function StudioProPage() {
     setAttendanceStatus(guest.attending === null ? "pending" : guest.attending ? "attending" : "declined");
     setConfirmedGuests(guest.confirmed_guests || 0);
     setInvitationSent(Boolean(guest.invitation_sent));
+    setIsVirtualGuest(Boolean(guest.virtual_guest));
     setHasChildren(Boolean(guest.has_children));
     setChildrenCount(Math.min(Math.max(1, guest.children_count || 1), Math.max(1, guest.max_guests)));
     setGuestNotes(guest.notes || "");
@@ -1528,6 +1553,11 @@ export default function StudioProPage() {
   };
 
   const beginSeatingCreateForGuest = (guest: GuestResponse, options?: { guestCount?: number | ""; tableNumber?: number | "" }) => {
+    if (guest.virtual_guest === true) {
+      showToast("Virtual guests do not need seating.", "info");
+      return;
+    }
+
     setSeatingComposerReturnLocation(
       activeView === "seating" && seatingTab === "composer" ? null : captureWorkspaceLocation(),
     );
@@ -1573,40 +1603,29 @@ export default function StudioProPage() {
     });
   };
 
-  const getSeatingAssignmentsForGuestName = useCallback(
-    (guestName: string) =>
-      seatingAssignments.filter((assignment) => normalizeNameKey(assignment.name) === normalizeNameKey(guestName)),
-    [seatingAssignments],
-  );
-
   const getSeatingAssignmentsForGuest = useCallback(
     (guest: GuestResponse) => {
-      const byInviteCode =
-        isSeatingInviteCodeAvailable === true
-          ? seatingAssignments.filter((assignment) => normalizeInviteCode(assignment.invite_code) === normalizeInviteCode(guest.invite_code))
-          : [];
-
-      if (byInviteCode.length > 0) return byInviteCode;
-      return getSeatingAssignmentsForGuestName(guest.guest_name);
+      if (isSeatingInviteCodeAvailable !== true) return [];
+      const guestInviteCode = normalizeInviteCode(guest.invite_code);
+      if (!guestInviteCode) return [];
+      return seatingAssignments.filter((assignment) => normalizeInviteCode(assignment.invite_code) === guestInviteCode);
     },
-    [getSeatingAssignmentsForGuestName, isSeatingInviteCodeAvailable, seatingAssignments],
+    [isSeatingInviteCodeAvailable, seatingAssignments],
   );
 
   const getSeatingCapacityCheck = useCallback(
     ({
-      name,
       inviteCode,
       guestCount,
       editingAssignmentId,
     }: {
-      name: string;
       inviteCode?: string | null;
       guestCount: number | "";
       editingAssignmentId?: number | null;
     }) => {
       if (!isSeatingGuestCountAvailable) return null;
 
-      const linkedGuest = findLinkedGuestForSeating({ name, inviteCode });
+      const linkedGuest = findLinkedGuestForSeating({ inviteCode });
       if (!linkedGuest) return null;
 
       const allowedSeats =
@@ -1698,14 +1717,6 @@ export default function StudioProPage() {
     [getSeatingAssignmentsForGuest, isSeatingInviteCodeAvailable],
   );
 
-  const openSeatingBoardForName = (guestName: string) => {
-    setActiveView("seating");
-    setSeatingTab("board");
-    setSeatingBoardMode("assignments");
-    setSeatingTableFilter("all");
-    setSeatingSearch(guestName);
-  };
-
   const openSeatingBoardForGuest = useCallback(
     (guest: GuestResponse) => {
       const guestTables = getTableNumbersForGuest(guest);
@@ -1715,13 +1726,9 @@ export default function StudioProPage() {
         setSeatingBoardMode("invites");
       }
       setSeatingTableFilter(guestTables.length > 0 ? guestTables : "all");
-      setSeatingSearch(
-        isSeatingInviteCodeAvailable === true && normalizeInviteCode(guest.invite_code)
-          ? normalizeInviteCode(guest.invite_code)
-          : guest.guest_name,
-      );
+      setSeatingSearch(normalizeInviteCode(guest.invite_code));
     },
-    [getTableNumbersForGuest, isSeatingInviteCodeAvailable],
+    [getTableNumbersForGuest],
   );
 
   const updateSetting = async (key: string, nextValue: boolean, successMessage: string) => {
@@ -1735,10 +1742,23 @@ export default function StudioProPage() {
     if (key === "is_seating_chart_enabled") setIsSeatingChartEnabled(nextValue);
     if (key === "is_gallery_enabled") setIsGalleryEnabled(nextValue);
     if (key === "is_gallery_feed_enabled") setIsGalleryFeedEnabled(nextValue);
+    if (key === "is_livestream_enabled") setIsLivestreamEnabled(nextValue);
     if (key === "is_home_venue_enabled") setIsHomeVenueEnabled(nextValue);
     if (key === "is_home_carousel_enabled") setIsHomeCarouselEnabled(nextValue);
     if (key === "is_home_dress_code_enabled") setIsHomeDressCodeEnabled(nextValue);
 
+    showToast(successMessage, "success");
+  };
+
+  const updateTextSetting = async (key: string, nextValue: string, successMessage: string) => {
+    const { error: updateError } = await supabase.from("settings").update({ value: nextValue }).eq("key", key);
+
+    if (updateError) {
+      showToast(updateError.message, "error");
+      return;
+    }
+
+    if (key === "livestream_embed_url") setLivestreamEmbedUrl(nextValue);
     showToast(successMessage, "success");
   };
 
@@ -1752,7 +1772,7 @@ export default function StudioProPage() {
 
   const acceptedGuestsNeedingSeating = useMemo(() => {
     return responses
-      .filter((guest) => guest.attending === true)
+      .filter((guest) => guest.attending === true && guest.virtual_guest !== true)
       .flatMap((guest) => {
         const assignments = getSeatingAssignmentsForGuest(guest);
         const assignment = assignments[0];
@@ -1792,7 +1812,7 @@ export default function StudioProPage() {
 
   const seatedPendingOrDeclinedGuests = useMemo(() => {
     return responses
-      .filter((guest) => guest.attending !== true)
+      .filter((guest) => guest.attending !== true && guest.virtual_guest !== true)
       .flatMap((guest) => {
         const assignments = getSeatingAssignmentsForGuest(guest);
         const assignment = assignments[0];
@@ -1823,7 +1843,7 @@ export default function StudioProPage() {
 
   const acceptedSeatOverages = useMemo(() => {
     return responses
-      .filter((guest) => guest.attending === true)
+      .filter((guest) => guest.attending === true && guest.virtual_guest !== true)
       .flatMap((guest) => {
         const assignments = getSeatingAssignmentsForGuest(guest);
         const assignment = assignments[0];
@@ -1875,42 +1895,20 @@ export default function StudioProPage() {
 
   const seatingWithoutMatchingInvite = useMemo(
     () =>
-      seatingAssignments.filter(
-        (assignment) =>
-          !responses.some((guest) =>
-            isSeatingInviteCodeAvailable === true && normalizeInviteCode(assignment.invite_code)
-              ? normalizeInviteCode(guest.invite_code) === normalizeInviteCode(assignment.invite_code)
-              : normalizeNameKey(guest.guest_name) === normalizeNameKey(assignment.name),
-          ),
-      ),
-    [isSeatingInviteCodeAvailable, responses, seatingAssignments],
+      seatingAssignments.filter((assignment) => {
+        const assignmentInviteCode = normalizeInviteCode(assignment.invite_code);
+        if (!assignmentInviteCode) return true;
+        return !responses.some((guest) => normalizeInviteCode(guest.invite_code) === assignmentInviteCode);
+      }),
+    [responses, seatingAssignments],
   );
-
-  const duplicateSeatingNameGroups = useMemo(() => {
-    const grouped = new Map<string, SeatingAssignment[]>();
-
-    seatingAssignments.forEach((assignment) => {
-      const key =
-        normalizeInviteCode(assignment.invite_code)
-          ? ""
-          : `name:${normalizeNameKey(assignment.name)}`;
-      if (!key) return;
-      grouped.set(key, [...(grouped.get(key) || []), assignment]);
-    });
-
-    return Array.from(grouped.entries())
-      .map(([key, assignments]) => ({ key, assignments }))
-      .filter(({ assignments }) => assignments.length > 1)
-      .sort((left, right) => left.assignments[0].name.localeCompare(right.assignments[0].name));
-  }, [seatingAssignments]);
 
   const integrityIssueCount =
     acceptedGuestsNeedingSeating.length +
     seatedPendingOrDeclinedGuests.length +
     acceptedSeatOverages.length +
     guestCountIntegrityIssues.length +
-    seatingWithoutMatchingInvite.length +
-    duplicateSeatingNameGroups.length;
+    seatingWithoutMatchingInvite.length;
 
   const toggleGuestStatusFilter = (filter: GuestStatusFilter) => {
     setGuestStatusFilters((prev) =>
@@ -1944,25 +1942,34 @@ export default function StudioProPage() {
   const clearGuestExtraFilters = () => setGuestExtraFilters([]);
 
   const stats = useMemo(() => {
-    const sentInvitations = responses.filter((guest) => guest.invitation_sent === true).length;
-    const pendingInvitations = responses.filter((guest) => guest.invitation_sent !== true).length;
-    const awaitingResponse = responses.filter((guest) => guest.attending === null).length;
-    const declinedInvitations = responses.filter((guest) => guest.attending === false).length;
-    const acceptedGuests = responses.reduce(
+    const physicalResponses = responses.filter((guest) => guest.virtual_guest !== true);
+    const virtualResponses = responses.filter((guest) => guest.virtual_guest === true);
+    const sentInvitations = physicalResponses.filter((guest) => guest.invitation_sent === true).length;
+    const pendingInvitations = physicalResponses.filter((guest) => guest.invitation_sent !== true).length;
+    const awaitingResponse = physicalResponses.filter((guest) => guest.attending === null).length;
+    const declinedInvitations = physicalResponses.filter((guest) => guest.attending === false).length;
+    const acceptedGuests = physicalResponses.reduce(
       (sum, guest) => sum + (guest.attending === true ? guest.confirmed_guests || 0 : 0),
       0,
     );
-    const acceptedGuestsSeated = responses.reduce((sum, guest) => {
+    const acceptedGuestsSeated = physicalResponses.reduce((sum, guest) => {
       if (guest.attending !== true) return sum;
       const confirmed = Math.max(1, guest.confirmed_guests || 1);
       const seatedCount = getAssignedSeatCountForGuest(guest);
       return sum + Math.min(confirmed, seatedCount);
     }, 0);
-    const totalInvitedGuests = responses.reduce((sum, guest) => sum + (guest.max_guests || 0), 0);
+    const totalInvitedGuests = physicalResponses.reduce((sum, guest) => sum + (guest.max_guests || 0), 0);
+    const virtualAccepted = virtualResponses.filter((guest) => guest.attending === true).length;
+    const virtualDeclined = virtualResponses.filter((guest) => guest.attending === false).length;
+    const virtualAwaiting = virtualResponses.filter((guest) => guest.attending === null).length;
     const uniqueTables = new Set(seatingAssignments.map((assignment) => assignment.table_number)).size;
     return {
-      totalInvitations: responses.length,
+      totalInvitations: physicalResponses.length,
       totalInvitedGuests,
+      virtualInvitations: virtualResponses.length,
+      virtualAccepted,
+      virtualDeclined,
+      virtualAwaiting,
       sentInvitations,
       pendingInvitations,
       awaitingResponse,
@@ -2001,6 +2008,7 @@ export default function StudioProPage() {
         if (filter === "not_sent") return guest.invitation_sent !== true;
         if (filter === "has_children") return guest.has_children === true;
         if (filter === "sent_awaiting_response") return guest.invitation_sent === true && guest.attending === null;
+        if (filter === "virtual") return guest.virtual_guest === true;
         return guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name));
       });
     });
@@ -2021,20 +2029,31 @@ export default function StudioProPage() {
   }, [deferredGuestSearch, guestExtraFilters, guestSort, guestStatusFilters, guestsNeedingSeatingKeys, responses]);
 
   const filteredInvitationStats = useMemo(() => {
-    const acceptedGuests = filteredResponses.reduce(
+    const physicalResponses = filteredResponses.filter((guest) => guest.virtual_guest !== true);
+    const virtualResponses = filteredResponses.filter((guest) => guest.virtual_guest === true);
+    const acceptedGuests = physicalResponses.reduce(
       (sum, guest) => sum + (guest.attending === true ? guest.confirmed_guests || 0 : 0),
       0,
     );
-    const invitedGuests = filteredResponses.reduce((sum, guest) => sum + (guest.max_guests || 0), 0);
-    const awaiting = filteredResponses.filter((guest) => guest.attending === null).length;
-    const needsSeating = filteredResponses.filter((guest) => guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name))).length;
+    const invitedGuests = physicalResponses.reduce((sum, guest) => sum + (guest.max_guests || 0), 0);
+    const awaiting = physicalResponses.filter((guest) => guest.attending === null).length;
+    const declined = physicalResponses.filter((guest) => guest.attending === false).length;
+    const needsSeating = physicalResponses.filter((guest) => guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name))).length;
+    const virtualAccepted = virtualResponses.filter((guest) => guest.attending === true).length;
+    const virtualDeclined = virtualResponses.filter((guest) => guest.attending === false).length;
+    const virtualAwaiting = virtualResponses.filter((guest) => guest.attending === null).length;
 
     return {
-      invitations: filteredResponses.length,
+      invitations: physicalResponses.length,
       acceptedGuests,
       invitedGuests,
       awaiting,
+      declined,
       needsSeating,
+      virtual: virtualResponses.length,
+      virtualAccepted,
+      virtualDeclined,
+      virtualAwaiting,
     };
   }, [filteredResponses, guestsNeedingSeatingKeys]);
 
@@ -2045,7 +2064,6 @@ export default function StudioProPage() {
           (assignment) => {
             const linkedGuestName =
               findLinkedGuestForSeating({
-                name: assignment.name,
                 inviteCode: assignment.invite_code,
               })?.guest_name.toLowerCase() || "";
 
@@ -2109,12 +2127,11 @@ export default function StudioProPage() {
 
     filteredSeatingAssignments.forEach((assignment) => {
       const inviteCode = normalizeInviteCode(assignment.invite_code) || null;
-      const key = inviteCode ? `invite:${inviteCode}` : `name:${normalizeNameKey(assignment.name)}`;
+      const key = inviteCode ? `invite:${inviteCode}` : `unlinked:${assignment.id}`;
       const existing = grouped.get(key);
       const linkedGuest =
         existing?.linkedGuest ||
         findLinkedGuestForSeating({
-          name: assignment.name,
           inviteCode,
         });
       const nextAssignments = [...(existing?.assignments || []), assignment];
@@ -2209,7 +2226,6 @@ export default function StudioProPage() {
   }, [followUpSentBefore, responses]);
 
   const seatingComposerCapacityCheck = getSeatingCapacityCheck({
-    name: seatingName.trim(),
     inviteCode: seatingInviteCode,
     guestCount: seatingGuestCount,
     editingAssignmentId: editingSeatingId,
@@ -2231,6 +2247,22 @@ export default function StudioProPage() {
   );
 
   const assignGuestToTable = async (guest: GuestResponse, nextTableNumber: number) => {
+    if (guest.virtual_guest === true) {
+      showToast("Virtual guests do not need seating.", "info");
+      return;
+    }
+
+    if (isSeatingInviteCodeAvailable !== true) {
+      showToast("Add an invite_code column to seating before assigning tables.", "error");
+      return;
+    }
+
+    const guestInviteCode = normalizeInviteCode(guest.invite_code);
+    if (!guestInviteCode) {
+      showToast("This invitation needs an RSVP code before it can be seated.", "error");
+      return;
+    }
+
     const matchingAssignments = getSeatingAssignmentsForGuest(guest);
     if (matchingAssignments.length > 1) {
       openSeatingBoardForGuest(guest);
@@ -2239,7 +2271,7 @@ export default function StudioProPage() {
     }
 
     const assignmentPayload = {
-      ...(isSeatingInviteCodeAvailable ? { invite_code: normalizeInviteCode(guest.invite_code) || null } : {}),
+      invite_code: guestInviteCode,
       table_number: Math.max(1, nextTableNumber),
     };
     const existingAssignment = matchingAssignments[0];
@@ -2460,10 +2492,26 @@ export default function StudioProPage() {
 
   const bulkAssignSelectedToTable = async () => {
     if (selectedGuests.length === 0) return;
+    if (isSeatingInviteCodeAvailable !== true) {
+      showToast("Add an invite_code column to seating before assigning tables.", "error");
+      return;
+    }
+
+    const physicalSelectedGuests = selectedGuests.filter((guest) => guest.virtual_guest !== true);
+    if (physicalSelectedGuests.length === 0) {
+      showToast("Virtual guests do not need seating.", "info");
+      return;
+    }
 
     const nextTableNumber = Math.max(1, Number(bulkTableNumber) || 1);
 
-    for (const guest of selectedGuests) {
+    for (const guest of physicalSelectedGuests) {
+      const guestInviteCode = normalizeInviteCode(guest.invite_code);
+      if (!guestInviteCode) {
+        showToast(`${guest.guest_name} needs an RSVP code before they can be seated.`, "error");
+        return;
+      }
+
       const existingAssignments = getSeatingAssignmentsForGuest(guest);
       const existingAssignment = existingAssignments[0];
 
@@ -2471,7 +2519,7 @@ export default function StudioProPage() {
         const { error: updateError } = await supabase
           .from("seating")
           .update({
-            ...(isSeatingInviteCodeAvailable ? { invite_code: normalizeInviteCode(guest.invite_code) || null } : {}),
+            invite_code: guestInviteCode,
             table_number: nextTableNumber,
           })
           .in(
@@ -2489,7 +2537,7 @@ export default function StudioProPage() {
           .insert([
             {
               name: guest.guest_name.trim(),
-              ...(isSeatingInviteCodeAvailable ? { invite_code: normalizeInviteCode(guest.invite_code) || null } : {}),
+              invite_code: guestInviteCode,
               table_number: nextTableNumber,
               ...(isSeatingGuestCountAvailable ? { guest_count: getSeatingGuestCount(guest) } : {}),
             },
@@ -2502,8 +2550,10 @@ export default function StudioProPage() {
       }
     }
 
+    const assignedSeatCount = physicalSelectedGuests.reduce((sum, guest) => sum + getSeatingGuestCount(guest), 0);
+    const skippedVirtualCount = selectedGuests.length - physicalSelectedGuests.length;
     showToast(
-      `${selectedGuests.length} guest${selectedGuests.length === 1 ? "" : "s"} (${selectedGuestSeatCount} seat${selectedGuestSeatCount === 1 ? "" : "s"}) assigned to table ${nextTableNumber}.`,
+      `${physicalSelectedGuests.length} guest${physicalSelectedGuests.length === 1 ? "" : "s"} (${assignedSeatCount} seat${assignedSeatCount === 1 ? "" : "s"}) assigned to table ${nextTableNumber}.${skippedVirtualCount > 0 ? ` ${skippedVirtualCount} virtual skipped.` : ""}`,
       "success",
     );
     setSelectedGuestIds([]);
@@ -2569,6 +2619,7 @@ export default function StudioProPage() {
       "attending",
       "invitation_sent",
       "invitation_sent_at",
+      "virtual_guest",
       "has_children",
       "children_count",
       "responded_at",
@@ -2604,6 +2655,7 @@ export default function StudioProPage() {
         guest.attending === null ? "pending" : guest.attending ? "attending" : "declined",
         Boolean(guest.invitation_sent),
         guest.invitation_sent_at ?? "",
+        Boolean(guest.virtual_guest),
         Boolean(guest.has_children),
         guest.children_count ?? "",
         guest.responded_at ?? "",
@@ -2669,6 +2721,66 @@ export default function StudioProPage() {
           `Moved ${assignmentsToMove.length} seating assignment${assignmentsToMove.length === 1 ? "" : "s"} from table ${sourceTable} to table ${targetTable}.`,
           "success",
         );
+      },
+    });
+  };
+
+  const swapTables = async () => {
+    if (tableMoveFrom === "" || tableMoveTo === "") return;
+
+    const firstTable = Number(tableMoveFrom);
+    const secondTable = Number(tableMoveTo);
+
+    if (firstTable === secondTable) {
+      showToast("Choose two different tables to swap.", "info");
+      return;
+    }
+
+    const firstAssignments = seatingAssignments.filter((assignment) => assignment.table_number === firstTable);
+    const secondAssignments = seatingAssignments.filter((assignment) => assignment.table_number === secondTable);
+
+    if (firstAssignments.length === 0 || secondAssignments.length === 0) {
+      showToast("Both tables need guests before they can be swapped.", "info");
+      return;
+    }
+
+    const firstSeatTotal = firstAssignments.reduce((sum, assignment) => sum + Math.max(1, assignment.guest_count || 1), 0);
+    const secondSeatTotal = secondAssignments.reduce((sum, assignment) => sum + Math.max(1, assignment.guest_count || 1), 0);
+
+    askConfirm({
+      title: `Swap Tables ${firstTable} And ${secondTable}?`,
+      message: `This will move table ${firstTable}'s ${firstSeatTotal} seat${firstSeatTotal === 1 ? "" : "s"} to table ${secondTable}, and table ${secondTable}'s ${secondSeatTotal} seat${secondSeatTotal === 1 ? "" : "s"} to table ${firstTable}.`,
+      actionLabel: "Swap Tables",
+      onConfirm: async () => {
+        const { error: firstStepError } = await supabase
+          .from("seating")
+          .update({ table_number: secondTable })
+          .in(
+            "id",
+            firstAssignments.map((assignment) => assignment.id),
+          );
+
+        if (firstStepError) {
+          showToast(firstStepError.message, "error");
+          return;
+        }
+
+        const { error: secondStepError } = await supabase
+          .from("seating")
+          .update({ table_number: firstTable })
+          .in(
+            "id",
+            secondAssignments.map((assignment) => assignment.id),
+          );
+
+        if (secondStepError) {
+          showToast(secondStepError.message, "error");
+          return;
+        }
+
+        setSeatingTableFilter([firstTable, secondTable]);
+        setSeatingTab("board");
+        showToast(`Swapped tables ${firstTable} and ${secondTable}.`, "success");
       },
     });
   };
@@ -2806,15 +2918,26 @@ export default function StudioProPage() {
                       <SectionHeading
                         kicker="Overview"
                         title="Overview"
-                        description="The main invitation, RSVP, and seating numbers in one place."
+                        description="In-person and virtual RSVP numbers are separated so seating work stays focused on guests attending in person."
                       />
-                      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                        <StatTile label="Invitations Sent" value={stats.sentInvitations} tone="sky" />
-                        <StatTile label="Pending Invitations" value={stats.pendingInvitations} tone="stone" />
-                        <StatTile label="Accepted Guests" value={stats.acceptedGuests} tone="emerald" />
-                        <StatTile label="Awaiting Response" value={stats.awaitingResponse} tone="stone" />
-                        <StatTile label="Needs Seating" value={stats.acceptedNeedingSeating} tone="amber" />
-                        <StatTile label="Total Invited Guests" value={stats.totalInvitedGuests} tone="stone" />
+                      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                        <MetricGroup title="On-Site">
+                          <StatTile label="Invitations Total" value={stats.totalInvitations} tone="stone" />
+                          <StatTile label="Invitations Sent" value={stats.sentInvitations} tone="sky" />
+                          <StatTile label="Invitations Not Sent" value={stats.pendingInvitations} tone="stone" />
+                          <StatTile label="Invitations Awaiting Reply" value={stats.awaitingResponse} tone="stone" />
+                          <StatTile label="Guests Attending" value={stats.acceptedGuests} tone="emerald" />
+                          <StatTile label="Invitations Declined" value={stats.declinedInvitations} tone="rose" />
+                          <StatTile label="Guests Invited" value={stats.totalInvitedGuests} tone="stone" />
+                          <StatTile label="Seats Needed" value={stats.acceptedNeedingSeating} tone="amber" />
+                        </MetricGroup>
+
+                        <MetricGroup title="Virtual">
+                          <StatTile label="Invitations Total" value={stats.virtualInvitations} tone="sky" />
+                          <StatTile label="Invitations Attending" value={stats.virtualAccepted} tone="emerald" />
+                          <StatTile label="Invitations Declined" value={stats.virtualDeclined} tone="rose" />
+                          <StatTile label="Invitations Awaiting Reply" value={stats.virtualAwaiting} tone="stone" />
+                        </MetricGroup>
                       </div>
                     </StudioPanel>
 
@@ -2825,16 +2948,16 @@ export default function StudioProPage() {
                         description="A quick read on sending, replies, accepted guests, and seating coverage."
                       />
                       <div className="mt-5 space-y-4">
-                        <ProgressLine label="Invitations Sent" value={stats.sentInvitations} total={stats.totalInvitations} tone="sky" />
+                        <ProgressLine label="On-Site Invitations Sent" value={stats.sentInvitations} total={stats.totalInvitations} tone="sky" />
                         <ProgressLine
-                          label="RSVP Replies Received"
+                          label="On-Site RSVP Replies Received"
                           value={stats.totalInvitations - stats.awaitingResponse}
                           total={stats.totalInvitations}
                           tone="stone"
                         />
-                        <ProgressLine label="Accepted Guests" value={stats.acceptedGuests} total={stats.totalInvitedGuests} tone="emerald" />
+                        <ProgressLine label="On-Site Guests Attending" value={stats.acceptedGuests} total={stats.totalInvitedGuests} tone="emerald" />
                         <ProgressLine
-                          label="Accepted Guests Seated"
+                          label="On-Site Guests Seated"
                           value={stats.acceptedGuestsSeated}
                           total={Math.max(stats.acceptedGuests, 1)}
                           tone="amber"
@@ -2995,7 +3118,6 @@ export default function StudioProPage() {
                       <StatTile label="Seat Count Over Accepted" value={acceptedSeatOverages.length} tone="rose" />
                       <StatTile label="Guest Count Issues" value={guestCountIntegrityIssues.length} tone="rose" />
                       <StatTile label="Seating Without Invite" value={seatingWithoutMatchingInvite.length} tone="rose" />
-                      <StatTile label="Duplicate Seating Rows" value={duplicateSeatingNameGroups.length} tone="rose" />
                     </div>
 
                     <div className="mt-5">
@@ -3003,7 +3125,7 @@ export default function StudioProPage() {
                         tabs={[
                           { key: "seating", label: `Seating (${acceptedGuestsNeedingSeating.length + acceptedSeatOverages.length})` },
                           { key: "rsvp", label: `RSVP (${seatedPendingOrDeclinedGuests.length + guestCountIntegrityIssues.length})` },
-                          { key: "records", label: `Records (${seatingWithoutMatchingInvite.length + duplicateSeatingNameGroups.length})` },
+                          { key: "records", label: `Records (${seatingWithoutMatchingInvite.length})` },
                         ]}
                         activeTab={checksTab}
                         onChange={(nextTab) => setChecksTab(nextTab as ChecksWorkspaceTab)}
@@ -3111,9 +3233,9 @@ export default function StudioProPage() {
                         <>
                           <IntegritySection
                             title="Seating Without Matching Invitation"
-                            subtitle="Seating rows that do not match any current invitation."
+                            subtitle="Seating rows that do not have an RSVP code, or whose RSVP code does not match a current invitation."
                             emptyTitle="No orphan seating rows"
-                            emptyDescription="Every seating row matches a current invitation."
+                            emptyDescription="Every seating row is linked by RSVP code."
                           >
                             {seatingWithoutMatchingInvite.map((assignment) => (
                               <IssueCard
@@ -3127,29 +3249,6 @@ export default function StudioProPage() {
                                 secondaryActionLabel="Remove"
                                 onSecondaryAction={() => confirmRemoveSeatingAssignment(assignment)}
                                 secondaryTone="danger"
-                              />
-                            ))}
-                          </IntegritySection>
-
-                          <IntegritySection
-                            title="Duplicate Seating Rows"
-                            subtitle="More than one seating row is pointing to the same guest."
-                            emptyTitle="No duplicate seating rows"
-                            emptyDescription="Each guest appears only once in seating."
-                          >
-                            {duplicateSeatingNameGroups.map(({ key, assignments }) => (
-                              <IssueCard
-                                key={`dup-${key}`}
-                                title={assignments[0]?.name || "Duplicate name"}
-                                detail={`${assignments.length} seating rows · ${assignments
-                                  .map((assignment) =>
-                                    assignment.invite_code
-                                      ? `Table ${assignment.table_number} · ${assignment.invite_code}`
-                                      : `Table ${assignment.table_number}`,
-                                  )
-                                  .join(" · ")}`}
-                                primaryActionLabel="Review Seating"
-                                onPrimaryAction={() => openSeatingBoardForName(assignments[0]?.name || "")}
                               />
                             ))}
                           </IntegritySection>
@@ -3239,6 +3338,7 @@ export default function StudioProPage() {
                               { key: "not_sent", label: "Not Sent" },
                               { key: "sent_awaiting_response", label: "Sent + Awaiting Reply" },
                               { key: "has_children", label: "Has Children" },
+                              { key: "virtual", label: "Virtual" },
                               { key: "needs_seating", label: "Needs Seating" },
                             ] as { key: GuestExtraFilter; label: string }[]).map((item) => (
                               <Pill
@@ -3254,16 +3354,19 @@ export default function StudioProPage() {
 
                       <CompactDisclosure
                         title="Visible Summary"
-                        subtitle={`${filteredInvitationStats.invitations} invitations in this view.`}
+                        subtitle={`${filteredInvitationStats.invitations} on-site invitation${filteredInvitationStats.invitations === 1 ? "" : "s"} in this view.`}
                         open={guestSummaryOpen}
                         onToggle={() => setGuestSummaryOpen((prev) => !prev)}
                       >
-                        <div className="grid gap-2 rounded-[22px] border border-stone-100 bg-stone-50 p-3 sm:grid-cols-5">
-                          <MiniMetric label="Invitations" value={filteredInvitationStats.invitations} />
-                          <MiniMetric label="Invited Guests" value={filteredInvitationStats.invitedGuests} />
-                          <MiniMetric label="Accepted Guests" value={filteredInvitationStats.acceptedGuests} />
-                          <MiniMetric label="Awaiting" value={filteredInvitationStats.awaiting} />
-                          <MiniMetric label="Needs Seating" value={filteredInvitationStats.needsSeating} />
+                        <div className="grid gap-2 rounded-[22px] border border-stone-100 bg-stone-50 p-3 sm:grid-cols-2 lg:grid-cols-6">
+                          <MiniMetric label="On-Site Invitations" value={filteredInvitationStats.invitations} />
+                          <MiniMetric label="On-Site Guests Invited" value={filteredInvitationStats.invitedGuests} />
+                          <MiniMetric label="On-Site Guests Attending" value={filteredInvitationStats.acceptedGuests} />
+                          <MiniMetric label="On-Site Invitations Declined" value={filteredInvitationStats.declined} />
+                          <MiniMetric label="Virtual Invitations" value={filteredInvitationStats.virtual} />
+                          <MiniMetric label="Virtual Invitations Declined" value={filteredInvitationStats.virtualDeclined} />
+                          <MiniMetric label="On-Site Awaiting Reply" value={filteredInvitationStats.awaiting} />
+                          <MiniMetric label="Seats Needed" value={filteredInvitationStats.needsSeating} />
                         </div>
                       </CompactDisclosure>
 
@@ -3356,6 +3459,7 @@ export default function StudioProPage() {
                               <>
                                 <InvitationSentBadge sent={Boolean(guest.invitation_sent)} />
                                 <StatusBadge attending={guest.attending} />
+                                {Boolean(guest.virtual_guest) && <VirtualGuestBadge />}
                                 {Boolean(guest.has_children) && <ChildrenCountBadge count={guest.children_count || 0} />}
                                 {guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name)) && <IssueBadge label="Needs Seating" tone="amber" />}
                                 {seatedPendingOrDeclinedKeys.has(normalizeNameKey(guest.guest_name)) && (
@@ -3661,6 +3765,26 @@ export default function StudioProPage() {
                                           className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-300"
                                         />
                                         Request Contact Details
+                                      </label>
+                                    )}
+
+                                    {isVirtualGuestAvailable && (
+                                      <label className="inline-flex items-center gap-3 rounded-full border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-700">
+                                        <input
+                                          type="checkbox"
+                                          checked={draft.virtual_guest}
+                                          onChange={(event) =>
+                                            setInlineGuestEdits((prev) => ({
+                                              ...prev,
+                                              [guest.id]: {
+                                                ...prev[guest.id],
+                                                virtual_guest: event.target.checked,
+                                              },
+                                            }))
+                                          }
+                                          className="h-4 w-4 rounded border-sky-300 text-sky-700 focus:ring-sky-300"
+                                        />
+                                        Virtual Guest
                                       </label>
                                     )}
 
@@ -4197,6 +4321,18 @@ export default function StudioProPage() {
                             onChange={setRequestContactDetails}
                           />
                         )}
+                        {isVirtualGuestAvailable ? (
+                          <ToggleBox
+                            label="Virtual Guest"
+                            description="Show a virtual RSVP flow, count this guest separately, and replace venue details with livestream details."
+                            checked={isVirtualGuest}
+                            onChange={setIsVirtualGuest}
+                          />
+                        ) : (
+                          <div className="rounded-[24px] border border-dashed border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-700">
+                            Add a `virtual_guest` column to `public.rsvp_list` to enable virtual invite controls.
+                          </div>
+                        )}
                         <ToggleBox
                           label="Has Children"
                           description="Track children included inside the total invited guest count."
@@ -4368,7 +4504,6 @@ export default function StudioProPage() {
                         const isEditing = Boolean(draft);
                         const inlineCapacityCheck = draft
                           ? getSeatingCapacityCheck({
-                              name: draft.name,
                               inviteCode: draft.invite_code,
                               guestCount: draft.guest_count,
                               editingAssignmentId: assignment.id,
@@ -4464,7 +4599,7 @@ export default function StudioProPage() {
                                         className="wedding-inline-edit-input uppercase"
                                         placeholder="RSVP code"
                                       />
-                                      <InlineFieldHint text="Optional, but best for keeping seating linked" />
+                                      <InlineFieldHint text="Required link to the RSVP record" />
                                     </div>
                                   )}
                                   <div className="space-y-1">
@@ -4633,12 +4768,11 @@ export default function StudioProPage() {
                                 {group.assignments.map((assignment) => {
                                   const draft = inlineSeatingEdits[assignment.id];
                                   const isEditing = Boolean(draft);
-                                  const inlineCapacityCheck = draft
-                                    ? getSeatingCapacityCheck({
-                                        name: draft.name,
-                                        inviteCode: draft.invite_code,
-                                        guestCount: draft.guest_count,
-                                        editingAssignmentId: assignment.id,
+                                          const inlineCapacityCheck = draft
+                                            ? getSeatingCapacityCheck({
+                                                inviteCode: draft.invite_code,
+                                                guestCount: draft.guest_count,
+                                                editingAssignmentId: assignment.id,
                                       })
                                     : null;
 
@@ -4726,7 +4860,7 @@ export default function StudioProPage() {
                                                   className="wedding-inline-edit-input uppercase"
                                                   placeholder="RSVP code"
                                                 />
-                                                <InlineFieldHint text="Optional, but best for keeping seating linked" />
+                                                <InlineFieldHint text="Required link to the RSVP record" />
                                               </div>
                                             )}
                                             <div className="space-y-1">
@@ -4868,6 +5002,12 @@ export default function StudioProPage() {
                       description="Review visible table totals and move an entire table when plans change."
                     />
 
+                    <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+                      <button type="button" disabled className="wedding-button-primary w-full cursor-not-allowed opacity-60 sm:w-auto">
+                        Seat Management
+                      </button>
+                    </div>
+
                     <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
                       <input
                         type="search"
@@ -4903,11 +5043,15 @@ export default function StudioProPage() {
                     {availableTableNumbers.length > 0 && (
                       <div className="mt-5">
                         <CompactDisclosure
-                          title="Move Entire Table"
-                          subtitle="Move every assignment from one table number to another."
+                          title="Move Or Swap Tables"
+                          subtitle="Renumber one table, or swap two occupied table numbers without merging guests."
                           open={tableToolsOpen}
                           onToggle={() => setTableToolsOpen((prev) => !prev)}
                         >
+                          <div className="mb-3 flex flex-wrap gap-2">
+                            <Pill label="Swap Tables" active={tableMoveMode === "swap"} onClick={() => setTableMoveMode("swap")} />
+                            <Pill label="Move / Merge" active={tableMoveMode === "move"} onClick={() => setTableMoveMode("move")} />
+                          </div>
                           <div className="grid gap-3 sm:grid-cols-[minmax(0,180px)_minmax(0,180px)_auto]">
                             <FormField label="From Table">
                               <select
@@ -4937,13 +5081,16 @@ export default function StudioProPage() {
                             </FormField>
                             <button
                               type="button"
-                              onClick={() => void moveEntireTable()}
+                              onClick={() => void (tableMoveMode === "swap" ? swapTables() : moveEntireTable())}
                               disabled={tableMoveFrom === "" || tableMoveTo === "" || tableMoveFrom === tableMoveTo}
                               className="wedding-button-primary w-full self-end disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                             >
-                              Move Table
+                              {tableMoveMode === "swap" ? "Swap Tables" : "Move Table"}
                             </button>
                           </div>
+                          <p className="mt-3 text-sm text-stone-500">
+                            Swap is best when both tables already have guests. Move / Merge changes the source table number and combines it with the destination.
+                          </p>
                         </CompactDisclosure>
                       </div>
                     )}
@@ -5039,11 +5186,12 @@ export default function StudioProPage() {
                         </FormField>
                       )}
 
-                      {isSeatingInviteCodeAvailable && (
-                        <FormField label="RSVP Code (Optional)">
+                      {isSeatingInviteCodeAvailable ? (
+                        <FormField label="RSVP Code">
                           <input
                             value={seatingInviteCode}
                             onChange={(event) => setSeatingInviteCode(event.target.value.toUpperCase())}
+                            required
                             autoCapitalize="characters"
                             autoCorrect="off"
                             spellCheck={false}
@@ -5051,9 +5199,13 @@ export default function StudioProPage() {
                             placeholder="Link this seating row to an invitation"
                           />
                           <p className="mt-2 text-xs text-stone-500">
-                            If you opened this from a guest card, the RSVP code is already filled in. Keeping it here is the safest way to keep seating and RSVP linked.
+                            Seating links to invitations by RSVP code only.
                           </p>
                         </FormField>
+                      ) : (
+                        <div className="rounded-[24px] border border-dashed border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">
+                          Add an `invite_code` column to `public.seating` before creating seating assignments.
+                        </div>
                       )}
 
                       <FormField label="Table Number">
@@ -5214,6 +5366,40 @@ export default function StudioProPage() {
                         )
                       }
                     />
+                    <ToggleTile
+                      label="Livestream Page"
+                      description="Control whether virtual guests can open the livestream page."
+                      enabled={isLivestreamEnabled}
+                      onToggle={() =>
+                        void updateSetting(
+                          "is_livestream_enabled",
+                          !isLivestreamEnabled,
+                          `Livestream page ${!isLivestreamEnabled ? "enabled" : "disabled"}.`,
+                        )
+                      }
+                    />
+                  </div>
+
+                  <div className="mt-5 rounded-[22px] border border-stone-100 bg-stone-50 p-4">
+                    <FormField label="Livestream Embed Link">
+                      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+                        <input
+                          value={livestreamEmbedUrl}
+                          onChange={(event) => setLivestreamEmbedUrl(event.target.value)}
+                          className="wedding-inline-edit-input"
+                          placeholder="https://www.youtube.com/embed/..."
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void updateTextSetting("livestream_embed_url", livestreamEmbedUrl.trim(), "Livestream link saved.")
+                          }
+                          className="wedding-button-primary w-full xl:w-auto"
+                        >
+                          Save Link
+                        </button>
+                      </div>
+                    </FormField>
                   </div>
                 </StudioPanel>
               </div>
@@ -5338,6 +5524,15 @@ function StatTile({
     <div className="rounded-[18px] border border-stone-100 bg-stone-50 px-3 py-3">
       <p className="wedding-kicker mb-1.5">{label}</p>
       <p className={`font-serif text-[2rem] leading-none ${toneStyles}`}>{value}</p>
+    </div>
+  );
+}
+
+function MetricGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="rounded-[22px] border border-stone-100 bg-stone-50/70 p-3">
+      <p className="wedding-kicker mb-3">{title}</p>
+      <div className="grid gap-3 sm:grid-cols-2">{children}</div>
     </div>
   );
 }
@@ -5712,6 +5907,14 @@ function InvitationSentBadge({ sent }: { sent: boolean }) {
       }`}
     >
       {sent ? "Sent" : "Not Sent"}
+    </span>
+  );
+}
+
+function VirtualGuestBadge() {
+  return (
+    <span className="inline-flex whitespace-nowrap rounded-full bg-indigo-50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-700">
+      Virtual
     </span>
   );
 }

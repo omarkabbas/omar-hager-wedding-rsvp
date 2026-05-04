@@ -27,6 +27,7 @@ type GuestData = {
   phone_number?: string | null;
   email?: string | null;
   request_contact_details?: boolean | null;
+  virtual_guest?: boolean | null;
 };
 
 const RSVP_BY_DATE = process.env.NEXT_PUBLIC_RSVP_BY_DATE || "May 1, 2026";
@@ -64,6 +65,7 @@ export default function GuestRSVP() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [emailAddress, setEmailAddress] = useState("");
   const [confirmSavedPhone, setConfirmSavedPhone] = useState(true);
+  const [isLivestreamEnabled, setIsLivestreamEnabled] = useState(false);
   const confettiPieces = useMemo(() => Array.from({ length: 240 }, (_, i) => i), []);
   const rsvpByLabel = useMemo(() => {
     const parsed = new Date(RSVP_BY_DATE);
@@ -75,6 +77,7 @@ export default function GuestRSVP() {
   const mapEmbedLink = VENUE_MAP_EMBED;
   const calendarLink = CALENDAR_FILE_PATH;
   const shouldRequestContactDetails = guestData?.request_contact_details === true;
+  const isVirtualGuest = guestData?.virtual_guest === true;
 
   useEffect(() => {
     async function fetchGuest() {
@@ -111,26 +114,45 @@ export default function GuestRSVP() {
     fetchGuest();
   }, [inviteCode, router]);
 
+  useEffect(() => {
+    async function fetchLivestreamSettings() {
+      const { data } = await supabase
+        .from("settings")
+        .select("key, value")
+        .eq("key", "is_livestream_enabled")
+        .maybeSingle<{ key: string; value: string }>();
+
+      if (data) setIsLivestreamEnabled(data.value === "true");
+    }
+
+    void fetchLivestreamSettings();
+  }, []);
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!guestData) return;
 
     const formData = new FormData(e.currentTarget);
     const attendingValue = formData.get("attending") === "true";
-    const countValue = attendingValue
+    const countValue = guestData.virtual_guest
+      ? attendingValue
+        ? 1
+        : 0
+      : attendingValue
       ? guestData.max_guests === 1
         ? 1
         : parseInt(formData.get("count") as string, 10)
       : 0;
     const nextPhoneNumber =
-      attendingValue && shouldRequestContactDetails
+      attendingValue && shouldRequestContactDetails && !guestData.virtual_guest
         ? guestData.phone_number && confirmSavedPhone
           ? formatPhoneNumberInput(guestData.phone_number)
           : formatPhoneNumberInput(phoneNumber)
         : guestData.phone_number ?? null;
-    const nextEmailAddress = attendingValue && shouldRequestContactDetails ? emailAddress.trim() || null : guestData.email ?? null;
+    const nextEmailAddress =
+      attendingValue && shouldRequestContactDetails && !guestData.virtual_guest ? emailAddress.trim() || null : guestData.email ?? null;
 
-    if (attendingValue && shouldRequestContactDetails && !nextPhoneNumber) {
+    if (attendingValue && shouldRequestContactDetails && !guestData.virtual_guest && !nextPhoneNumber) {
       return;
     }
 
@@ -272,7 +294,28 @@ export default function GuestRSVP() {
                     : "We’ll miss you, but thanks for letting us know!"}
                 </p>
 
-                {guestData.attending && (
+                {guestData.attending && isVirtualGuest && (
+                  <div className="space-y-5 text-left max-w-xl mx-auto">
+                    <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8 text-center">
+                      <p className="wedding-kicker mb-3">Livestream Details</p>
+                      <p className="wedding-card-title text-[#4E5E72]">Omar & Hager Wedding Livestream</p>
+                      <p className="mt-4 text-sm md:text-base text-stone-500 leading-relaxed">
+                        We are so grateful you will be joining us virtually.
+                      </p>
+                      <div className="mt-6">
+                        {isLivestreamEnabled ? (
+                          <Link href="/livestream" className="wedding-button-primary w-full md:w-auto">
+                            Go To Livestream
+                          </Link>
+                        ) : (
+                          <p className="text-sm font-medium text-stone-600">Livestream access will be shared closer to the celebration.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {guestData.attending && !isVirtualGuest && (
                   <div className="space-y-5 text-left max-w-xl mx-auto">
                     <div className="wedding-subpanel px-6 py-6 md:px-8 md:py-8 text-center">
                       <p className="wedding-kicker mb-3">Wedding Details</p>
@@ -343,15 +386,19 @@ export default function GuestRSVP() {
                   <p className="wedding-kicker mb-3">RSVP</p>
                   <p className="wedding-lead text-stone-600 text-xl font-medium mb-1">Welcome,</p>
                   <h2 className="wedding-title text-4xl text-[#4E5E72] md:text-5xl">{guestData.guest_name}</h2>
-                  <p className="mt-3 text-sm font-semibold tracking-[0.01em] text-stone-800">
-                    We have reserved {guestData.max_guests} {guestData.max_guests === 1 ? "seat" : "seats"} in your honor.
-                  </p>
+                  {!isVirtualGuest && (
+                    <p className="mt-3 text-sm font-semibold tracking-[0.01em] text-stone-800">
+                      We have reserved {guestData.max_guests} {guestData.max_guests === 1 ? "seat" : "seats"} in your honor.
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2 text-left">
-                  <p className="text-center text-sm font-medium tracking-[0.01em] text-stone-700">
-                    Kindly reply by {rsvpByLabel}.
-                  </p>
+                  {!isVirtualGuest && (
+                    <p className="text-center text-sm font-medium tracking-[0.01em] text-stone-700">
+                      Kindly reply by {rsvpByLabel}.
+                    </p>
+                  )}
                   <label className="wedding-kicker block ml-2 text-stone-600">Will you be attending?</label>
                   <select
                     name="attending"
@@ -365,7 +412,7 @@ export default function GuestRSVP() {
                   </select>
                 </div>
 
-                {isAttending === "true" && guestData.max_guests > 1 && (
+                {isAttending === "true" && !isVirtualGuest && guestData.max_guests > 1 && (
                   <div className="wedding-animate-up space-y-2 text-left">
                     <label className="wedding-kicker block ml-2 text-stone-600">Total Attending in Your Party</label>
                     <select name="count" required className="wedding-select text-lg text-stone-900">
@@ -381,7 +428,7 @@ export default function GuestRSVP() {
                   </div>
                 )}
 
-                {isAttending === "true" && shouldRequestContactDetails && (
+                {isAttending === "true" && !isVirtualGuest && shouldRequestContactDetails && (
                   <div className="wedding-animate-up space-y-5 text-left">
                     {guestData.phone_number ? (
                       <div className="space-y-3 rounded-[24px] border border-stone-100 bg-stone-50 px-5 py-5">
