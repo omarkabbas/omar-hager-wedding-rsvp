@@ -4426,11 +4426,16 @@ export default function StudioProPage() {
                 {seatingTab === "board" && (
                   <div className="space-y-4">
                   <StudioPanel>
-                    <SectionHeading
-                      kicker="Seating Workspace"
-                      title="Seating Board"
-                      description="Search, filter, and update table assignments by guest or table number."
-                    />
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <SectionHeading
+                        kicker="Seating Workspace"
+                        title="Seating Board"
+                        description="Search, filter, and update table assignments by guest or table number."
+                      />
+                      <Link href="/studio-pro/seat-management" className="wedding-button-primary shrink-0">
+                        Seat Management
+                      </Link>
+                    </div>
 
                     <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
                       <input
@@ -4451,7 +4456,7 @@ export default function StudioProPage() {
                     <div className="mt-4">
                       <WorkspaceTabs
                         tabs={[
-                          { key: "assignments", label: "By Seating Row" },
+                          { key: "assignments", label: "By Assignment" },
                           { key: "invites", label: "By Invitation" },
                         ]}
                         activeTab={seatingBoardMode}
@@ -4707,7 +4712,7 @@ export default function StudioProPage() {
                                     }`}
                                   >
                                     {inlineCapacityCheck.linkedGuest.guest_name} currently has {inlineCapacityCheck.alreadyAssignedSeats} seat
-                                    {inlineCapacityCheck.alreadyAssignedSeats === 1 ? "" : "s"} assigned. This row would bring the total to{" "}
+                                    {inlineCapacityCheck.alreadyAssignedSeats === 1 ? "" : "s"} assigned. This assignment would bring the total to{" "}
                                     {inlineCapacityCheck.totalAfterSave} of {inlineCapacityCheck.allowedSeats}.
                                   </div>
                                 )}
@@ -4968,7 +4973,7 @@ export default function StudioProPage() {
                                               }`}
                                             >
                                               {inlineCapacityCheck.linkedGuest.guest_name} currently has {inlineCapacityCheck.alreadyAssignedSeats} seat
-                                              {inlineCapacityCheck.alreadyAssignedSeats === 1 ? "" : "s"} assigned. This row would bring the total to{" "}
+                                              {inlineCapacityCheck.alreadyAssignedSeats === 1 ? "" : "s"} assigned. This assignment would bring the total to{" "}
                                               {inlineCapacityCheck.totalAfterSave} of {inlineCapacityCheck.allowedSeats}.
                                             </div>
                                           )}
@@ -5011,12 +5016,6 @@ export default function StudioProPage() {
                       title="Table Totals & Moves"
                       description="Review visible table totals and move an entire table when plans change."
                     />
-
-                    <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-                      <Link href="/studio-pro/seat-management" className="wedding-button-primary w-full sm:w-auto">
-                        Seat Management
-                      </Link>
-                    </div>
 
                     <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
                       <input
@@ -5273,7 +5272,7 @@ export default function StudioProPage() {
                           }`}
                         >
                           {seatingComposerCapacityCheck.linkedGuest.guest_name} currently has {seatingComposerCapacityCheck.alreadyAssignedSeats} seat
-                          {seatingComposerCapacityCheck.alreadyAssignedSeats === 1 ? "" : "s"} assigned. This row would bring the total to{" "}
+                          {seatingComposerCapacityCheck.alreadyAssignedSeats === 1 ? "" : "s"} assigned. This assignment would bring the total to{" "}
                           {seatingComposerCapacityCheck.totalAfterSave} of {seatingComposerCapacityCheck.allowedSeats}.
                         </div>
                       )}
