@@ -3,9 +3,11 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, WheelEvent } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
 import { SITE_URL } from "@/lib/wedding";
+import { DatabaseEnvironmentBadge } from "./DatabaseEnvironmentBadge";
 
 type GuestResponse = {
   id: string;
@@ -1038,7 +1040,7 @@ export default function StudioProPage() {
       if (hasSeating && attendingValue !== true) {
         askConfirm({
           title: "Guest Still Has Seating Assigned",
-          message: `${existingGuest.guest_name} still has a seating assignment. You can keep the seating as-is, or remove it while saving this RSVP change.`,
+          message: `${existingGuest.guest_name} still has a table assignment. You can keep it as-is, or remove it while saving this RSVP change.`,
           actionLabel: "Save & Keep Seating",
           actionTone: "default",
           onConfirm: async () => {
@@ -1082,7 +1084,7 @@ export default function StudioProPage() {
 
     const cleanedInviteCode = normalizeInviteCode(seatingInviteCode);
     if (isSeatingInviteCodeAvailable !== true) {
-      showToast("Add an invite_code column to seating before creating linked seating rows.", "error");
+      showToast("Add an invite_code column to seating before creating linked table assignments.", "error");
       return;
     }
 
@@ -1118,6 +1120,7 @@ export default function StudioProPage() {
       table_number: Math.max(1, Number(tableNumber) || 1),
       ...(isSeatingGuestCountAvailable ? { guest_count: Math.max(1, Number(seatingGuestCount) || 1) } : {}),
     };
+    const returnLocation = seatingComposerReturnLocation;
 
     if (editingSeatingId !== null) {
       const { error: updateError } = await supabase.from("seating").update(payload).eq("id", editingSeatingId);
@@ -1129,6 +1132,7 @@ export default function StudioProPage() {
 
       showToast("Seating assignment updated.", "success");
       resetSeatingForm();
+      restoreWorkspaceLocation(returnLocation);
       return;
     }
 
@@ -1141,6 +1145,7 @@ export default function StudioProPage() {
 
     showToast("Seating assignment added.", "success");
     resetSeatingForm();
+    restoreWorkspaceLocation(returnLocation);
   };
 
   const startInlineGuestEdit = (guest: GuestResponse) => {
@@ -1282,7 +1287,7 @@ export default function StudioProPage() {
     if (hasSeating && draft.attending !== true) {
       askConfirm({
         title: "Guest Still Has Seating Assigned",
-        message: `${existingGuest.guest_name} still has a seating assignment. You can keep the seating as-is, or remove it while saving this RSVP change.`,
+        message: `${existingGuest.guest_name} still has a table assignment. You can keep it as-is, or remove it while saving this RSVP change.`,
         actionLabel: "Save & Keep Seating",
         actionTone: "default",
         onConfirm: async () => {
@@ -1327,7 +1332,7 @@ export default function StudioProPage() {
     const cleanedInviteCode = normalizeInviteCode(draft.invite_code);
 
     if (isSeatingInviteCodeAvailable !== true) {
-      showToast("Add an invite_code column to seating before editing linked seating rows.", "error");
+      showToast("Add an invite_code column to seating before editing linked table assignments.", "error");
       return;
     }
 
@@ -1497,7 +1502,7 @@ export default function StudioProPage() {
     askConfirm({
       title: "Remove Invitation?",
       message: hasLinkedSeating
-        ? `${guest.guest_name} will be removed from the invitation list. This guest also has linked seating assignments.`
+        ? `${guest.guest_name} will be removed from the invitation list. This guest also has linked table assignments.`
         : `${guest.guest_name} will be removed from the invitation list.`,
       actionLabel: hasLinkedSeating ? "Remove Invitation & Seating" : "Remove",
       actionTone: "danger",
@@ -1588,7 +1593,7 @@ export default function StudioProPage() {
 
   const confirmRemoveSeatingAssignment = (assignment: SeatingAssignment) => {
     askConfirm({
-      title: "Remove Seating Assignment?",
+      title: "Remove Table Assignment?",
       message: `${assignment.name} will be removed from table ${assignment.table_number}.`,
       actionLabel: "Remove",
       actionTone: "danger",
@@ -2266,7 +2271,7 @@ export default function StudioProPage() {
     const matchingAssignments = getSeatingAssignmentsForGuest(guest);
     if (matchingAssignments.length > 1) {
       openSeatingBoardForGuest(guest);
-      showToast("This invitation has multiple seating rows. Update it from the seating board.", "info");
+      showToast("This invitation has multiple table assignments. Update it from the seating board.", "info");
       return;
     }
 
@@ -2300,7 +2305,7 @@ export default function StudioProPage() {
   const removeGuestSeating = async (guest: GuestResponse) => {
     const matchingAssignments = getSeatingAssignmentsForGuest(guest);
     if (matchingAssignments.length === 0) {
-      showToast(`${guest.guest_name} does not have a seating assignment yet.`, "info");
+      showToast(`${guest.guest_name} does not have a table assignment yet.`, "info");
       return;
     }
 
@@ -2471,8 +2476,8 @@ export default function StudioProPage() {
 
     if (seatedSelectedGuests.length > 0) {
       askConfirm({
-        title: "Selected Guests Still Have Seating Assigned",
-        message: `${seatedSelectedGuests.length} selected guest${seatedSelectedGuests.length === 1 ? "" : "s"} still have seating assigned. You can reset their RSVP to pending and keep their seating, or remove those seating assignments too.`,
+        title: "Selected Invitations Still Have Seats Assigned",
+        message: `${seatedSelectedGuests.length} selected invitation${seatedSelectedGuests.length === 1 ? "" : "s"} still has assigned seats. You can reset their RSVP to pending and keep those seats, or remove those table assignments too.`,
         actionLabel: "Reset & Keep Seating",
         actionTone: "default",
         onConfirm: async () => {
@@ -2571,15 +2576,15 @@ export default function StudioProPage() {
     );
 
     if (assignmentsToRemove.length === 0) {
-      showToast("None of the selected guests currently have a seating assignment.", "info");
+      showToast("None of the selected invitations currently have assigned seats.", "info");
       return;
     }
-    const guestsAffected = selectedGuests.filter((guest) => getSeatingAssignmentsForGuest(guest).length > 0).length;
+    const invitationsAffected = selectedGuests.filter((guest) => getSeatingAssignmentsForGuest(guest).length > 0).length;
     const totalSeatsAffected = assignmentsToRemove.reduce((sum, assignment) => sum + Math.max(1, assignment.guest_count || 1), 0);
 
     askConfirm({
       title: "Remove Selected Seating?",
-      message: `This will remove seating for ${guestsAffected} guest${guestsAffected === 1 ? "" : "s"} across ${assignmentsToRemove.length} seating row${
+      message: `This will remove seats for ${invitationsAffected} invitation${invitationsAffected === 1 ? "" : "s"} across ${assignmentsToRemove.length} table assignment${
         assignmentsToRemove.length === 1 ? "" : "s"
       }, covering ${totalSeatsAffected} seat${totalSeatsAffected === 1 ? "" : "s"}.`,
       actionLabel: "Remove Seating",
@@ -2599,7 +2604,7 @@ export default function StudioProPage() {
         }
 
         showToast(
-          `Removed seating for ${guestsAffected} guest${guestsAffected === 1 ? "" : "s"}.`,
+          `Removed seats for ${invitationsAffected} invitation${invitationsAffected === 1 ? "" : "s"}.`,
           "success",
         );
         setSelectedGuestIds([]);
@@ -2702,7 +2707,7 @@ export default function StudioProPage() {
 
     askConfirm({
       title: `Move Table ${sourceTable} To Table ${targetTable}?`,
-      message: `This will move ${assignmentsToMove.length} seating assignment${assignmentsToMove.length === 1 ? "" : "s"} covering ${seatTotal} seat${seatTotal === 1 ? "" : "s"} to table ${targetTable}.`,
+      message: `This will move ${assignmentsToMove.length} table assignment${assignmentsToMove.length === 1 ? "" : "s"} covering ${seatTotal} seat${seatTotal === 1 ? "" : "s"} to table ${targetTable}.`,
       actionLabel: "Move Table",
       onConfirm: async () => {
         const { error: updateError } = await supabase
@@ -2718,7 +2723,7 @@ export default function StudioProPage() {
         setSeatingTableFilter([targetTable]);
         setSeatingTab("board");
         showToast(
-          `Moved ${assignmentsToMove.length} seating assignment${assignmentsToMove.length === 1 ? "" : "s"} from table ${sourceTable} to table ${targetTable}.`,
+          `Moved ${assignmentsToMove.length} table assignment${assignmentsToMove.length === 1 ? "" : "s"} from table ${sourceTable} to table ${targetTable}.`,
           "success",
         );
       },
@@ -2856,6 +2861,7 @@ export default function StudioProPage() {
                       <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-sky-700">
                         Pro
                       </span>
+                      <DatabaseEnvironmentBadge />
                     </div>
                     <p className="mt-1 max-w-3xl text-sm leading-relaxed text-stone-500">
                       Manage invitations, seating, RSVPs, and live wedding controls.
@@ -2904,7 +2910,7 @@ export default function StudioProPage() {
                   tabs={[
                     { key: "summary", label: "Overview" },
                     { key: "follow_up", label: "Follow Up" },
-                    { key: "needs_seating", label: `Needs Seating (${stats.acceptedNeedingSeating})` },
+                    { key: "needs_seating", label: `Seats Needed (${stats.acceptedNeedingSeating})` },
                     { key: "activity", label: "Recent Activity" },
                     { key: "checks", label: `Checks (${integrityIssueCount})` },
                   ]}
@@ -2945,7 +2951,7 @@ export default function StudioProPage() {
                       <SectionHeading
                         kicker="Progress"
                         title="Progress"
-                        description="A quick read on sending, replies, accepted guests, and seating coverage."
+                        description="A quick read on invitation sending, guest headcount, and seat coverage."
                       />
                       <div className="mt-5 space-y-4">
                         <ProgressLine label="On-Site Invitations Sent" value={stats.sentInvitations} total={stats.totalInvitations} tone="sky" />
@@ -2975,25 +2981,25 @@ export default function StudioProPage() {
                       description="Review invitations that have been sent but have not been answered yet."
                     />
 
-                    <div className="mt-5 grid gap-3 rounded-[22px] border border-stone-100 bg-stone-50 p-3 md:grid-cols-[minmax(0,220px)_auto] md:items-end">
+                    <div className="mt-5 grid min-w-0 gap-3 rounded-[22px] border border-stone-100 bg-stone-50 p-3 sm:grid-cols-[minmax(0,220px)_minmax(0,1fr)] sm:items-end">
                       <FormField label="Invitation Sent On Or Before">
                         <input
                           type="date"
                           value={followUpSentBefore}
                           max={new Date().toISOString().slice(0, 10)}
                           onChange={(event) => setFollowUpSentBefore(event.target.value)}
-                          className="wedding-inline-edit-input"
+                          className="wedding-inline-edit-input min-w-0"
                         />
                       </FormField>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
                         <button
                           type="button"
                           onClick={() => setFollowUpSentBefore("")}
-                          className="wedding-button-secondary"
+                          className="wedding-button-secondary w-full sm:w-auto"
                         >
                           Show All Sent
                         </button>
-                        <span className="inline-flex items-center rounded-full border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600">
+                        <span className="inline-flex w-full items-center justify-center rounded-full border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600 sm:w-auto">
                           {followUpGuests.length} awaiting reply
                         </span>
                       </div>
@@ -3056,15 +3062,15 @@ export default function StudioProPage() {
                 {overviewTab === "needs_seating" && (
                   <StudioPanel>
                     <SectionHeading
-                      kicker="Needs Seating"
-                      title="Accepted Guests Still Needing Seating"
-                      description="Guests who replied yes and still need seats added to their table assignment."
+                      kicker="Seats Needed"
+                      title="On-Site Invitations Still Needing Seats"
+                      description="On-site invitations that replied yes and still need seats added to their table assignment."
                     />
                     <div className="mt-5 grid gap-3">
                       {acceptedGuestsNeedingSeating.length === 0 ? (
                         <EmptyState
-                          title="All accepted guests are fully seated"
-                          description="Your current seating assignments cover every accepted guest count."
+                          title="All attending guests are fully seated"
+                          description="Your current table assignments cover every on-site guest attending."
                         />
                       ) : (
                         acceptedGuestsNeedingSeating.map(({ guest, assignment, accepted, assigned, remaining }) => (
@@ -3073,8 +3079,8 @@ export default function StudioProPage() {
                             title={guest.guest_name}
                             subtitle={
                               assignment
-                                ? `Accepted ${accepted} guest${accepted === 1 ? "" : "s"} · ${assigned} seated · ${remaining} still needed · ${getTableLabelForGuest(guest)}`
-                                : `Accepted ${accepted} guest${accepted === 1 ? "" : "s"} · ${remaining} still needed · ${guest.invite_code}`
+                                ? `${accepted} guest${accepted === 1 ? "" : "s"} attending · ${assigned} seat${assigned === 1 ? "" : "s"} assigned · ${remaining} seat${remaining === 1 ? "" : "s"} needed · ${getTableLabelForGuest(guest)}`
+                                : `${accepted} guest${accepted === 1 ? "" : "s"} attending · ${remaining} seat${remaining === 1 ? "" : "s"} needed · ${guest.invite_code}`
                             }
                             actionLabel={assigned > 0 ? "Add Remaining Seating" : "Add Seating"}
                             onAction={() => beginSeatingPlacementForGuest(guest)}
@@ -3113,9 +3119,9 @@ export default function StudioProPage() {
                     />
 
                     <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                      <StatTile label="Needs Seating" value={acceptedGuestsNeedingSeating.length} tone="amber" />
-                      <StatTile label="Seated While Pending/Declined" value={seatedPendingOrDeclinedGuests.length} tone="rose" />
-                      <StatTile label="Seat Count Over Accepted" value={acceptedSeatOverages.length} tone="rose" />
+                      <StatTile label="Invitations Needing Seats" value={acceptedGuestsNeedingSeating.length} tone="amber" />
+                      <StatTile label="Invitations Seated While Pending/Declined" value={seatedPendingOrDeclinedGuests.length} tone="rose" />
+                      <StatTile label="Assigned Seats Over Guest Count" value={acceptedSeatOverages.length} tone="rose" />
                       <StatTile label="Guest Count Issues" value={guestCountIntegrityIssues.length} tone="rose" />
                       <StatTile label="Seating Without Invite" value={seatingWithoutMatchingInvite.length} tone="rose" />
                     </div>
@@ -3136,10 +3142,10 @@ export default function StudioProPage() {
                       {checksTab === "seating" && (
                         <>
                           <IntegritySection
-                            title="Accepted Guests Still Needing Seating"
-                            subtitle="Accepted guest counts that are not fully covered by seating yet."
+                            title="On-Site Invitations Still Needing Seats"
+                            subtitle="Attending guest counts that are not fully covered by assigned seats yet."
                             emptyTitle="No seating gaps"
-                            emptyDescription="All accepted guest counts are fully covered."
+                            emptyDescription="All attending guest counts are fully covered."
                           >
                             {acceptedGuestsNeedingSeating.map(({ guest, assignment, accepted, assigned, remaining }) => (
                               <IssueCard
@@ -3147,8 +3153,8 @@ export default function StudioProPage() {
                                 title={guest.guest_name}
                                 detail={
                                   assignment
-                                    ? `Accepted ${accepted} guests · ${assigned} seated · ${remaining} still needed · ${getTableLabelForGuest(guest)}`
-                                    : `Accepted ${accepted} guests · no table yet · ${remaining} still needed`
+                                    ? `${accepted} guests attending · ${assigned} seats assigned · ${remaining} seats needed · ${getTableLabelForGuest(guest)}`
+                                    : `${accepted} guests attending · no table yet · ${remaining} seats needed`
                                 }
                                 primaryActionLabel={assigned > 0 ? "Add Remaining Seating" : "Add Seating"}
                                 onPrimaryAction={() => beginSeatingPlacementForGuest(guest)}
@@ -3157,16 +3163,16 @@ export default function StudioProPage() {
                           </IntegritySection>
 
                           <IntegritySection
-                            title="Seat Count Over Accepted"
-                            subtitle="Seating rows with more seats assigned than the RSVP currently allows."
+                            title="Assigned Seats Over Guest Count"
+                            subtitle="Table assignments with more assigned seats than the RSVP guest count currently allows."
                             emptyTitle="No seat count overages"
-                            emptyDescription="Assigned seats do not exceed accepted guest counts."
+                            emptyDescription="Assigned seats do not exceed attending guest counts."
                           >
                             {acceptedSeatOverages.map(({ guest, accepted, assigned, overflow }) => (
                               <IssueCard
                                 key={`over-${guest.id}`}
                                 title={guest.guest_name}
-                                detail={`Accepted ${accepted} guests · ${assigned} seats assigned · ${overflow} too many · ${getTableLabelForGuest(guest)}`}
+                                detail={`${accepted} guests attending · ${assigned} seats assigned · ${overflow} too many · ${getTableLabelForGuest(guest)}`}
                                 primaryActionLabel="Review Seating"
                                 onPrimaryAction={() => openSeatingBoardForGuest(guest)}
                                 secondaryActionLabel="Open Invitation"
@@ -3182,7 +3188,7 @@ export default function StudioProPage() {
                           <IntegritySection
                             title="Seated While Pending Or Declined"
                             subtitle="Guests who are not attending right now but still have seats assigned."
-                            emptyTitle="No stale seating assignments"
+                            emptyTitle="No stale table assignments"
                             emptyDescription="Pending and declined guests are not holding any seats."
                           >
                             {seatedPendingOrDeclinedGuests.map(({ guest, assigned }) => (
@@ -3234,8 +3240,8 @@ export default function StudioProPage() {
                           <IntegritySection
                             title="Seating Without Matching Invitation"
                             subtitle="Seating rows that do not have an RSVP code, or whose RSVP code does not match a current invitation."
-                            emptyTitle="No orphan seating rows"
-                            emptyDescription="Every seating row is linked by RSVP code."
+                            emptyTitle="No orphan table assignments"
+                            emptyDescription="Every table assignment is linked by RSVP code."
                           >
                             {seatingWithoutMatchingInvite.map((assignment) => (
                               <IssueCard
@@ -3264,7 +3270,7 @@ export default function StudioProPage() {
               <div className="space-y-5">
                 <WorkspaceTabs
                   tabs={[
-                    { key: "manage", label: "Guest List" },
+                    { key: "manage", label: "Invitation List" },
                     { key: "bulk", label: `Bulk (${selectedGuestIds.length})` },
                     { key: "composer", label: editingGuestId ? "Edit Invitation" : "New Invitation" },
                   ]}
@@ -3277,8 +3283,8 @@ export default function StudioProPage() {
                   <StudioPanel>
                     <SectionHeading
                       kicker="Guest Workspace"
-                      title="Guest List"
-                      description="Search, filter, and manage invitations in one place."
+                      title="Invitation List"
+                      description="Search, filter, and manage invitation records in one place."
                     />
 
                     <div className="mt-5 space-y-4">
@@ -3339,7 +3345,7 @@ export default function StudioProPage() {
                               { key: "sent_awaiting_response", label: "Sent + Awaiting Reply" },
                               { key: "has_children", label: "Has Children" },
                               { key: "virtual", label: "Virtual" },
-                              { key: "needs_seating", label: "Needs Seating" },
+                              { key: "needs_seating", label: "Seats Needed" },
                             ] as { key: GuestExtraFilter; label: string }[]).map((item) => (
                               <Pill
                                 key={item.key}
@@ -3382,8 +3388,10 @@ export default function StudioProPage() {
                           )}
                         </div>
                         <span className="text-sm text-stone-500">
-                          {selectedGuestIds.length} selected
-                          {selectedVisibleGuestCount > 0 ? ` · ${selectedVisibleGuestCount} visible` : ""}
+                          {selectedGuestIds.length} invitation{selectedGuestIds.length === 1 ? "" : "s"} selected
+                          {selectedVisibleGuestCount > 0
+                            ? ` · ${selectedVisibleGuestCount} visible invitation${selectedVisibleGuestCount === 1 ? "" : "s"}`
+                            : ""}
                           {selectedGuestIds.length > 0 ? ` · ${selectedGuestSeatCount} seats` : ""}
                         </span>
                       </div>
@@ -3393,7 +3401,7 @@ export default function StudioProPage() {
                   <div className="space-y-4">
                     {filteredResponses.length === 0 ? (
                       <StudioPanel>
-                        <EmptyState title="No guests match this view" description="Try a different filter or search term." />
+                        <EmptyState title="No invitations match this view" description="Try a different filter or search term." />
                       </StudioPanel>
                     ) : (
                       filteredResponses.map((guest) => {
@@ -3426,7 +3434,7 @@ export default function StudioProPage() {
                           { label: "Open Composer", onSelect: () => beginGuestFormEdit(guest) },
                           {
                             label: hasSplitSeating
-                              ? "Review Seating Assignments"
+                              ? "Review Table Assignments"
                               : seatingTable
                                 ? "Quick Edit Table Assignment"
                                 : "Assign Table in Quick Edit",
@@ -3461,7 +3469,7 @@ export default function StudioProPage() {
                                 <StatusBadge attending={guest.attending} />
                                 {Boolean(guest.virtual_guest) && <VirtualGuestBadge />}
                                 {Boolean(guest.has_children) && <ChildrenCountBadge count={guest.children_count || 0} />}
-                                {guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name)) && <IssueBadge label="Needs Seating" tone="amber" />}
+                                {guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name)) && <IssueBadge label="Seats Needed" tone="amber" />}
                                 {seatedPendingOrDeclinedKeys.has(normalizeNameKey(guest.guest_name)) && (
                                   <IssueBadge label={guest.attending === false ? "Seated While Declined" : "Seated While Pending"} tone="rose" />
                                 )}
@@ -3824,7 +3832,7 @@ export default function StudioProPage() {
                                       {hasSplitSeating ? (
                                         <div className="mt-3 space-y-3">
                                           <p className="text-sm text-stone-600">
-                                            This invitation is currently split across {guestAssignments.length} seating assignments.
+                                            This invitation is currently split across {guestAssignments.length} table assignments.
                                           </p>
                                           <div className="flex flex-col gap-2 sm:flex-row">
                                             <button
@@ -3921,7 +3929,7 @@ export default function StudioProPage() {
                                   {hasSplitSeating ? (
                                     <div className="mt-3 space-y-3">
                                       <p className="text-sm text-stone-600">
-                                        This invitation is split across {guestAssignments.length} seating assignments. Review it from the seating board.
+                                        This invitation is split across {guestAssignments.length} table assignments. Review it from the seating board.
                                       </p>
                                       <div className="flex flex-col gap-2 sm:flex-row">
                                         <button
@@ -3995,9 +4003,9 @@ export default function StudioProPage() {
                                 </div>
                               ) : (
                                 <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
-                                  <InfoPanel label="Invited" value={`${guest.max_guests} guest${guest.max_guests === 1 ? "" : "s"}`} />
+                                  <InfoPanel label="Guests Invited" value={`${guest.max_guests} guest${guest.max_guests === 1 ? "" : "s"}`} />
                                   <InfoPanel
-                                    label="Accepted"
+                                    label="Guests Attending"
                                     value={
                                       guest.attending === true
                                         ? `${acceptedCount} guest${acceptedCount === 1 ? "" : "s"}`
@@ -4055,7 +4063,7 @@ export default function StudioProPage() {
                               <p className="wedding-kicker mb-1">Selection Summary</p>
                               <p className="font-serif text-3xl text-stone-900">{selectedGuestIds.length}</p>
                               <p className="mt-1 text-sm text-stone-500">
-                                guest{selectedGuestIds.length === 1 ? "" : "s"} selected · {selectedGuestSeatCount} seat{selectedGuestSeatCount === 1 ? "" : "s"}
+                                invitation{selectedGuestIds.length === 1 ? "" : "s"} selected · {selectedGuestSeatCount} seat{selectedGuestSeatCount === 1 ? "" : "s"}
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-2">
@@ -4096,7 +4104,7 @@ export default function StudioProPage() {
                               disabled={selectedGuestIds.length === 0}
                               className="wedding-button-primary disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              Assign Selected To Table
+                              Assign Selected Invitations To Table
                             </button>
                             <button
                               type="button"
@@ -4104,7 +4112,7 @@ export default function StudioProPage() {
                               disabled={selectedGuestIds.length === 0}
                               className="wedding-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              Remove Selected Seating
+                              Remove Seating For Selected
                             </button>
                           </div>
 
@@ -4115,7 +4123,7 @@ export default function StudioProPage() {
                               disabled={selectedGuestIds.length === 0}
                               className="wedding-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              Mark Selected Sent
+                              Mark Selected Invitations Sent
                             </button>
                             <button
                               type="button"
@@ -4123,7 +4131,7 @@ export default function StudioProPage() {
                               disabled={selectedGuestIds.length === 0}
                               className="wedding-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              Mark Selected Not Sent
+                              Mark Selected Invitations Not Sent
                             </button>
                             <button
                               type="button"
@@ -4131,7 +4139,7 @@ export default function StudioProPage() {
                               disabled={selectedGuestIds.length === 0}
                               className="wedding-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              Reset Selected RSVP To Pending
+                              Reset Selected Invitations To Pending
                             </button>
                             <button
                               type="button"
@@ -4139,7 +4147,7 @@ export default function StudioProPage() {
                               disabled={selectedGuestIds.length === 0}
                               className="wedding-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              Copy Selected RSVP Links
+                              Copy Selected Invitation Links
                             </button>
                             <button
                               type="button"
@@ -4147,7 +4155,7 @@ export default function StudioProPage() {
                               disabled={selectedGuestIds.length === 0}
                               className="wedding-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              Copy Selected Invitations
+                              Copy Selected Invitation Messages
                             </button>
                             <button type="button" onClick={exportInvitationCsv} className="wedding-button-secondary">
                               Export Current CSV
@@ -4156,12 +4164,12 @@ export default function StudioProPage() {
                         </div>
 
                         <div className="rounded-[22px] border border-stone-100 bg-white p-4">
-                          <p className="wedding-kicker mb-3">Selected Guests</p>
+                          <p className="wedding-kicker mb-3">Selected Invitations</p>
                           <div className="space-y-2">
                             {selectedGuests.length === 0 ? (
                               <EmptyState
-                                title="No guests selected"
-                                description="Select guests from Guest List, then come here to run bulk actions."
+                                title="No invitations selected"
+                                description="Select invitations from Invitation List, then come here to run bulk actions."
                               />
                             ) : (
                               selectedGuests.slice(0, 10).map((guest) => (
@@ -4179,7 +4187,9 @@ export default function StudioProPage() {
                               ))
                             )}
                             {selectedGuests.length > 10 && (
-                              <p className="text-xs uppercase tracking-[0.18em] text-stone-400">+ {selectedGuests.length - 10} more selected</p>
+                              <p className="text-xs uppercase tracking-[0.18em] text-stone-400">
+                                + {selectedGuests.length - 10} more invitation{selectedGuests.length - 10 === 1 ? "" : "s"} selected
+                              </p>
                             )}
                           </div>
                         </div>
@@ -4419,7 +4429,7 @@ export default function StudioProPage() {
                     <SectionHeading
                       kicker="Seating Workspace"
                       title="Seating Board"
-                      description="Search, filter, and update seating assignments by guest or table number."
+                      description="Search, filter, and update table assignments by guest or table number."
                     />
 
                     <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
@@ -4441,8 +4451,8 @@ export default function StudioProPage() {
                     <div className="mt-4">
                       <WorkspaceTabs
                         tabs={[
-                          { key: "assignments", label: "By Assignment" },
-                          { key: "invites", label: "By Invite" },
+                          { key: "assignments", label: "By Seating Row" },
+                          { key: "invites", label: "By Invitation" },
                         ]}
                         activeTab={seatingBoardMode}
                         onChange={(nextTab) => setSeatingBoardMode(nextTab as SeatingBoardMode)}
@@ -4480,12 +4490,12 @@ export default function StudioProPage() {
                           </div>
 
                           <div className="grid gap-2 rounded-[22px] border border-stone-100 bg-stone-50 p-3 sm:grid-cols-3">
-                            <MiniMetric label="Assignments" value={filteredSeatingAssignments.length} />
+                            <MiniMetric label="Table Assignments" value={filteredSeatingAssignments.length} />
                             <MiniMetric
-                              label={isSeatingGuestCountAvailable ? "Seated Guests" : "Tables"}
+                              label={isSeatingGuestCountAvailable ? "Assigned Seats" : "Tables"}
                               value={isSeatingGuestCountAvailable ? filteredSeatingGuestCount : stats.uniqueTables}
                             />
-                            <MiniMetric label="Needs Seating" value={stats.acceptedNeedingSeating} />
+                            <MiniMetric label="Invitations Needing Seats" value={stats.acceptedNeedingSeating} />
                           </div>
                         </div>
                       </CompactDisclosure>
@@ -4742,10 +4752,10 @@ export default function StudioProPage() {
                                     )}
                                   </div>
                                   <p className="mt-1 text-sm text-stone-500">
-                                    {tableLabel} · {group.assignments.length} seating row{group.assignments.length === 1 ? "" : "s"} · {group.assignedSeats} assigned seat
+                                    {tableLabel} · {group.assignments.length} table assignment{group.assignments.length === 1 ? "" : "s"} · {group.assignedSeats} assigned seat
                                     {group.assignedSeats === 1 ? "" : "s"}
                                     {acceptedSeats !== null
-                                      ? ` · ${acceptedSeats} accepted · ${remainingSeats === 0 ? "fully seated" : `${remainingSeats} still needed`}`
+                                      ? ` · ${acceptedSeats} guest${acceptedSeats === 1 ? "" : "s"} attending · ${remainingSeats === 0 ? "fully seated" : `${remainingSeats} seat${remainingSeats === 1 ? "" : "s"} still needed`}`
                                       : ""}
                                   </p>
                                 </div>
@@ -5003,9 +5013,9 @@ export default function StudioProPage() {
                     />
 
                     <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-                      <button type="button" disabled className="wedding-button-primary w-full cursor-not-allowed opacity-60 sm:w-auto">
+                      <Link href="/studio-pro/seat-management" className="wedding-button-primary w-full sm:w-auto">
                         Seat Management
-                      </button>
+                      </Link>
                     </div>
 
                     <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
@@ -5099,7 +5109,7 @@ export default function StudioProPage() {
                       <div className="mt-5 rounded-[28px] border border-stone-100 bg-[linear-gradient(180deg,_rgba(248,250,252,0.96),_rgba(241,245,249,0.86))] p-4">
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <div>
-                            <p className="wedding-kicker">Visible Table Totals</p>
+                            <p className="wedding-kicker">Visible Table Seat Totals</p>
                             <p className="mt-1 text-sm text-stone-500">Select a table to open the seating board filtered to that table.</p>
                           </div>
                           <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-stone-600 ring-1 ring-stone-200">
@@ -5146,7 +5156,7 @@ export default function StudioProPage() {
                           title={isSeatingGuestCountAvailable ? "No visible table totals yet" : "Add guest_count to seating first"}
                           description={
                             isSeatingGuestCountAvailable
-                              ? "Table totals will appear here as soon as seating assignments match this view."
+                              ? "Table totals will appear here as soon as table assignments match this view."
                               : "Add a guest_count column to public.seating if you want table seat totals to be tracked."
                           }
                         />
@@ -5160,7 +5170,7 @@ export default function StudioProPage() {
                     <SectionHeading
                       kicker="Composer"
                       title={editingSeatingId !== null ? "Edit Assignment" : "Add Assignment"}
-                      description="Add a new seating assignment or update an existing one."
+                      description="Add a new table assignment or update an existing one."
                     />
 
                     <form onSubmit={addSeatingAssignment} className="mt-5 space-y-4">
@@ -5196,7 +5206,7 @@ export default function StudioProPage() {
                             autoCorrect="off"
                             spellCheck={false}
                             className="wedding-inline-edit-input uppercase"
-                            placeholder="Link this seating row to an invitation"
+                            placeholder="Link this table assignment to an invitation"
                           />
                           <p className="mt-2 text-xs text-stone-500">
                             Seating links to invitations by RSVP code only.
@@ -5204,7 +5214,7 @@ export default function StudioProPage() {
                         </FormField>
                       ) : (
                         <div className="rounded-[24px] border border-dashed border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">
-                          Add an `invite_code` column to `public.seating` before creating seating assignments.
+                          Add an `invite_code` column to `public.seating` before creating table assignments.
                         </div>
                       )}
 
