@@ -4,27 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Navigation from "@/app/components/Navigation";
 import { supabase } from "@/lib/supabase";
-
-const toYoutubeEmbedUrl = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-
-  try {
-    const url = new URL(trimmed);
-    if (url.hostname.includes("youtube.com") && url.pathname.startsWith("/watch")) {
-      const videoId = url.searchParams.get("v");
-      return videoId ? `https://www.youtube.com/embed/${videoId}` : trimmed;
-    }
-    if (url.hostname.includes("youtu.be")) {
-      const videoId = url.pathname.replace("/", "");
-      return videoId ? `https://www.youtube.com/embed/${videoId}` : trimmed;
-    }
-  } catch {
-    return trimmed;
-  }
-
-  return trimmed;
-};
+import { isYoutubeUrl, toYoutubeEmbedUrl } from "@/lib/youtube";
 
 export default function LivestreamPage() {
   const [isEnabled, setIsEnabled] = useState<boolean | null>(null);
@@ -70,6 +50,7 @@ export default function LivestreamPage() {
   }, []);
 
   const embedUrl = useMemo(() => toYoutubeEmbedUrl(livestreamUrl), [livestreamUrl]);
+  const hasUnsupportedYoutubeUrl = useMemo(() => Boolean(livestreamUrl.trim()) && isYoutubeUrl(livestreamUrl) && !embedUrl, [embedUrl, livestreamUrl]);
 
   if (isEnabled === false) {
     return (
@@ -106,6 +87,14 @@ export default function LivestreamPage() {
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
             />
+          ) : hasUnsupportedYoutubeUrl ? (
+            <div className="flex aspect-video items-center justify-center rounded-[18px] border border-dashed border-amber-200 bg-amber-50 px-6 text-center">
+              <div>
+                <p className="wedding-kicker mb-3 text-amber-700">Livestream</p>
+                <h1 className="wedding-state-title mb-4 text-[#4E5E72]">Livestream link needs an embeddable YouTube video</h1>
+                <p className="wedding-lead text-stone-600">Use a YouTube video, live, share, or embed link from Studio Pro.</p>
+              </div>
+            </div>
           ) : (
             <div className="flex aspect-video items-center justify-center rounded-[18px] border border-dashed border-stone-200 bg-stone-50 px-6 text-center">
               <div>

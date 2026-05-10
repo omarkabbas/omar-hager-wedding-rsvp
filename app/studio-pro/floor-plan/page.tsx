@@ -162,6 +162,15 @@ type FloorPlanLayout = {
 };
 
 type LayoutStorageMode = "loading" | "database" | "browser";
+type TableHealth = "empty" | "open" | "full" | "over";
+type GuestFinderResult = {
+  key: string;
+  guestName: string;
+  inviteCode: string;
+  tableNumber: number | null;
+  seatCount: number;
+  status: "Seated" | "Waiting";
+};
 
 const FLOOR_LAYOUT_KEY = "studio_pro_seat_floor_layout_v1";
 const EXTRA_TABLES_KEY = "studio_pro_seat_extra_tables_v1";
@@ -215,6 +224,44 @@ const normalizeInviteCode = (value?: string | null) => (value || "").trim().toUp
 const getAssignmentSeatCount = (assignment: SeatingAssignment) => Math.max(1, assignment.guest_count || 1);
 const getGuestExpectedSeats = (guest: GuestResponse) =>
   guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : Math.max(1, guest.max_guests || 1);
+const getTableHealth = (usedSeats: number, capacity: number): TableHealth => {
+  if (usedSeats > capacity) return "over";
+  if (usedSeats === 0) return "empty";
+  if (usedSeats === capacity) return "full";
+  return "open";
+};
+const getTableHealthLabel = (health: TableHealth, openSeats: number) => {
+  if (health === "over") return "Over Capacity";
+  if (health === "empty") return "Empty";
+  if (health === "full") return "Full";
+  return `${openSeats} Open`;
+};
+const TABLE_HEALTH_STYLES: Record<TableHealth, { badge: string; border: string; ring: string; text: string }> = {
+  empty: {
+    badge: "bg-stone-100 text-stone-600 ring-stone-200",
+    border: "border-stone-300",
+    ring: "",
+    text: "text-stone-500",
+  },
+  open: {
+    badge: "bg-emerald-50 text-emerald-700 ring-emerald-100",
+    border: "border-emerald-300",
+    ring: "ring-emerald-100",
+    text: "text-emerald-700",
+  },
+  full: {
+    badge: "bg-sky-50 text-sky-700 ring-sky-100",
+    border: "border-sky-300",
+    ring: "ring-sky-100",
+    text: "text-sky-700",
+  },
+  over: {
+    badge: "bg-rose-50 text-rose-700 ring-rose-100",
+    border: "border-rose-400",
+    ring: "ring-rose-100",
+    text: "text-rose-700",
+  },
+};
 
 const getDefaultTablePosition = (index: number) => {
   const leftColumns = [90, 330];
@@ -359,6 +406,8 @@ const escapeSvgText = (value: string) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;");
 
+const escapeHtml = escapeSvgText;
+
 const getFloorGridSvg = (width: number, height: number) => {
   const verticalLines = Array.from({ length: Math.ceil(width / 28) + 1 }, (_, index) => {
     const x = index * 28;
@@ -372,7 +421,7 @@ const getFloorGridSvg = (width: number, height: number) => {
   return verticalLines + horizontalLines;
 };
 
-export default function SeatManagementPage() {
+export default function FloorPlanPage() {
   const [authorized, setAuthorized] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [responses, setResponses] = useState<GuestResponse[]>([]);
@@ -390,6 +439,11 @@ export default function SeatManagementPage() {
   const [tableCapacities, setTableCapacities] = useState<Record<number, number>>({});
   const [tableShapes, setTableShapes] = useState<Record<number, GuestTableShape>>({});
   const [floorZoom, setFloorZoom] = useState(1);
+  const [printZoom, setPrintZoom] = useState(0.72);
+  const [layoutLocked, setLayoutLocked] = useState(false);
+  const [spotlightSearch, setSpotlightSearch] = useState("");
+  const [spotlightInviteCode, setSpotlightInviteCode] = useState<string | null>(null);
+  const [selectedTableNumber, setSelectedTableNumber] = useState<number | null>(null);
   const [showGuestLabels, setShowGuestLabels] = useState(true);
   const [tableDragState, setTableDragState] = useState<TableDragState | null>(null);
   const [stageDragState, setStageDragState] = useState<StageDragState | null>(null);
@@ -1025,10 +1079,16 @@ export default function SeatManagementPage() {
           return [unit.householdName, unit.inviteCode, unit.label, String(tableNumber)].some((value) => value.toLowerCase().includes(query));
         });
 
+      const capacity = Math.max(tableCapacities[tableNumber] || 8, units.length, 1);
+      const openSeats = Math.max(0, capacity - units.length);
+      const health = getTableHealth(units.length, capacity);
+
       return {
         tableNumber,
         units,
-        capacity: Math.max(tableCapacities[tableNumber] || 8, units.length, 1),
+        capacity,
+        openSeats,
+        health,
         position: tablePositions[tableNumber] || { ...getDefaultTablePosition(index), x: getDefaultTablePosition(index).x + floorLeftPadding },
         shape: tableShapes[tableNumber] || "round",
       };
@@ -1066,10 +1126,122 @@ export default function SeatManagementPage() {
       tables: tableNumbers.filter((table) => assignedSeatUnits.some((unit) => unit.tableNumber === table)).length,
       seatedGuests: assignedSeatUnits.length,
       waitingGuests: unseatedUnits.length,
-      seatingRows: seatingAssignments.length,
+      openSeats: tableModels.reduce((sum, table) => sum + table.openSeats, 0),
+      emptyTables: tableModels.filter((table) => table.health === "empty").length,
+      openTables: tableModels.filter((table) => table.health === "open").length,
+      fullTables: tableModels.filter((table) => table.health === "full").length,
     }),
-    [assignedSeatUnits, seatingAssignments.length, tableNumbers, unseatedUnits.length],
+    [assignedSeatUnits, tableModels, tableNumbers, unseatedUnits.length],
   );
+
+  const selectedTable = useMemo(
+    () => tableModels.find((table) => table.tableNumber === selectedTableNumber) ?? null,
+    [selectedTableNumber, tableModels],
+  );
+
+  const guestFinderResults = useMemo<GuestFinderResult[]>(() => {
+    const query = spotlightSearch.trim().toLowerCase();
+    if (!query) return [];
+
+    return responses
+      .flatMap<GuestFinderResult>((guest) => {
+        const inviteCode = normalizeInviteCode(guest.invite_code);
+        if (!inviteCode) return [];
+
+        const matchesGuest = [guest.guest_name, inviteCode].some((value) => value.toLowerCase().includes(query));
+        if (!matchesGuest) return [];
+
+        const assignedUnits = assignedSeatUnits.filter((unit) => unit.inviteCode === inviteCode);
+        const tableNumbersForGuest = Array.from(
+          new Set(assignedUnits.map((unit) => unit.tableNumber).filter((tableNumber): tableNumber is number => typeof tableNumber === "number")),
+        ).sort((left, right) => left - right);
+
+        if (tableNumbersForGuest.length > 0) {
+          return tableNumbersForGuest.map((tableNumber) => ({
+            key: `${guest.id}-${tableNumber}`,
+            guestName: guest.guest_name,
+            inviteCode,
+            tableNumber,
+            seatCount: assignedUnits.filter((unit) => unit.tableNumber === tableNumber).length,
+            status: "Seated" as const,
+          }));
+        }
+
+        const expectedSeats = guest.attending === true && guest.virtual_guest !== true ? getGuestExpectedSeats(guest) : 0;
+        if (expectedSeats > 0) {
+          return [
+            {
+              key: `${guest.id}-waiting`,
+              guestName: guest.guest_name,
+              inviteCode,
+              tableNumber: null,
+              seatCount: expectedSeats,
+              status: "Waiting" as const,
+            },
+          ];
+        }
+
+        return [
+          {
+            key: `${guest.id}-not-seated`,
+            guestName: guest.guest_name,
+            inviteCode,
+            tableNumber: null,
+            seatCount: 0,
+            status: "Waiting" as const,
+          },
+        ];
+      })
+      .slice(0, 12);
+  }, [assignedSeatUnits, responses, spotlightSearch]);
+
+  const allWaitingGuests = useMemo(
+    () =>
+      responses
+        .filter((guest) => guest.attending === true && guest.virtual_guest !== true)
+        .flatMap((guest) => {
+          const inviteCode = normalizeInviteCode(guest.invite_code);
+          if (!inviteCode) return [];
+          const expectedSeats = getGuestExpectedSeats(guest);
+          const assignedSeats = assignedSeatsByCode.get(inviteCode) || 0;
+          const waitingSeats = Math.max(0, expectedSeats - assignedSeats);
+          if (waitingSeats === 0) return [];
+          return [{ guestName: guest.guest_name, inviteCode, waitingSeats }];
+        })
+        .sort((left, right) => left.guestName.localeCompare(right.guestName)),
+    [assignedSeatsByCode, responses],
+  );
+
+  const focusTableOnFloor = useCallback(
+    (tableNumber: number, inviteCode?: string | null) => {
+      const table = tableModels.find((item) => item.tableNumber === tableNumber);
+      if (!table) return;
+
+      setSelectedTableNumber(tableNumber);
+      setSpotlightInviteCode(inviteCode ? normalizeInviteCode(inviteCode) : null);
+
+      window.requestAnimationFrame(() => {
+        floorScrollRef.current?.scrollTo({
+          left: Math.max(0, (table.position.x - 120) * floorZoom),
+          top: Math.max(0, (table.position.y - 120) * floorZoom),
+          behavior: "smooth",
+        });
+      });
+    },
+    [floorZoom, tableModels],
+  );
+
+  const focusGuestResult = (result: GuestFinderResult) => {
+    setSpotlightInviteCode(result.inviteCode);
+
+    if (result.tableNumber === null) {
+      setSearch(result.inviteCode);
+      showToast(`${result.guestName} is still waiting for a seat.`, "info");
+      return;
+    }
+
+    focusTableOnFloor(result.tableNumber, result.inviteCode);
+  };
 
   const buildFloorPlanLayout = useCallback(
     (): FloorPlanLayout => ({
@@ -1431,6 +1603,10 @@ export default function SeatManagementPage() {
   };
 
   const addStage = () => {
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before changing room elements.", "info");
+      return;
+    }
     if (stageVisible) return;
     pushLayoutUndo(buildFloorPlanLayout());
     setStageVisible(true);
@@ -1439,6 +1615,10 @@ export default function SeatManagementPage() {
   };
 
   const addDanceFloor = () => {
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before changing room elements.", "info");
+      return;
+    }
     if (danceFloorVisible) return;
     pushLayoutUndo(buildFloorPlanLayout());
     setDanceFloorVisible(true);
@@ -1447,6 +1627,10 @@ export default function SeatManagementPage() {
   };
 
   const removeStage = () => {
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before changing room elements.", "info");
+      return;
+    }
     askConfirm({
       title: "Remove Stage / Kosha?",
       message: "Remove Stage / Kosha from the floor plan? You can add it back from the left panel.",
@@ -1461,6 +1645,10 @@ export default function SeatManagementPage() {
   };
 
   const removeDanceFloor = () => {
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before changing room elements.", "info");
+      return;
+    }
     askConfirm({
       title: "Remove Dance Floor?",
       message: "Remove the dance floor from the floor plan? You can add it back from the left panel.",
@@ -1482,6 +1670,10 @@ export default function SeatManagementPage() {
   };
 
   const addRoomObject = () => {
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before adding room objects.", "info");
+      return;
+    }
     const preset = ROOM_OBJECT_PRESETS[roomObjectKind];
     const label = roomObjectLabel.trim() || preset.label;
     const nextObject: RoomObject = {
@@ -1501,6 +1693,10 @@ export default function SeatManagementPage() {
   };
 
   const removeRoomObject = (objectId: string) => {
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before removing room objects.", "info");
+      return;
+    }
     const object = roomObjects.find((item) => item.id === objectId);
     if (!object) return;
     askConfirm({
@@ -1620,20 +1816,102 @@ export default function SeatManagementPage() {
     showToast("Floor plan captured.", "success");
   }, [buildFloorPlanSvg, floorSize.height, floorSize.width, showToast]);
 
-  const openFloorPlanPreview = useCallback(() => {
-    const previewWindow = window.open("", "_blank");
-    if (!previewWindow) {
-      showToast("Allow pop-ups to open the floor plan preview.", "error");
-      return;
-    }
+  const buildTableListHtml = useCallback(() => {
+    const tableSections = [...tableModels]
+      .sort((left, right) => left.tableNumber - right.tableNumber)
+      .map((table) => {
+        const groupedGuests = Array.from(
+          table.units.reduce((map, unit) => {
+            const existing = map.get(unit.inviteCode);
+            if (existing) {
+              existing.count += 1;
+              return map;
+            }
 
-    const svg = buildFloorPlanSvg();
-    const svgUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
-    previewWindow.opener = null;
-    previewWindow.document.write(`<!doctype html>
+            map.set(unit.inviteCode, {
+              householdName: unit.householdName,
+              inviteCode: unit.inviteCode,
+              count: 1,
+            });
+            return map;
+          }, new Map<string, { householdName: string; inviteCode: string; count: number }>()),
+        ).map(([, guest]) => guest);
+        const openSeats = Math.max(0, table.capacity - table.units.length);
+        const tableStatus = table.units.length === 0 ? "Empty" : openSeats === 0 ? "Full" : `${openSeats} open seat${openSeats === 1 ? "" : "s"}`;
+        const guestRows =
+          groupedGuests.length > 0
+            ? groupedGuests
+                .map(
+                  (guest) => `<li>
+                    <div>
+                      <strong>${escapeHtml(guest.householdName)}</strong>
+                      <span>${escapeHtml(guest.inviteCode)}</span>
+                    </div>
+                    <b>${guest.count} seat${guest.count === 1 ? "" : "s"}</b>
+                  </li>`,
+                )
+                .join("")
+            : `<li class="empty-row">No guests assigned</li>`;
+
+        return `<section class="table-card">
+          <div class="table-card-header">
+            <div>
+              <p>Table</p>
+              <h2>${table.tableNumber}</h2>
+            </div>
+            <span>${table.units.length}/${table.capacity} seats · ${tableStatus}</span>
+          </div>
+          <ol>${guestRows}</ol>
+        </section>`;
+      })
+      .join("");
+
+    const waitingRows =
+      allWaitingGuests.length > 0
+        ? allWaitingGuests
+            .map(
+              (guest) => `<li>
+                <div>
+                  <strong>${escapeHtml(guest.guestName)}</strong>
+                  <span>${escapeHtml(guest.inviteCode)}</span>
+                </div>
+                <b>${guest.waitingSeats} seat${guest.waitingSeats === 1 ? "" : "s"}</b>
+              </li>`,
+            )
+            .join("")
+        : `<li class="empty-row">No attending guests are waiting for seats.</li>`;
+
+    return `${tableSections}<section class="table-card waiting-card">
+      <div class="table-card-header">
+        <div>
+          <p>Final Check</p>
+          <h2>Guests Waiting For Seats</h2>
+        </div>
+        <span>${allWaitingGuests.length} invitation${allWaitingGuests.length === 1 ? "" : "s"}</span>
+      </div>
+      <ol>${waitingRows}</ol>
+    </section>`;
+  }, [allWaitingGuests, tableModels]);
+
+  const openPrintableFloorPlan = useCallback(
+    ({ title, subtitle, includeTableList }: { title: string; subtitle: string; includeTableList: boolean }) => {
+      const previewWindow = window.open("", "_blank");
+      if (!previewWindow) {
+        showToast("Allow pop-ups to open the printable floor plan.", "error");
+        return;
+      }
+
+      const svg = buildFloorPlanSvg();
+      const svgUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+      const fitLetterLandscape = Math.min(1, 980 / floorSize.width, 720 / floorSize.height);
+      const fitLetterPortrait = Math.min(1, 740 / floorSize.width, 980 / floorSize.height);
+      const tableListHtml = includeTableList ? buildTableListHtml() : "";
+
+      previewWindow.opener = null;
+      previewWindow.document.write(`<!doctype html>
 <html>
   <head>
-    <title>Omar & Hager Floor Plan</title>
+    <title>${escapeHtml(title)}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       body {
@@ -1654,18 +1932,18 @@ export default function SeatManagementPage() {
         border-bottom: 1px solid #e7e5e4;
         background: rgba(255, 255, 255, 0.96);
       }
-      h1 {
+      h1, h2 {
         margin: 0;
         font-family: Georgia, serif;
-        font-size: 24px;
         font-weight: 500;
       }
+      h1 { font-size: 24px; }
       p {
         margin: 4px 0 0;
         color: #78716c;
         font-size: 12px;
       }
-      a, button {
+      button, a {
         border: 1px solid #d6d3d1;
         border-radius: 999px;
         background: #fff;
@@ -1673,47 +1951,179 @@ export default function SeatManagementPage() {
         cursor: pointer;
         font-size: 10px;
         font-weight: 700;
-        letter-spacing: 0.16em;
+        letter-spacing: 0.13em;
         padding: 10px 14px;
         text-decoration: none;
         text-transform: uppercase;
-      }
-      main {
-        padding: 20px;
-        overflow: auto;
-      }
-      img {
-        display: block;
-        max-width: none;
-        background: #fff;
-        box-shadow: 0 18px 45px rgba(28, 25, 23, 0.12);
       }
       .actions {
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
+        justify-content: flex-end;
+      }
+      main {
+        padding: 20px;
+        overflow: auto;
+      }
+      .floor-sheet {
+        display: inline-block;
+        background: #fff;
+        box-shadow: 0 18px 45px rgba(28, 25, 23, 0.12);
+      }
+      img {
+        display: block;
+        max-width: none;
+        width: ${Math.round(floorSize.width * printZoom)}px;
+        height: ${Math.round(floorSize.height * printZoom)}px;
+        background: #fff;
+      }
+      .table-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 12px;
+        margin-top: 20px;
+      }
+      .table-card {
+        break-inside: avoid;
+        border: 1px solid #e7e5e4;
+        border-radius: 18px;
+        background: #fff;
+        padding: 14px;
+      }
+      .table-card-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid #f5f5f4;
+        padding-bottom: 10px;
+      }
+      .table-card-header p {
+        margin: 0 0 2px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+      .table-card-header h2 {
+        font-size: 28px;
+      }
+      .table-card-header span {
+        color: #78716c;
+        font-size: 12px;
+        font-weight: 700;
+        text-align: right;
+      }
+      ol {
+        list-style: none;
+        margin: 10px 0 0;
+        padding: 0;
+      }
+      li {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid #f5f5f4;
+        padding: 8px 0;
+      }
+      li:last-child { border-bottom: 0; }
+      li strong {
+        display: block;
+        font-family: Georgia, serif;
+        font-size: 16px;
+        font-weight: 500;
+      }
+      li span {
+        display: block;
+        margin-top: 2px;
+        color: #78716c;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      li b {
+        color: #57534e;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .empty-row {
+        color: #78716c;
+        font-size: 13px;
+      }
+      @media print {
+        @page { size: landscape; margin: 0.35in; }
+        body { background: #fff; }
+        header { display: none; }
+        main { padding: 0; overflow: visible; }
+        .floor-sheet { box-shadow: none; }
+        .table-list { grid-template-columns: repeat(2, 1fr); }
       }
     </style>
   </head>
   <body>
     <header>
       <div>
-        <h1>Floor Plan Preview</h1>
-        <p>Read-only capture from Seat Management</p>
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(subtitle)}</p>
       </div>
       <div class="actions">
+        <button onclick="setZoom(${fitLetterLandscape.toFixed(3)})">Fit Landscape</button>
+        <button onclick="setZoom(${fitLetterPortrait.toFixed(3)})">Fit Portrait</button>
+        <button onclick="setZoom(0.5)">50%</button>
+        <button onclick="setZoom(0.75)">75%</button>
+        <button onclick="setZoom(1)">100%</button>
         <a href="${svgUrl}" download="omar-hager-floor-plan.svg">Download SVG</a>
         <button onclick="window.print()">Print</button>
       </div>
     </header>
     <main>
-      <img src="${svgUrl}" width="${floorSize.width}" height="${floorSize.height}" alt="Omar and Hager floor plan" />
+      <section class="floor-sheet">
+        <img id="floor-plan-image" src="${svgUrl}" alt="Omar and Hager floor plan" />
+      </section>
+      ${includeTableList ? `<section class="table-list">${tableListHtml}</section>` : ""}
     </main>
+    <script>
+      const sourceWidth = ${floorSize.width};
+      const sourceHeight = ${floorSize.height};
+      function setZoom(zoom) {
+        const image = document.getElementById('floor-plan-image');
+        image.style.width = Math.round(sourceWidth * zoom) + 'px';
+        image.style.height = Math.round(sourceHeight * zoom) + 'px';
+      }
+    </script>
   </body>
 </html>`);
-    previewWindow.document.close();
-    showToast("Floor plan preview opened.", "success");
-  }, [buildFloorPlanSvg, floorSize.height, floorSize.width, showToast]);
+      previewWindow.document.close();
+      showToast(`${title} opened.`, "success");
+    },
+    [buildFloorPlanSvg, buildTableListHtml, floorSize.height, floorSize.width, printZoom, showToast],
+  );
+
+  const openPrintPacket = useCallback(() => {
+    openPrintableFloorPlan({
+      title: "Planner Print Packet",
+      subtitle: "Floor plan, table-by-table guest list, and guests still waiting for seats.",
+      includeTableList: true,
+    });
+  }, [openPrintableFloorPlan]);
+
+  const openVendorView = useCallback(() => {
+    openPrintableFloorPlan({
+      title: "Read-Only Vendor Floor Plan",
+      subtitle: "Non-editable floor plan and table list for venue, catering, and planner staff.",
+      includeTableList: true,
+    });
+  }, [openPrintableFloorPlan]);
+
+  const openFloorPlanPreview = useCallback(() => {
+    openPrintableFloorPlan({
+      title: "Floor Plan Preview",
+      subtitle: "Read-only floor plan with print zoom controls.",
+      includeTableList: false,
+    });
+  }, [openPrintableFloorPlan]);
 
   const updateTableCapacity = (tableNumber: number, nextCapacity: number) => {
     const seatedCount = tableModels.find((table) => table.tableNumber === tableNumber)?.units.length || 0;
@@ -1733,6 +2143,10 @@ export default function SeatManagementPage() {
 
   const startTableDrag = (tableNumber: number, event: ReactPointerEvent<HTMLElement>) => {
     if ((event.target as HTMLElement).closest("[data-seat-token='true']")) return;
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before moving tables.", "info");
+      return;
+    }
     const rect = floorRef.current?.getBoundingClientRect();
     if (!rect) return;
     const currentPosition =
@@ -1751,6 +2165,10 @@ export default function SeatManagementPage() {
 
   const startStageDrag = (event: ReactPointerEvent<HTMLElement>) => {
     if ((event.target as HTMLElement).closest("[data-object-control='true']")) return;
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before moving room elements.", "info");
+      return;
+    }
     const rect = floorRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -1765,6 +2183,10 @@ export default function SeatManagementPage() {
 
   const startDanceFloorDrag = (event: ReactPointerEvent<HTMLElement>) => {
     if ((event.target as HTMLElement).closest("[data-object-control='true']")) return;
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before moving room elements.", "info");
+      return;
+    }
     const rect = floorRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -1779,6 +2201,10 @@ export default function SeatManagementPage() {
 
   const startRoomObjectDrag = (object: RoomObject, event: ReactPointerEvent<HTMLElement>) => {
     if ((event.target as HTMLElement).closest("[data-object-control='true']")) return;
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before moving room objects.", "info");
+      return;
+    }
     const rect = floorRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -1796,6 +2222,10 @@ export default function SeatManagementPage() {
   };
 
   const startResize = (target: ResizeTarget, startSize: FloorSize, event: ReactPointerEvent<HTMLElement>) => {
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before resizing objects.", "info");
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     setResizeState({
@@ -2023,7 +2453,7 @@ export default function SeatManagementPage() {
       <div className="min-h-screen bg-[#eef3f8] px-4 py-10 text-stone-900">
         <section className="mx-auto max-w-xl rounded-[28px] border border-white bg-white p-8 text-center shadow-xl">
           <p className="wedding-kicker mb-3">Private Access</p>
-          <h1 className="font-serif text-4xl text-stone-900">Seat Management</h1>
+          <h1 className="font-serif text-4xl text-stone-900">Floor Plan</h1>
           <p className="mt-4 text-sm leading-relaxed text-stone-500">Open Studio Pro first, then return to this page.</p>
           <Link href="/studio-pro" className="wedding-button-primary mt-8">
             Open Studio Pro
@@ -2040,8 +2470,13 @@ export default function SeatManagementPage() {
           <div className="min-w-0">
             <p className="wedding-kicker mb-1">Studio Pro</p>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate font-serif text-2xl tracking-tight text-stone-900 md:text-3xl">Floor Plan Seat Manager</h1>
+              <h1 className="font-serif text-2xl tracking-tight text-stone-900 md:text-3xl">Floor Plan Seat Manager</h1>
               <DatabaseEnvironmentBadge />
+              {layoutLocked ? (
+                <span className="rounded-full bg-stone-900 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-white">
+                  Layout Locked
+                </span>
+              ) : null}
             </div>
             <p className="mt-1 max-w-3xl text-xs leading-relaxed text-stone-500 md:text-sm">
               Drag tables, guests, the dance floor, and room elements. Guest seating and floor layout are saved separately so planning stays controlled.
@@ -2052,13 +2487,23 @@ export default function SeatManagementPage() {
             <Metric label="Tables" value={stats.tables} />
             <Metric label="Seated" value={stats.seatedGuests} />
             <Metric label="Waiting" value={stats.waitingGuests} />
-            <Metric label="Seat Groups" value={stats.seatingRows} />
+            <Metric label="Open Seats" value={stats.openSeats} />
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end xl:max-w-[430px]">
             <Link href="/studio-pro" className="studio-compact-button">
               Studio Pro
             </Link>
+            <button
+              type="button"
+              onClick={() => {
+                setLayoutLocked((prev) => !prev);
+                showToast(layoutLocked ? "Layout unlocked. Tables and room objects can move again." : "Layout locked. Guest seating can still be edited.", "success");
+              }}
+              className={layoutLocked ? "studio-compact-button-primary" : "studio-compact-button"}
+            >
+              {layoutLocked ? "Locked" : "Lock Layout"}
+            </button>
             <button
               type="button"
               onClick={undoLastLayoutChange}
@@ -2082,6 +2527,12 @@ export default function SeatManagementPage() {
             </button>
             <button type="button" onClick={openFloorPlanPreview} className="studio-compact-button">
               Share Preview
+            </button>
+            <button type="button" onClick={openPrintPacket} className="studio-compact-button">
+              Print Packet
+            </button>
+            <button type="button" onClick={openVendorView} className="studio-compact-button">
+              Vendor View
             </button>
             <button
               type="button"
@@ -2113,6 +2564,88 @@ export default function SeatManagementPage() {
               className="studio-input-compact"
               placeholder="Search names or invite codes"
             />
+
+            <div className="studio-panel border-sky-100 bg-sky-50">
+              <p className="wedding-kicker mb-2 text-sky-600">Guest Finder Spotlight</p>
+              <input
+                type="search"
+                value={spotlightSearch}
+                onChange={(event) => setSpotlightSearch(event.target.value)}
+                className="studio-input-compact"
+                placeholder="Find a guest and jump to their seat"
+              />
+              <div className="mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
+                {spotlightSearch.trim().length === 0 ? (
+                  <p className="text-[11px] leading-relaxed text-sky-700">
+                    Search a name or invite code. Selecting a seated guest will pan the floor plan to their table.
+                  </p>
+                ) : guestFinderResults.length === 0 ? (
+                  <p className="text-[11px] leading-relaxed text-sky-700">No matching guests found.</p>
+                ) : (
+                  guestFinderResults.map((result) => (
+                    <button
+                      key={result.key}
+                      type="button"
+                      onClick={() => focusGuestResult(result)}
+                      className="w-full rounded-[12px] border border-sky-100 bg-white px-3 py-2 text-left shadow-sm transition hover:border-sky-200"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-serif text-base leading-tight text-stone-900">{result.guestName}</p>
+                          <p className="mt-1 truncate text-[9px] font-bold uppercase tracking-[0.12em] text-sky-600">{result.inviteCode}</p>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-sky-50 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.08em] text-sky-700">
+                          {result.tableNumber === null ? "Waiting" : `Table ${result.tableNumber}`}
+                        </span>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+              {spotlightInviteCode ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSpotlightInviteCode(null);
+                    setSpotlightSearch("");
+                  }}
+                  className="studio-mini-button mt-3 w-full"
+                >
+                  Clear Spotlight
+                </button>
+              ) : null}
+            </div>
+
+            <div className="studio-panel bg-white">
+              <p className="wedding-kicker mb-2">Table Health</p>
+              <div className="grid grid-cols-3 gap-2">
+                <Metric label="Open" value={stats.openTables} />
+                <Metric label="Full" value={stats.fullTables} />
+                <Metric label="Empty" value={stats.emptyTables} />
+              </div>
+              <div className="mt-3 max-h-36 space-y-1.5 overflow-y-auto pr-1">
+                {tableModels.length === 0 ? (
+                  <p className="text-[11px] leading-relaxed text-stone-500">Add a guest table to begin planning seats.</p>
+                ) : (
+                  tableModels.map((table) => {
+                    const healthStyle = TABLE_HEALTH_STYLES[table.health];
+                    return (
+                      <button
+                        key={`health-${table.tableNumber}`}
+                        type="button"
+                        onClick={() => focusTableOnFloor(table.tableNumber)}
+                        className="flex w-full items-center justify-between gap-2 rounded-[10px] border border-stone-100 bg-stone-50 px-2.5 py-2 text-left transition hover:border-stone-200"
+                      >
+                        <span className="font-serif text-base leading-none text-stone-900">Table {table.tableNumber}</span>
+                        <span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-[0.08em] ring-1 ${healthStyle.badge}`}>
+                          {getTableHealthLabel(table.health, table.openSeats)}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
 
             <div className="studio-panel bg-white">
               <p className="wedding-kicker mb-2">Planner Flow</p>
@@ -2148,8 +2681,8 @@ export default function SeatManagementPage() {
                 <button
                   type="button"
                   onClick={addGuestTable}
-                  disabled={newTableNumber === ""}
-                  className="studio-compact-button-primary disabled:opacity-50"
+                  disabled={newTableNumber === "" || layoutLocked}
+                  className="studio-compact-button-primary disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Add
                 </button>
@@ -2172,20 +2705,39 @@ export default function SeatManagementPage() {
                   {tableModels.map((table) => {
                     const tableBusy = busyKeys.includes(`table:${table.tableNumber}`);
                     return (
-                      <div key={table.tableNumber} className="min-w-0 rounded-[12px] border border-stone-200 bg-white px-3 py-2.5">
+                      <div
+                        key={table.tableNumber}
+                        className={`min-w-0 rounded-[12px] border bg-white px-3 py-2.5 ${
+                          selectedTableNumber === table.tableNumber
+                            ? "border-sky-300 ring-2 ring-sky-100"
+                            : table.health === "empty"
+                              ? "border-stone-200"
+                              : TABLE_HEALTH_STYLES[table.health].border
+                        }`}
+                      >
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <div className="min-w-0">
                             <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-stone-400">Table</p>
                             <p className="font-serif text-xl leading-none text-stone-900">{table.tableNumber}</p>
                           </div>
-                          <p className="shrink-0 text-xs font-semibold text-stone-500">
-                            {table.units.length}/{table.capacity} seats
-                          </p>
+                          <div className="shrink-0 text-right">
+                            <p className="text-xs font-semibold text-stone-500">{table.units.length}/{table.capacity} seats</p>
+                            <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ring-1 ${TABLE_HEALTH_STYLES[table.health].badge}`}>
+                              {getTableHealthLabel(table.health, table.openSeats)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => focusTableOnFloor(table.tableNumber)}
+                              className="block w-full text-right text-[9px] font-bold uppercase tracking-[0.12em] text-sky-700"
+                            >
+                              Details
+                            </button>
+                          </div>
                         </div>
                         <select
                           value={table.shape}
                           onChange={(event) => updateTableShape(table.tableNumber, event.target.value as GuestTableShape)}
-                          disabled={tableBusy}
+                          disabled={tableBusy || layoutLocked}
                           className="studio-select-compact h-8 bg-stone-50 py-1.5 disabled:opacity-60"
                           aria-label={`Table ${table.tableNumber} shape`}
                         >
@@ -2198,7 +2750,7 @@ export default function SeatManagementPage() {
                             <button
                               type="button"
                               onClick={() => updateTableCapacity(table.tableNumber, table.capacity - 1)}
-                              disabled={tableBusy}
+                              disabled={tableBusy || layoutLocked}
                               className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-100 text-sm font-bold text-stone-600 disabled:opacity-60"
                               aria-label={`Remove a seat from table ${table.tableNumber}`}
                             >
@@ -2210,7 +2762,7 @@ export default function SeatManagementPage() {
                             <button
                               type="button"
                               onClick={() => updateTableCapacity(table.tableNumber, table.capacity + 1)}
-                              disabled={tableBusy}
+                              disabled={tableBusy || layoutLocked}
                               className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-900 text-sm font-bold text-white disabled:opacity-60"
                               aria-label={`Add a seat to table ${table.tableNumber}`}
                             >
@@ -2220,7 +2772,7 @@ export default function SeatManagementPage() {
                           <button
                             type="button"
                             onClick={() => removeGuestTable(table.tableNumber)}
-                            disabled={tableBusy}
+                            disabled={tableBusy || layoutLocked}
                             className="rounded-full border border-rose-100 bg-rose-50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-rose-700 disabled:cursor-wait disabled:opacity-60"
                           >
                             {tableBusy ? "Removing..." : "Remove"}
@@ -2234,7 +2786,8 @@ export default function SeatManagementPage() {
               <button
                 type="button"
                 onClick={resetTableLayout}
-                className="studio-compact-button mt-3 w-full"
+                disabled={layoutLocked}
+                className="studio-compact-button mt-3 w-full disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Reset Layout
               </button>
@@ -2256,7 +2809,8 @@ export default function SeatManagementPage() {
                 <button
                   type="button"
                   onClick={stageVisible ? removeStage : addStage}
-                  className={`min-h-9 rounded-full px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] transition ${
+                  disabled={layoutLocked}
+                  className={`min-h-9 rounded-full px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-50 ${
                     stageVisible
                       ? "border border-rose-100 bg-rose-50 text-rose-700"
                       : "bg-stone-900 text-white"
@@ -2267,7 +2821,8 @@ export default function SeatManagementPage() {
                 <button
                   type="button"
                   onClick={danceFloorVisible ? removeDanceFloor : addDanceFloor}
-                  className={`min-h-9 rounded-full px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] transition ${
+                  disabled={layoutLocked}
+                  className={`min-h-9 rounded-full px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-50 ${
                     danceFloorVisible
                       ? "border border-rose-100 bg-rose-50 text-rose-700"
                       : "bg-stone-900 text-white"
@@ -2330,7 +2885,8 @@ export default function SeatManagementPage() {
                 <button
                   type="button"
                   onClick={addRoomObject}
-                  className="studio-compact-button-primary"
+                  disabled={layoutLocked}
+                  className="studio-compact-button-primary disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Add Object
                 </button>
@@ -2367,18 +2923,34 @@ export default function SeatManagementPage() {
                 <button
                   type="button"
                   onClick={fitGridToLayout}
-                  className="studio-compact-button"
+                  disabled={layoutLocked}
+                  className="studio-compact-button disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Fit Grid
                 </button>
                 <button
                   type="button"
                   onClick={addGridSpace}
-                  className="studio-compact-button"
+                  disabled={layoutLocked}
+                  className="studio-compact-button disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Add Space
                 </button>
               </div>
+              <label className="mt-3 block text-xs font-bold uppercase tracking-[0.14em] text-stone-400">
+                Print Zoom
+                <select
+                  value={printZoom}
+                  onChange={(event) => setPrintZoom(Number(event.target.value))}
+                  className="studio-select-compact mt-2"
+                >
+                  <option value={0.4}>40% - Large Floor Plans</option>
+                  <option value={0.55}>55% - Wide Room</option>
+                  <option value={0.72}>72% - Default Print</option>
+                  <option value={0.85}>85% - More Detail</option>
+                  <option value={1}>100% - Full Size</option>
+                </select>
+              </label>
               <label className="mt-3 flex items-center gap-2 text-sm font-medium text-stone-600">
                 <input
                   type="checkbox"
@@ -2478,7 +3050,9 @@ export default function SeatManagementPage() {
             <div className="pointer-events-none absolute left-4 top-4 max-w-[280px] rounded-[12px] border border-stone-200 bg-white/92 px-3 py-2 text-xs leading-snug text-stone-500 shadow-sm">
               <p className="font-bold uppercase tracking-[0.12em] text-stone-400">Layout Status</p>
               <p className="mt-1">
-                {isSavingLayout
+                {layoutLocked
+                  ? "Layout is locked. Guest seating can still be edited."
+                  : isSavingLayout
                   ? layoutSaveMode === "auto"
                     ? "Autosaving layout..."
                     : "Saving layout..."
@@ -2490,14 +3064,16 @@ export default function SeatManagementPage() {
               </p>
             </div>
             <div className="pointer-events-none absolute right-4 top-4 max-w-[260px] rounded-[12px] border border-stone-200 bg-white/90 px-3 py-2 text-xs leading-snug text-stone-500 shadow-sm">
-              Drag empty floor to pan. Drag objects to arrange.
+              {layoutLocked ? "Layout is locked. Drag guests into seats, or unlock to move tables and room objects." : "Drag empty floor to pan. Drag objects to arrange."}
             </div>
 
             {stageVisible && (
               <div
                 data-floor-object="true"
                 onPointerDown={startStageDrag}
-                className="group absolute flex cursor-move select-none items-center justify-center rounded-[10px] border-2 border-stone-500 bg-stone-50/95 shadow-sm"
+                className={`group absolute flex select-none items-center justify-center rounded-[10px] border-2 border-stone-500 bg-stone-50/95 shadow-sm ${
+                  layoutLocked ? "cursor-default" : "cursor-move"
+                }`}
                 style={{
                   left: stagePosition.x,
                   top: stagePosition.y,
@@ -2517,7 +3093,9 @@ export default function SeatManagementPage() {
                     event.stopPropagation();
                     removeStage();
                   }}
-                  className="absolute -right-2 -top-2 hidden h-6 w-6 items-center justify-center rounded-full bg-rose-600 text-[11px] font-bold text-white shadow group-hover:flex"
+                  className={`absolute -right-2 -top-2 h-6 w-6 items-center justify-center rounded-full bg-rose-600 text-[11px] font-bold text-white shadow ${
+                    layoutLocked ? "hidden" : "hidden group-hover:flex"
+                  }`}
                   aria-label="Remove stage"
                 >
                   x
@@ -2526,7 +3104,9 @@ export default function SeatManagementPage() {
                   type="button"
                   data-object-control="true"
                   onPointerDown={(event) => startResize("stage", stageSize, event)}
-                  className="absolute -bottom-2 -right-2 h-5 w-5 cursor-nwse-resize rounded-full border border-stone-300 bg-white shadow"
+                  className={`absolute -bottom-2 -right-2 h-5 w-5 cursor-nwse-resize rounded-full border border-stone-300 bg-white shadow ${
+                    layoutLocked ? "hidden" : ""
+                  }`}
                   aria-label="Resize stage"
                 />
               </div>
@@ -2536,7 +3116,9 @@ export default function SeatManagementPage() {
               <div
                 data-floor-object="true"
                 onPointerDown={startDanceFloorDrag}
-                className="group absolute flex cursor-move select-none items-center justify-center border-2 border-dashed border-stone-300 bg-white/90 shadow-sm"
+                className={`group absolute flex select-none items-center justify-center border-2 border-dashed border-stone-300 bg-white/90 shadow-sm ${
+                  layoutLocked ? "cursor-default" : "cursor-move"
+                }`}
                 style={{
                   left: danceFloorPosition.x,
                   top: danceFloorPosition.y,
@@ -2556,7 +3138,9 @@ export default function SeatManagementPage() {
                     event.stopPropagation();
                     removeDanceFloor();
                   }}
-                  className="absolute -right-2 -top-2 hidden h-6 w-6 items-center justify-center rounded-full bg-rose-600 text-[11px] font-bold text-white shadow group-hover:flex"
+                  className={`absolute -right-2 -top-2 h-6 w-6 items-center justify-center rounded-full bg-rose-600 text-[11px] font-bold text-white shadow ${
+                    layoutLocked ? "hidden" : "hidden group-hover:flex"
+                  }`}
                   aria-label="Remove dance floor"
                 >
                   x
@@ -2565,7 +3149,9 @@ export default function SeatManagementPage() {
                   type="button"
                   data-object-control="true"
                   onPointerDown={(event) => startResize("danceFloor", danceFloorSize, event)}
-                  className="absolute -bottom-2 -right-2 h-5 w-5 cursor-nwse-resize rounded-full border border-stone-300 bg-white shadow"
+                  className={`absolute -bottom-2 -right-2 h-5 w-5 cursor-nwse-resize rounded-full border border-stone-300 bg-white shadow ${
+                    layoutLocked ? "hidden" : ""
+                  }`}
                   aria-label="Resize dance floor"
                 />
               </div>
@@ -2575,6 +3161,7 @@ export default function SeatManagementPage() {
               <RoomObjectView
                 key={object.id}
                 object={object}
+                layoutLocked={layoutLocked}
                 onStartDrag={(event) => startRoomObjectDrag(object, event)}
                 onStartResize={(event) => startResize({ objectId: object.id }, { width: object.width, height: object.height }, event)}
                 onRemove={() => removeRoomObject(object.id)}
@@ -2588,14 +3175,19 @@ export default function SeatManagementPage() {
                 units={table.units}
                 capacity={table.capacity}
                 shape={table.shape}
+                health={table.health}
                 position={table.position}
                 active={activeTarget === table.tableNumber}
+                selected={selectedTableNumber === table.tableNumber}
+                layoutLocked={layoutLocked}
+                spotlightInviteCode={spotlightInviteCode}
                 busyKeys={busyKeys}
                 showGuestLabels={showGuestLabels}
                 onDrop={() => void handleDropOnTable(table.tableNumber)}
                 onDragOver={() => setActiveTarget(table.tableNumber)}
                 onDragLeave={() => setActiveTarget(null)}
                 onStartTableDrag={(event) => startTableDrag(table.tableNumber, event)}
+                onOpenDetails={() => focusTableOnFloor(table.tableNumber)}
                 onDragUnit={(unit) => {
                   if (unit.assignmentId) {
                     setDragPayload({ kind: "assigned", assignmentId: unit.assignmentId, inviteCode: unit.inviteCode });
@@ -2609,6 +3201,22 @@ export default function SeatManagementPage() {
           </div>
         </main>
       </div>
+
+      {selectedTable && (
+        <TableDetailDrawer
+          tableNumber={selectedTable.tableNumber}
+          units={selectedTable.units}
+                capacity={selectedTable.capacity}
+                shape={selectedTable.shape}
+                health={selectedTable.health}
+                openSeats={selectedTable.openSeats}
+                spotlightInviteCode={spotlightInviteCode}
+          onClose={() => setSelectedTableNumber(null)}
+          onHighlightGuest={(inviteCode) => setSpotlightInviteCode(inviteCode)}
+          onPrintPacket={openPrintPacket}
+          onVendorView={openVendorView}
+        />
+      )}
 
       <div className="fixed bottom-4 right-4 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
         {toasts.map((toast) => (
@@ -2661,6 +3269,125 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
       <p className="font-serif text-xl text-stone-900">{title}</p>
       <p className="mt-2 text-sm leading-relaxed text-stone-500">{detail}</p>
     </div>
+  );
+}
+
+function TableDetailDrawer({
+  tableNumber,
+  units,
+  capacity,
+  shape,
+  health,
+  openSeats,
+  spotlightInviteCode,
+  onClose,
+  onHighlightGuest,
+  onPrintPacket,
+  onVendorView,
+}: {
+  tableNumber: number;
+  units: SeatUnit[];
+  capacity: number;
+  shape: GuestTableShape;
+  health: TableHealth;
+  openSeats: number;
+  spotlightInviteCode: string | null;
+  onClose: () => void;
+  onHighlightGuest: (inviteCode: string) => void;
+  onPrintPacket: () => void;
+  onVendorView: () => void;
+}) {
+  const groupedGuests = Array.from(
+    units.reduce((map, unit) => {
+      const existing = map.get(unit.inviteCode);
+      if (existing) {
+        existing.count += 1;
+        return map;
+      }
+
+      map.set(unit.inviteCode, {
+        householdName: unit.householdName,
+        inviteCode: unit.inviteCode,
+        count: 1,
+      });
+      return map;
+    }, new Map<string, { householdName: string; inviteCode: string; count: number }>()),
+  ).map(([, guest]) => guest);
+  const status = getTableHealthLabel(health, openSeats);
+  const healthStyle = TABLE_HEALTH_STYLES[health];
+
+  return (
+    <>
+      <button type="button" aria-label="Close table details" onClick={onClose} className="fixed inset-0 z-[69] bg-stone-900/20" />
+      <aside className="fixed inset-x-0 bottom-0 z-[70] flex max-h-[92vh] w-full flex-col rounded-t-[24px] border border-stone-200 bg-white shadow-2xl md:inset-y-0 md:left-auto md:right-0 md:max-h-none md:max-w-md md:rounded-none md:border-y-0 md:border-r-0">
+      <div className="border-b border-stone-100 px-5 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="wedding-kicker mb-1">Table Detail</p>
+            <h2 className="font-serif text-3xl text-stone-900">Table {tableNumber}</h2>
+            <p className="mt-1 text-sm text-stone-500">
+              {units.length}/{capacity} seats · {shape === "rect" ? "rectangular" : shape} table
+            </p>
+            <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] ring-1 ${healthStyle.badge}`}>
+              {status}
+            </span>
+          </div>
+          <button type="button" onClick={onClose} className="studio-compact-button">
+            Close
+          </button>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button type="button" onClick={onPrintPacket} className="studio-compact-button-primary">
+            Print Packet
+          </button>
+          <button type="button" onClick={onVendorView} className="studio-compact-button">
+            Vendor View
+          </button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="grid grid-cols-3 gap-2">
+          <Metric label="Seats Used" value={units.length} />
+          <Metric label="Capacity" value={capacity} />
+          <Metric label="Open Seats" value={openSeats} />
+        </div>
+
+        <div className="mt-5">
+          <p className="wedding-kicker mb-2">Guests At This Table</p>
+          <div className="space-y-2">
+            {groupedGuests.length === 0 ? (
+              <EmptyState title="No guests here yet" detail="Drag guests into this table from the waiting list." />
+            ) : (
+              groupedGuests.map((guest) => {
+                const highlighted = spotlightInviteCode === guest.inviteCode;
+                return (
+                  <button
+                    key={guest.inviteCode}
+                    type="button"
+                    onClick={() => onHighlightGuest(guest.inviteCode)}
+                    className={`w-full rounded-[14px] border px-3 py-3 text-left transition ${
+                      highlighted ? "border-sky-300 bg-sky-50 ring-2 ring-sky-100" : "border-stone-100 bg-stone-50 hover:border-stone-200"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-serif text-lg leading-tight text-stone-900">{guest.householdName}</p>
+                        <p className="mt-1 truncate text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">{guest.inviteCode}</p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-stone-600 ring-1 ring-stone-200">
+                        {guest.count} seat{guest.count === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+      </aside>
+    </>
   );
 }
 
@@ -2738,11 +3465,13 @@ function GuestChip({
 
 function RoomObjectView({
   object,
+  layoutLocked,
   onStartDrag,
   onStartResize,
   onRemove,
 }: {
   object: RoomObject;
+  layoutLocked: boolean;
   onStartDrag: (event: ReactPointerEvent<HTMLElement>) => void;
   onStartResize: (event: ReactPointerEvent<HTMLElement>) => void;
   onRemove: () => void;
@@ -2754,7 +3483,7 @@ function RoomObjectView({
     <section
       data-floor-object="true"
       onPointerDown={onStartDrag}
-      className="group absolute cursor-move select-none"
+      className={`group absolute select-none ${layoutLocked ? "cursor-default" : "cursor-move"}`}
       style={{ left: object.x, top: object.y, width: object.width, height: object.height }}
     >
       <div
@@ -2776,7 +3505,9 @@ function RoomObjectView({
           event.stopPropagation();
           onRemove();
         }}
-        className="absolute -right-2 -top-2 hidden h-6 w-6 items-center justify-center rounded-full bg-rose-600 text-[11px] font-bold text-white shadow group-hover:flex"
+        className={`absolute -right-2 -top-2 h-6 w-6 items-center justify-center rounded-full bg-rose-600 text-[11px] font-bold text-white shadow ${
+          layoutLocked ? "hidden" : "hidden group-hover:flex"
+        }`}
         aria-label={`Remove ${object.label}`}
       >
         x
@@ -2785,7 +3516,9 @@ function RoomObjectView({
         type="button"
         data-object-control="true"
         onPointerDown={onStartResize}
-        className="absolute -bottom-2 -right-2 h-5 w-5 cursor-nwse-resize rounded-full border border-stone-300 bg-white shadow"
+        className={`absolute -bottom-2 -right-2 h-5 w-5 cursor-nwse-resize rounded-full border border-stone-300 bg-white shadow ${
+          layoutLocked ? "hidden" : ""
+        }`}
         aria-label={`Resize ${object.label}`}
       />
     </section>
@@ -2797,14 +3530,19 @@ function VisualTable({
   units,
   capacity,
   shape,
+  health,
   position,
   active,
+  selected,
+  layoutLocked,
+  spotlightInviteCode,
   busyKeys,
   showGuestLabels,
   onDrop,
   onDragOver,
   onDragLeave,
   onStartTableDrag,
+  onOpenDetails,
   onDragUnit,
   onUnseat,
 }: {
@@ -2812,19 +3550,25 @@ function VisualTable({
   units: SeatUnit[];
   capacity: number;
   shape: GuestTableShape;
+  health: TableHealth;
   position: { x: number; y: number };
   active: boolean;
+  selected: boolean;
+  layoutLocked: boolean;
+  spotlightInviteCode: string | null;
   busyKeys: string[];
   showGuestLabels: boolean;
   onDrop: () => void;
   onDragOver: () => void;
   onDragLeave: () => void;
   onStartTableDrag: (event: ReactPointerEvent<HTMLElement>) => void;
+  onOpenDetails: () => void;
   onDragUnit: (unit: SeatUnit) => void;
   onUnseat: (unit: SeatUnit) => void;
 }) {
   const seats = Array.from({ length: capacity }, (_, index) => units[index] || null);
   const tableSize = getGuestTableSize(shape);
+  const healthStyle = TABLE_HEALTH_STYLES[health];
 
   return (
     <section
@@ -2841,8 +3585,14 @@ function VisualTable({
       <div
         onPointerDown={onStartTableDrag}
         className={`absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center border bg-white shadow-sm transition ${
-          active ? "border-sky-400 ring-8 ring-sky-100" : "border-stone-300"
-        } ${shape === "round" ? "rounded-full" : shape === "square" ? "rounded-[8px]" : "rounded-[12px]"} cursor-move select-none`}
+          active
+            ? "border-sky-400 ring-8 ring-sky-100"
+            : selected
+              ? "border-sky-500 ring-4 ring-sky-100"
+              : healthStyle.border
+        } ${shape === "round" ? "rounded-full" : shape === "square" ? "rounded-[8px]" : "rounded-[12px]"} ${
+          layoutLocked ? "cursor-default" : "cursor-move"
+        } ${healthStyle.ring ? `ring-2 ${healthStyle.ring}` : ""} select-none`}
         style={{ width: tableSize.width, height: tableSize.height }}
       >
         <div className="text-center">
@@ -2851,6 +3601,18 @@ function VisualTable({
           <p className="text-xs text-stone-400">
             {units.length}/{capacity} seats
           </p>
+          <button
+            type="button"
+            data-object-control="true"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenDetails();
+            }}
+            className="mt-1 rounded-full bg-stone-900 px-2 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] text-white shadow-sm"
+          >
+            Open
+          </button>
         </div>
       </div>
 
@@ -2858,6 +3620,7 @@ function VisualTable({
         const seatPosition = getTableSeatPosition(index, capacity, shape);
         const busy = unit?.assignmentId ? busyKeys.includes(`assignment:${unit.assignmentId}`) : false;
         const seatLabel = unit ? getSeatDisplayParts(unit, showGuestLabels) : null;
+        const highlighted = Boolean(unit && spotlightInviteCode === unit.inviteCode);
 
         return (
           <div
@@ -2871,7 +3634,9 @@ function VisualTable({
               onDragUnit(unit);
             }}
             className={`group absolute flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-center font-bold leading-tight shadow-sm transition ${
-              unit
+              highlighted
+                ? "cursor-grab border-sky-500 bg-sky-50 text-sky-800 ring-4 ring-sky-200"
+                : unit
                 ? busy
                   ? "cursor-wait border-sky-200 bg-sky-50 text-sky-700 opacity-60"
                   : "cursor-grab border-stone-400 bg-white text-stone-700 hover:border-sky-400 hover:bg-sky-50 active:cursor-grabbing"

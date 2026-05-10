@@ -7,6 +7,7 @@ import Link from "next/link";
 import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
 import { SITE_URL } from "@/lib/wedding";
+import { toYoutubeEmbedUrl } from "@/lib/youtube";
 import { DatabaseEnvironmentBadge } from "./DatabaseEnvironmentBadge";
 
 type GuestResponse = {
@@ -927,6 +928,39 @@ export default function StudioProPage() {
     restoreWorkspaceLocation(returnLocation);
   };
 
+  const openOverviewWorkspace = (tab: OverviewWorkspaceTab = "summary") => {
+    setActiveView("overview");
+    setOverviewTab(tab);
+  };
+
+  const openGuestWorkspace = (tab: InvitationWorkspaceTab = "manage") => {
+    setActiveView("invitations");
+    setInvitationTab(tab);
+  };
+
+  const openSeatingWorkspace = (tab: SeatingWorkspaceTab = "board") => {
+    setActiveView("seating");
+    setSeatingTab(tab);
+  };
+
+  const beginGuestFormCreate = () => {
+    const returnLocation = activeView === "invitations" && invitationTab === "composer" ? null : captureWorkspaceLocation();
+    resetGuestForm();
+    setGuestComposerReturnLocation(returnLocation);
+    setActiveView("invitations");
+    setInvitationTab("composer");
+    scrollToSection(invitationFormRef);
+  };
+
+  const beginSeatingAssignmentCreate = () => {
+    const returnLocation = activeView === "seating" && seatingTab === "composer" ? null : captureWorkspaceLocation();
+    resetSeatingForm();
+    setSeatingComposerReturnLocation(returnLocation);
+    setActiveView("seating");
+    setSeatingTab("composer");
+    scrollToSection(seatingFormRef);
+  };
+
   const findGuestByInviteCode = useCallback(
     (inviteCode: string) => responses.find((guest) => normalizeInviteCode(guest.invite_code) === normalizeInviteCode(inviteCode)) ?? null,
     [responses],
@@ -1765,6 +1799,22 @@ export default function StudioProPage() {
 
     if (key === "livestream_embed_url") setLivestreamEmbedUrl(nextValue);
     showToast(successMessage, "success");
+  };
+
+  const saveLivestreamLink = async () => {
+    const rawLink = livestreamEmbedUrl.trim();
+    if (!rawLink) {
+      await updateTextSetting("livestream_embed_url", "", "Livestream link cleared.");
+      return;
+    }
+
+    const embedLink = toYoutubeEmbedUrl(rawLink);
+    if (!embedLink) {
+      showToast("Paste a YouTube watch, live, share, or embed link.", "error");
+      return;
+    }
+
+    await updateTextSetting("livestream_embed_url", embedLink, "Livestream link saved.");
   };
 
   const getTableForGuest = useCallback(
@@ -2821,7 +2871,7 @@ export default function StudioProPage() {
             <h1 className="wedding-state-title mb-4">Admin Studio</h1>
             <div className="mx-auto mb-8 h-px w-20 bg-stone-200" />
             <p className="mx-auto mb-8 max-w-xl text-base leading-relaxed text-stone-500">
-              Manage invitations, seating, RSVPs, and live wedding controls.
+              Manage invitations, seating, RSVPs, and live wedding controls from one workspace.
             </p>
 
             <input
@@ -2844,27 +2894,27 @@ export default function StudioProPage() {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[linear-gradient(180deg,_#d6e3f1_0%,_#e8eef5_42%,_#f5f7fa_100%)] text-stone-900">
-      <div className="mx-auto max-w-[1500px] px-3 py-3 md:px-5 md:py-5">
-        <header className="rounded-[28px] border border-white/85 bg-white/92 p-4 text-stone-900 shadow-sm md:rounded-[34px] md:p-5">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="studio-pro-shell min-h-screen overflow-x-hidden bg-[linear-gradient(180deg,_#d6e3f1_0%,_#e8eef5_42%,_#f5f7fa_100%)] text-stone-900">
+      <div className="mx-auto max-w-[1500px] px-3 py-3 md:px-5 md:py-4">
+        <header className="rounded-[22px] border border-white/85 bg-white/92 p-3 text-stone-900 shadow-sm md:rounded-[26px] md:p-4">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
                 <div className="flex items-start gap-3">
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] border border-stone-200 bg-stone-50 md:h-16 md:w-16">
-                    <Image src="/logo.png" alt="Omar & Hager logo" width={64} height={64} className="wedding-logo w-10 md:w-12" />
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] border border-stone-200 bg-stone-50 md:h-14 md:w-14">
+                    <Image src="/logo.png" alt="Omar & Hager logo" width={64} height={64} className="wedding-logo w-9 md:w-10" />
                   </div>
                   <div className="min-w-0">
                     <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.26em] text-stone-400">Omar & Hager 2026</p>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h1 className="font-serif text-3xl tracking-tight text-stone-900 md:text-4xl">Admin Studio</h1>
+                      <h1 className="font-serif text-2xl tracking-tight text-stone-900 md:text-3xl">Studio Pro</h1>
                       <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-sky-700">
                         Pro
                       </span>
                       <DatabaseEnvironmentBadge />
                     </div>
                     <p className="mt-1 max-w-3xl text-sm leading-relaxed text-stone-500">
-                      Manage invitations, seating, RSVPs, and live wedding controls.
+                      A planner-friendly control room for invitations, RSVPs, seating, livestream, and final checks.
                     </p>
                   </div>
                 </div>
@@ -2874,15 +2924,32 @@ export default function StudioProPage() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
+                onClick={beginGuestFormCreate}
+                className="studio-compact-button-primary"
+              >
+                New Invitation
+              </button>
+              <button
+                type="button"
+                onClick={() => openOverviewWorkspace("needs_seating")}
+                className="studio-compact-button"
+              >
+                Seat Guests
+              </button>
+              <Link href="/studio-pro/floor-plan" className="studio-compact-button">
+                Floor Plan
+              </Link>
+              <button
+                type="button"
                 onClick={openInvitationImage}
-                className="inline-flex items-center justify-center rounded-full border border-stone-200 bg-stone-50 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-stone-700 transition hover:bg-white"
+                className="studio-compact-button"
               >
                 Open Invitation Image
               </button>
               <button
                 type="button"
                 onClick={exportInvitationCsv}
-                className="inline-flex items-center justify-center rounded-full border border-stone-200 bg-stone-50 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-stone-700 transition hover:bg-white"
+                className="studio-compact-button"
               >
                 Export CSV
               </button>
@@ -2891,15 +2958,41 @@ export default function StudioProPage() {
         </header>
 
         <div className="mt-3">
-          <WorkspaceTabs
-            tabs={[
-              { key: "overview", label: "Overview" },
-              { key: "invitations", label: "Guests" },
-              { key: "seating", label: "Seating" },
-              { key: "settings", label: "Settings" },
+          <PlannerNavigation
+            activeView={activeView}
+            onChange={setActiveView}
+            items={[
+              {
+                key: "overview",
+                eyebrow: "Command Center",
+                label: "Dashboard",
+                description: "Next actions, RSVP counts, follow-up, and checks.",
+                meta: `${integrityIssueCount} check${integrityIssueCount === 1 ? "" : "s"}`,
+              },
+              {
+                key: "invitations",
+                eyebrow: "Guest Work",
+                label: "Guest List",
+                description: "Create, search, text, bulk edit, and export invitations.",
+                meta: `${stats.totalInvitations + stats.virtualInvitations} invitation${
+                  stats.totalInvitations + stats.virtualInvitations === 1 ? "" : "s"
+                }`,
+              },
+              {
+                key: "seating",
+                eyebrow: "Tables",
+                label: "Seating",
+                description: "Assign tables, move guests, and open the visual floor plan.",
+                meta: `${stats.acceptedNeedingSeating} ${stats.acceptedNeedingSeating === 1 ? "needs" : "need"} seating`,
+              },
+              {
+                key: "settings",
+                eyebrow: "Website",
+                label: "Site Controls",
+                description: "Turn public site sections and livestream access on or off.",
+                meta: isLivestreamEnabled ? "Livestream on" : "Livestream off",
+              },
             ]}
-            activeTab={activeView}
-            onChange={(nextTab) => setActiveView(nextTab as AdminView)}
           />
         </div>
 
@@ -2919,57 +3012,109 @@ export default function StudioProPage() {
                 />
 
                 {overviewTab === "summary" && (
-                  <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
+                  <div className="space-y-5">
                     <StudioPanel>
                       <SectionHeading
-                        kicker="Overview"
-                        title="Overview"
-                        description="In-person and virtual RSVP numbers are separated so seating work stays focused on guests attending in person."
+                        kicker="Planner Command Center"
+                        title="What Needs Attention Now"
+                        description="Start here when you open Studio Pro. Each card takes you straight to the workspace that fixes the item."
                       />
-                      <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                        <MetricGroup title="On-Site">
-                          <StatTile label="Invitations Total" value={stats.totalInvitations} tone="stone" />
-                          <StatTile label="Invitations Sent" value={stats.sentInvitations} tone="sky" />
-                          <StatTile label="Invitations Not Sent" value={stats.pendingInvitations} tone="stone" />
-                          <StatTile label="Invitations Awaiting Reply" value={stats.awaitingResponse} tone="stone" />
-                          <StatTile label="Guests Attending" value={stats.acceptedGuests} tone="emerald" />
-                          <StatTile label="Invitations Declined" value={stats.declinedInvitations} tone="rose" />
-                          <StatTile label="Guests Invited" value={stats.totalInvitedGuests} tone="stone" />
-                          <StatTile label="Seats Needed" value={stats.acceptedNeedingSeating} tone="amber" />
-                        </MetricGroup>
-
-                        <MetricGroup title="Virtual">
-                          <StatTile label="Invitations Total" value={stats.virtualInvitations} tone="sky" />
-                          <StatTile label="Invitations Attending" value={stats.virtualAccepted} tone="emerald" />
-                          <StatTile label="Invitations Declined" value={stats.virtualDeclined} tone="rose" />
-                          <StatTile label="Invitations Awaiting Reply" value={stats.virtualAwaiting} tone="stone" />
-                        </MetricGroup>
-                      </div>
-                    </StudioPanel>
-
-                    <StudioPanel>
-                      <SectionHeading
-                        kicker="Progress"
-                        title="Progress"
-                        description="A quick read on invitation sending, guest headcount, and seat coverage."
-                      />
-                      <div className="mt-5 space-y-4">
-                        <ProgressLine label="On-Site Invitations Sent" value={stats.sentInvitations} total={stats.totalInvitations} tone="sky" />
-                        <ProgressLine
-                          label="On-Site RSVP Replies Received"
-                          value={stats.totalInvitations - stats.awaitingResponse}
-                          total={stats.totalInvitations}
+                      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                        <PlannerActionCard
+                          eyebrow="Follow Up"
+                          title={`${followUpGuests.length} awaiting reply`}
+                          description="Sent invitations that still need an RSVP."
+                          actionLabel="Open Follow Up"
+                          tone={followUpGuests.length > 0 ? "amber" : "stone"}
+                          onAction={() => openOverviewWorkspace("follow_up")}
+                        />
+                        <PlannerActionCard
+                          eyebrow="Seating"
+                          title={`${stats.acceptedNeedingSeating} ${stats.acceptedNeedingSeating === 1 ? "needs" : "need"} seating`}
+                          description="On-site attending invitations without enough seats."
+                          actionLabel="Seat Guests"
+                          tone={stats.acceptedNeedingSeating > 0 ? "amber" : "emerald"}
+                          onAction={() => openOverviewWorkspace("needs_seating")}
+                        />
+                        <PlannerActionCard
+                          eyebrow="Checks"
+                          title={`${integrityIssueCount} issue${integrityIssueCount === 1 ? "" : "s"}`}
+                          description="Review mismatches before they become day-of problems."
+                          actionLabel="Run Checks"
+                          tone={integrityIssueCount > 0 ? "rose" : "emerald"}
+                          onAction={() => openOverviewWorkspace("checks")}
+                        />
+                        <PlannerActionCard
+                          eyebrow="Guest List"
+                          title="Add an invitation"
+                          description="Create an in-person or virtual invitation."
+                          actionLabel="New Invitation"
+                          tone="sky"
+                          onAction={beginGuestFormCreate}
+                        />
+                        <PlannerActionCard
+                          eyebrow="Floor Plan"
+                          title="Open visual seating"
+                          description="Drag tables, guests, and room elements."
+                          actionLabel="Open Floor Plan"
                           tone="stone"
-                        />
-                        <ProgressLine label="On-Site Guests Attending" value={stats.acceptedGuests} total={stats.totalInvitedGuests} tone="emerald" />
-                        <ProgressLine
-                          label="On-Site Guests Seated"
-                          value={stats.acceptedGuestsSeated}
-                          total={Math.max(stats.acceptedGuests, 1)}
-                          tone="amber"
+                          href="/studio-pro/floor-plan"
                         />
                       </div>
                     </StudioPanel>
+
+                    <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
+                      <StudioPanel>
+                        <SectionHeading
+                          kicker="Overview"
+                          title="Counts That Matter"
+                          description="In-person and virtual RSVP numbers are separated so seating work stays focused on guests attending in person."
+                        />
+                        <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                          <MetricGroup title="In-Person">
+                            <StatTile label="Invitations Total" value={stats.totalInvitations} tone="stone" />
+                            <StatTile label="Invitations Sent" value={stats.sentInvitations} tone="sky" />
+                            <StatTile label="Invitations Not Sent" value={stats.pendingInvitations} tone="stone" />
+                            <StatTile label="Invitations Awaiting Reply" value={stats.awaitingResponse} tone="stone" />
+                            <StatTile label="Guests Attending" value={stats.acceptedGuests} tone="emerald" />
+                            <StatTile label="Invitations Declined" value={stats.declinedInvitations} tone="rose" />
+                            <StatTile label="Guests Invited" value={stats.totalInvitedGuests} tone="stone" />
+                            <StatTile label="Seats Needed" value={stats.acceptedNeedingSeating} tone="amber" />
+                          </MetricGroup>
+
+                          <MetricGroup title="Virtual">
+                            <StatTile label="Invitations Total" value={stats.virtualInvitations} tone="sky" />
+                            <StatTile label="Invitations Attending" value={stats.virtualAccepted} tone="emerald" />
+                            <StatTile label="Invitations Declined" value={stats.virtualDeclined} tone="rose" />
+                            <StatTile label="Invitations Awaiting Reply" value={stats.virtualAwaiting} tone="stone" />
+                          </MetricGroup>
+                        </div>
+                      </StudioPanel>
+
+                      <StudioPanel>
+                        <SectionHeading
+                          kicker="Progress"
+                          title="Planning Progress"
+                          description="A quick read on invitation sending, guest headcount, and seat coverage."
+                        />
+                        <div className="mt-5 space-y-4">
+                          <ProgressLine label="In-Person Invitations Sent" value={stats.sentInvitations} total={stats.totalInvitations} tone="sky" />
+                          <ProgressLine
+                            label="In-Person RSVP Replies Received"
+                            value={stats.totalInvitations - stats.awaitingResponse}
+                            total={stats.totalInvitations}
+                            tone="stone"
+                          />
+                          <ProgressLine label="In-Person Guests Attending" value={stats.acceptedGuests} total={stats.totalInvitedGuests} tone="emerald" />
+                          <ProgressLine
+                            label="In-Person Guests Seated"
+                            value={stats.acceptedGuestsSeated}
+                            total={Math.max(stats.acceptedGuests, 1)}
+                            tone="amber"
+                          />
+                        </div>
+                      </StudioPanel>
+                    </div>
                   </div>
                 )}
 
@@ -3063,14 +3208,14 @@ export default function StudioProPage() {
                   <StudioPanel>
                     <SectionHeading
                       kicker="Seats Needed"
-                      title="On-Site Invitations Still Needing Seats"
-                      description="On-site invitations that replied yes and still need seats added to their table assignment."
+                      title="In-Person Invitations Still Needing Seats"
+                      description="In-person invitations that replied yes and still need seats added to their table assignment."
                     />
                     <div className="mt-5 grid gap-3">
                       {acceptedGuestsNeedingSeating.length === 0 ? (
                         <EmptyState
                           title="All attending guests are fully seated"
-                          description="Your current table assignments cover every on-site guest attending."
+                          description="Your current table assignments cover every in-person guest attending."
                         />
                       ) : (
                         acceptedGuestsNeedingSeating.map(({ guest, assignment, accepted, assigned, remaining }) => (
@@ -3142,7 +3287,7 @@ export default function StudioProPage() {
                       {checksTab === "seating" && (
                         <>
                           <IntegritySection
-                            title="On-Site Invitations Still Needing Seats"
+                            title="In-Person Invitations Still Needing Seats"
                             subtitle="Attending guest counts that are not fully covered by assigned seats yet."
                             emptyTitle="No seating gaps"
                             emptyDescription="All attending guest counts are fully covered."
@@ -3287,6 +3432,18 @@ export default function StudioProPage() {
                       description="Search, filter, and manage invitation records in one place."
                     />
 
+                    <div className="mt-4 grid gap-2 md:grid-cols-3">
+                      <button type="button" onClick={beginGuestFormCreate} className="studio-compact-button-primary">
+                        New Invitation
+                      </button>
+                      <button type="button" onClick={() => openGuestWorkspace("bulk")} className="studio-compact-button">
+                        Bulk Actions
+                      </button>
+                      <button type="button" onClick={exportInvitationCsv} className="studio-compact-button">
+                        Export Current View
+                      </button>
+                    </div>
+
                     <div className="mt-5 space-y-4">
                       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
                         <input
@@ -3360,18 +3517,18 @@ export default function StudioProPage() {
 
                       <CompactDisclosure
                         title="Visible Summary"
-                        subtitle={`${filteredInvitationStats.invitations} on-site invitation${filteredInvitationStats.invitations === 1 ? "" : "s"} in this view.`}
+                        subtitle={`${filteredInvitationStats.invitations} in-person invitation${filteredInvitationStats.invitations === 1 ? "" : "s"} in this view.`}
                         open={guestSummaryOpen}
                         onToggle={() => setGuestSummaryOpen((prev) => !prev)}
                       >
                         <div className="grid gap-2 rounded-[22px] border border-stone-100 bg-stone-50 p-3 sm:grid-cols-2 lg:grid-cols-6">
-                          <MiniMetric label="On-Site Invitations" value={filteredInvitationStats.invitations} />
-                          <MiniMetric label="On-Site Guests Invited" value={filteredInvitationStats.invitedGuests} />
-                          <MiniMetric label="On-Site Guests Attending" value={filteredInvitationStats.acceptedGuests} />
-                          <MiniMetric label="On-Site Invitations Declined" value={filteredInvitationStats.declined} />
+                          <MiniMetric label="In-Person Invitations" value={filteredInvitationStats.invitations} />
+                          <MiniMetric label="In-Person Guests Invited" value={filteredInvitationStats.invitedGuests} />
+                          <MiniMetric label="In-Person Guests Attending" value={filteredInvitationStats.acceptedGuests} />
+                          <MiniMetric label="In-Person Invitations Declined" value={filteredInvitationStats.declined} />
                           <MiniMetric label="Virtual Invitations" value={filteredInvitationStats.virtual} />
                           <MiniMetric label="Virtual Invitations Declined" value={filteredInvitationStats.virtualDeclined} />
-                          <MiniMetric label="On-Site Awaiting Reply" value={filteredInvitationStats.awaiting} />
+                          <MiniMetric label="In-Person Awaiting Reply" value={filteredInvitationStats.awaiting} />
                           <MiniMetric label="Seats Needed" value={filteredInvitationStats.needsSeating} />
                         </div>
                       </CompactDisclosure>
@@ -4056,12 +4213,12 @@ export default function StudioProPage() {
                         description="Use bulk actions here for sending, follow-up, table assignment, seating cleanup, and export."
                       />
 
-                      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-                        <div className="rounded-[22px] border border-stone-100 bg-stone-50 p-4">
+                      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                        <div className="rounded-[16px] border border-stone-100 bg-stone-50 p-3">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
                               <p className="wedding-kicker mb-1">Selection Summary</p>
-                              <p className="font-serif text-3xl text-stone-900">{selectedGuestIds.length}</p>
+                              <p className="font-serif text-2xl leading-none text-stone-900">{selectedGuestIds.length}</p>
                               <p className="mt-1 text-sm text-stone-500">
                                 invitation{selectedGuestIds.length === 1 ? "" : "s"} selected · {selectedGuestSeatCount} seat{selectedGuestSeatCount === 1 ? "" : "s"}
                               </p>
@@ -4076,8 +4233,9 @@ export default function StudioProPage() {
                             </div>
                           </div>
 
-                          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-[160px_minmax(0,1fr)_minmax(0,1fr)]">
-                            <div className="rounded-[18px] border border-stone-200 bg-white px-3 py-3">
+                          <div className="mt-4 rounded-[14px] border border-stone-200 bg-white p-3">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                              <div className="sm:w-28">
                               <p className="wedding-kicker mb-1">Table</p>
                                 <input
                                   type="number"
@@ -4095,14 +4253,14 @@ export default function StudioProPage() {
                                 onBlur={() => {
                                   if (bulkTableNumber === "") setBulkTableNumber(1);
                                 }}
-                                className="w-full border-0 bg-transparent p-0 text-2xl font-serif text-stone-900 outline-none"
+                                className="w-full rounded-[12px] border border-stone-200 bg-stone-50 px-3 py-2 font-serif text-xl text-stone-900 outline-none focus:border-stone-300 focus:ring-2 focus:ring-stone-200"
                               />
                             </div>
                             <button
                               type="button"
                               onClick={() => void bulkAssignSelectedToTable()}
                               disabled={selectedGuestIds.length === 0}
-                              className="wedding-button-primary disabled:cursor-not-allowed disabled:opacity-50"
+                              className="studio-mini-button-primary disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                             >
                               Assign Selected Invitations To Table
                             </button>
@@ -4110,10 +4268,11 @@ export default function StudioProPage() {
                               type="button"
                               onClick={() => void bulkRemoveSelectedSeating()}
                               disabled={selectedGuestIds.length === 0}
-                              className="wedding-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                              className="studio-mini-button disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                             >
                               Remove Seating For Selected
                             </button>
+                            </div>
                           </div>
 
                           <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -4163,7 +4322,7 @@ export default function StudioProPage() {
                           </div>
                         </div>
 
-                        <div className="rounded-[22px] border border-stone-100 bg-white p-4">
+                        <div className="rounded-[16px] border border-stone-100 bg-white p-3">
                           <p className="wedding-kicker mb-3">Selected Invitations</p>
                           <div className="space-y-2">
                             {selectedGuests.length === 0 ? (
@@ -4205,6 +4364,49 @@ export default function StudioProPage() {
                       title={editingGuestId ? "Edit Invitation" : "Create Invitation"}
                       description="Add a new invitation or update an existing one."
                     />
+
+                    {isVirtualGuestAvailable === true ? (
+                      <div className="mt-5 grid gap-3 md:grid-cols-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsVirtualGuest(false)}
+                          className={`rounded-[18px] border px-4 py-4 text-left transition ${
+                            !isVirtualGuest
+                              ? "border-stone-900 bg-stone-900 text-white"
+                              : "border-stone-200 bg-stone-50 text-stone-700 hover:border-stone-300"
+                          }`}
+                        >
+                          <p className={`text-[10px] font-bold uppercase tracking-[0.16em] ${!isVirtualGuest ? "text-white/70" : "text-stone-400"}`}>
+                            Invitation Type
+                          </p>
+                          <p className="mt-2 font-serif text-2xl leading-tight">In-Person Guest</p>
+                          <p className={`mt-2 text-sm leading-relaxed ${!isVirtualGuest ? "text-white/78" : "text-stone-500"}`}>
+                            Counts toward venue headcount and seating.
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsVirtualGuest(true)}
+                          className={`rounded-[18px] border px-4 py-4 text-left transition ${
+                            isVirtualGuest
+                              ? "border-sky-700 bg-sky-700 text-white"
+                              : "border-sky-100 bg-sky-50 text-sky-800 hover:border-sky-200"
+                          }`}
+                        >
+                          <p className={`text-[10px] font-bold uppercase tracking-[0.16em] ${isVirtualGuest ? "text-white/70" : "text-sky-500"}`}>
+                            Invitation Type
+                          </p>
+                          <p className="mt-2 font-serif text-2xl leading-tight">Virtual Guest</p>
+                          <p className={`mt-2 text-sm leading-relaxed ${isVirtualGuest ? "text-white/82" : "text-sky-700"}`}>
+                            Uses the virtual RSVP flow and stays out of seating.
+                          </p>
+                        </button>
+                      </div>
+                    ) : isVirtualGuestAvailable === false ? (
+                      <div className="mt-5 rounded-[20px] border border-dashed border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-700">
+                        Add a `virtual_guest` column to `public.rsvp_list` to enable virtual invite controls.
+                      </div>
+                    ) : null}
 
                     <form onSubmit={addGuest} className="mt-5 space-y-4">
                       <FormField label="Guest Name">
@@ -4331,18 +4533,6 @@ export default function StudioProPage() {
                             onChange={setRequestContactDetails}
                           />
                         )}
-                        {isVirtualGuestAvailable ? (
-                          <ToggleBox
-                            label="Virtual Guest"
-                            description="Show a virtual RSVP flow, count this guest separately, and replace venue details with livestream details."
-                            checked={isVirtualGuest}
-                            onChange={setIsVirtualGuest}
-                          />
-                        ) : (
-                          <div className="rounded-[24px] border border-dashed border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-700">
-                            Add a `virtual_guest` column to `public.rsvp_list` to enable virtual invite controls.
-                          </div>
-                        )}
                         <ToggleBox
                           label="Has Children"
                           description="Track children included inside the total invited guest count."
@@ -4432,9 +4622,21 @@ export default function StudioProPage() {
                         title="Seating Board"
                         description="Search, filter, and update table assignments by guest or table number."
                       />
-                      <Link href="/studio-pro/seat-management" className="wedding-button-primary shrink-0">
-                        Seat Management
+                      <Link href="/studio-pro/floor-plan" className="wedding-button-primary shrink-0">
+                        Floor Plan
                       </Link>
+                    </div>
+
+                    <div className="mt-4 grid gap-2 md:grid-cols-3">
+                      <button type="button" onClick={() => openOverviewWorkspace("needs_seating")} className="studio-compact-button-primary">
+                        Seat Waiting Guests
+                      </button>
+                      <button type="button" onClick={beginSeatingAssignmentCreate} className="studio-compact-button">
+                        New Assignment
+                      </button>
+                      <button type="button" onClick={() => openSeatingWorkspace("tables")} className="studio-compact-button">
+                        Move Or Swap Tables
+                      </button>
                     </div>
 
                     <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
@@ -5017,7 +5219,7 @@ export default function StudioProPage() {
                       description="Review visible table totals and move an entire table when plans change."
                     />
 
-                    <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
+                    <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
                       <input
                         type="search"
                         value={seatingSearch}
@@ -5033,7 +5235,7 @@ export default function StudioProPage() {
                       </select>
                     </div>
 
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="mt-3 flex max-h-28 flex-wrap gap-2 overflow-y-auto rounded-[14px] border border-stone-100 bg-stone-50 p-2">
                       <Pill
                         label="All Tables"
                         active={seatingTableFilter === "all"}
@@ -5050,7 +5252,7 @@ export default function StudioProPage() {
                     </div>
 
                     {availableTableNumbers.length > 0 && (
-                      <div className="mt-5">
+                      <div className="mt-4">
                         <CompactDisclosure
                           title="Move Or Swap Tables"
                           subtitle="Renumber one table, or swap two occupied table numbers without merging guests."
@@ -5061,7 +5263,7 @@ export default function StudioProPage() {
                             <Pill label="Swap Tables" active={tableMoveMode === "swap"} onClick={() => setTableMoveMode("swap")} />
                             <Pill label="Move / Merge" active={tableMoveMode === "move"} onClick={() => setTableMoveMode("move")} />
                           </div>
-                          <div className="grid gap-3 sm:grid-cols-[minmax(0,180px)_minmax(0,180px)_auto]">
+                          <div className="grid gap-3 sm:grid-cols-[minmax(0,160px)_minmax(0,160px)_auto]">
                             <FormField label="From Table">
                               <select
                                 value={tableMoveFrom}
@@ -5092,12 +5294,12 @@ export default function StudioProPage() {
                               type="button"
                               onClick={() => void (tableMoveMode === "swap" ? swapTables() : moveEntireTable())}
                               disabled={tableMoveFrom === "" || tableMoveTo === "" || tableMoveFrom === tableMoveTo}
-                              className="wedding-button-primary w-full self-end disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                              className="studio-mini-button-primary self-end disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {tableMoveMode === "swap" ? "Swap Tables" : "Move Table"}
                             </button>
                           </div>
-                          <p className="mt-3 text-sm text-stone-500">
+                          <p className="mt-3 text-sm leading-relaxed text-stone-500">
                             Swap is best when both tables already have guests. Move / Merge changes the source table number and combines it with the destination.
                           </p>
                         </CompactDisclosure>
@@ -5105,7 +5307,7 @@ export default function StudioProPage() {
                     )}
 
                     {isSeatingGuestCountAvailable && filteredTableSeatTotals.size > 0 ? (
-                      <div className="mt-5 rounded-[28px] border border-stone-100 bg-[linear-gradient(180deg,_rgba(248,250,252,0.96),_rgba(241,245,249,0.86))] p-4">
+                      <div className="mt-4 rounded-[18px] border border-stone-100 bg-[linear-gradient(180deg,_rgba(248,250,252,0.96),_rgba(241,245,249,0.86))] p-3">
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <div>
                             <p className="wedding-kicker">Visible Table Seat Totals</p>
@@ -5126,7 +5328,7 @@ export default function StudioProPage() {
                                   toggleSeatingTableFilter(table);
                                   setSeatingTab("board");
                                 }}
-                                className={`rounded-[22px] border px-4 py-4 text-left transition ${
+                                className={`rounded-[16px] border px-3 py-3 text-left transition ${
                                   isSeatingTableSelected(table)
                                     ? "border-stone-900 bg-stone-900 text-white"
                                     : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
@@ -5139,7 +5341,7 @@ export default function StudioProPage() {
                                 >
                                   Table {table}
                                 </p>
-                                <p className="mt-2 font-serif text-3xl leading-none">
+                                <p className="mt-2 font-serif text-2xl leading-none">
                                   {seats}
                                 </p>
                                 <p className={`mt-2 text-sm ${isSeatingTableSelected(table) ? "text-white/85" : "text-stone-500"}`}>
@@ -5171,6 +5373,10 @@ export default function StudioProPage() {
                       title={editingSeatingId !== null ? "Edit Assignment" : "Add Assignment"}
                       description="Add a new table assignment or update an existing one."
                     />
+
+                    <div className="mt-5 rounded-[18px] border border-amber-100 bg-amber-50 px-4 py-4 text-sm leading-relaxed text-amber-800">
+                      Seating is linked by RSVP code. For day-to-day planning, start from Seats Needed or the visual floor plan; use this form when you need a precise manual table assignment.
+                    </div>
 
                     <form onSubmit={addSeatingAssignment} className="mt-5 space-y-4">
                       <FormField label="Guest Name">
@@ -5390,24 +5596,25 @@ export default function StudioProPage() {
                   </div>
 
                   <div className="mt-5 rounded-[22px] border border-stone-100 bg-stone-50 p-4">
-                    <FormField label="Livestream Embed Link">
+                    <FormField label="YouTube Livestream Link">
                       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
                         <input
                           value={livestreamEmbedUrl}
                           onChange={(event) => setLivestreamEmbedUrl(event.target.value)}
                           className="wedding-inline-edit-input"
-                          placeholder="https://www.youtube.com/embed/..."
+                          placeholder="Paste a YouTube live, watch, share, or embed link"
                         />
                         <button
                           type="button"
-                          onClick={() =>
-                            void updateTextSetting("livestream_embed_url", livestreamEmbedUrl.trim(), "Livestream link saved.")
-                          }
+                          onClick={() => void saveLivestreamLink()}
                           className="wedding-button-primary w-full xl:w-auto"
                         >
                           Save Link
                         </button>
                       </div>
+                      <p className="mt-2 text-xs leading-relaxed text-stone-500">
+                        Normal YouTube links are okay. Studio Pro will save them in the embed format the livestream page needs.
+                      </p>
                     </FormField>
                   </div>
                 </StudioPanel>
@@ -5444,6 +5651,112 @@ export default function StudioProPage() {
   );
 }
 
+function PlannerNavigation({
+  items,
+  activeView,
+  onChange,
+}: {
+  items: {
+    key: AdminView;
+    eyebrow: string;
+    label: string;
+    description: string;
+    meta: string;
+  }[];
+  activeView: AdminView;
+  onChange: (key: AdminView) => void;
+}) {
+  return (
+    <nav className="grid gap-2 md:grid-cols-2 xl:grid-cols-4" aria-label="Studio Pro workspaces">
+      {items.map((item) => {
+        const active = activeView === item.key;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onChange(item.key)}
+            className={`min-w-0 rounded-[18px] border px-3 py-3 text-left shadow-sm transition ${
+              active
+                ? "border-stone-900 bg-stone-900 text-white"
+                : "border-white/85 bg-white/92 text-stone-800 hover:border-stone-200 hover:bg-white"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className={`text-[9px] font-bold uppercase tracking-[0.14em] ${active ? "text-white/60" : "text-stone-400"}`}>
+                  {item.eyebrow}
+                </p>
+                <p className="mt-1 font-serif text-xl leading-tight">{item.label}</p>
+              </div>
+              <span
+                className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-tight tracking-[0.09em] ${
+                  active ? "bg-white/12 text-white/78" : "bg-stone-100 text-stone-500"
+                }`}
+              >
+                {item.meta}
+              </span>
+            </div>
+            <p className={`mt-2 text-sm leading-relaxed ${active ? "text-white/72" : "text-stone-500"}`}>{item.description}</p>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function PlannerActionCard({
+  eyebrow,
+  title,
+  description,
+  actionLabel,
+  tone = "stone",
+  onAction,
+  href,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  actionLabel: string;
+  tone?: "stone" | "sky" | "emerald" | "amber" | "rose";
+  onAction?: () => void;
+  href?: string;
+}) {
+  const toneStyles = {
+    stone: "border-stone-200 bg-stone-50 text-stone-800",
+    sky: "border-sky-100 bg-sky-50 text-sky-800",
+    emerald: "border-emerald-100 bg-emerald-50 text-emerald-800",
+    amber: "border-amber-100 bg-amber-50 text-amber-800",
+    rose: "border-rose-100 bg-rose-50 text-rose-800",
+  }[tone];
+
+  const content = (
+    <>
+      <p className="text-[9px] font-bold uppercase tracking-[0.16em] opacity-65">{eyebrow}</p>
+      <p className="mt-2 font-serif text-2xl leading-tight">{title}</p>
+      <p className="mt-2 text-sm leading-relaxed opacity-78">{description}</p>
+      <span className="mt-4 inline-flex rounded-full bg-white/80 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-stone-700 ring-1 ring-black/5">
+        {actionLabel}
+      </span>
+    </>
+  );
+
+  const className = `block min-h-full rounded-[18px] border px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneStyles}`;
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button type="button" onClick={onAction} className={className}>
+      {content}
+    </button>
+  );
+}
+
 function StudioPanel({
   children,
   refProp,
@@ -5456,8 +5769,8 @@ function StudioPanel({
   return (
     <section
       ref={refProp}
-      className={`min-w-0 rounded-[24px] border border-white/85 bg-white/92 shadow-sm ${
-        dense ? "p-4" : "p-4 md:p-5"
+      className={`min-w-0 rounded-[18px] border border-white/85 bg-white/92 shadow-sm ${
+        dense ? "p-3 md:p-4" : "p-3.5 md:p-4"
       }`}
     >
       {children}
@@ -5476,8 +5789,8 @@ function SectionHeading({
 }) {
   return (
     <div>
-      <p className="wedding-kicker mb-1.5">{kicker}</p>
-      <h2 className="font-serif text-[1.85rem] tracking-tight text-stone-900 md:text-[2.2rem]">{title}</h2>
+      <p className="wedding-kicker mb-1">{kicker}</p>
+      <h2 className="font-serif text-[1.55rem] tracking-tight text-stone-900 md:text-[1.9rem]">{title}</h2>
       {description && <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-stone-500">{description}</p>}
     </div>
   );
@@ -5493,14 +5806,14 @@ function WorkspaceTabs({
   onChange: (key: string) => void;
 }) {
   return (
-    <div className="rounded-[20px] border border-white/85 bg-white/92 p-2 shadow-sm">
-      <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="rounded-[16px] border border-white/85 bg-white/92 p-1.5 shadow-sm">
+      <div className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {tabs.map((tab) => (
           <button
             key={tab.key}
             type="button"
             onClick={() => onChange(tab.key)}
-            className={`shrink-0 rounded-full px-4 py-2 text-[10px] font-bold uppercase tracking-[0.18em] transition-colors ${
+            className={`shrink-0 rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.13em] transition-colors ${
               activeTab === tab.key ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-600 hover:bg-white"
             }`}
           >
@@ -5530,9 +5843,9 @@ function StatTile({
   }[tone];
 
   return (
-    <div className="rounded-[18px] border border-stone-100 bg-stone-50 px-3 py-3">
-      <p className="wedding-kicker mb-1.5">{label}</p>
-      <p className={`font-serif text-[2rem] leading-none ${toneStyles}`}>{value}</p>
+    <div className="min-w-0 rounded-[14px] border border-stone-100 bg-stone-50 px-3 py-2.5">
+      <p title={label} className="text-[8px] font-bold uppercase leading-tight tracking-[0.08em] text-stone-400">{label}</p>
+      <p className={`mt-1 font-serif text-[1.65rem] leading-none ${toneStyles}`}>{value}</p>
     </div>
   );
 }
@@ -5594,21 +5907,21 @@ function CompactDisclosure({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-[20px] border border-stone-100 bg-white">
+    <div className="rounded-[16px] border border-stone-100 bg-white">
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
       >
         <div>
           <p className="wedding-kicker mb-1">{title}</p>
           {subtitle ? <p className="text-sm text-stone-500">{subtitle}</p> : null}
         </div>
-        <span className="rounded-full bg-stone-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-stone-500">
+        <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-stone-500">
           {open ? "Hide" : "Show"}
         </span>
       </button>
-      {open && <div className="border-t border-stone-100 px-4 py-4">{children}</div>}
+      {open && <div className="border-t border-stone-100 px-3 py-3">{children}</div>}
     </div>
   );
 }
@@ -5724,9 +6037,9 @@ function IssueCard({
 
 function MiniMetric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-[16px] border border-stone-100 bg-white px-3 py-3">
-      <p className="wedding-kicker mb-1">{label}</p>
-      <p className="font-serif text-2xl text-stone-900">{value}</p>
+    <div className="min-w-0 rounded-[12px] border border-stone-100 bg-white px-3 py-2.5">
+      <p title={label} className="text-[8px] font-bold uppercase leading-tight tracking-[0.08em] text-stone-400">{label}</p>
+      <p className="mt-1 font-serif text-xl leading-none text-stone-900">{value}</p>
     </div>
   );
 }
@@ -5736,7 +6049,7 @@ function Pill({ label, active, onClick }: { label: string; active: boolean; onCl
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] transition-colors ${
+      className={`rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] transition-colors ${
         active ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-600"
       }`}
     >
