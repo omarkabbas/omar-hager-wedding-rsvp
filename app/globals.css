@@ -287,11 +287,16 @@ body {
   }
 
   .wedding-nav-inner {
-    @apply mx-auto flex w-full max-w-3xl items-center justify-center gap-1.5 rounded-full border border-white/55 bg-[#D0E0F0]/82 px-2 py-2 shadow-[0_15px_40px_rgba(120,113,108,0.12)] backdrop-blur-md md:gap-4;
+    @apply mx-auto flex w-full max-w-3xl items-center justify-start gap-1.5 overflow-x-auto rounded-full border border-white/55 bg-[#D0E0F0]/82 px-2 py-2 shadow-[0_15px_40px_rgba(120,113,108,0.12)] backdrop-blur-md md:justify-center md:gap-4;
     transition:
       transform var(--motion-base) var(--easing-standard),
       box-shadow var(--motion-base) var(--easing-standard),
       background-color var(--motion-fast) ease;
+    scrollbar-width: none;
+  }
+
+  .wedding-nav-inner::-webkit-scrollbar {
+    display: none;
   }
 
   .wedding-nav-link {

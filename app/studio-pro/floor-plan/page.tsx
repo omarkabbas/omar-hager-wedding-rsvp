@@ -433,6 +433,7 @@ export default function FloorPlanPage() {
   const [newTableNumber, setNewTableNumber] = useState<number | "">(1);
   const [newTableShape, setNewTableShape] = useState<GuestTableShape>("round");
   const [dragPayload, setDragPayload] = useState<DragPayload | null>(null);
+  const [tapSeatAction, setTapSeatAction] = useState<DragPayload | null>(null);
   const [activeTarget, setActiveTarget] = useState<number | "queue" | null>(null);
   const [tablePositions, setTablePositions] = useState<Record<number, TablePosition>>({});
   const [extraTableNumbers, setExtraTableNumbers] = useState<number[]>([]);
@@ -1063,6 +1064,18 @@ export default function FloorPlanPage() {
       })
       .sort((left, right) => left.householdName.localeCompare(right.householdName) || left.seatNumber - right.seatNumber);
   }, [assignedSeatsByCode, responses, search]);
+
+  const tapSeatActionLabel = useMemo(() => {
+    if (!tapSeatAction) return "";
+
+    if (tapSeatAction.kind === "unseated") {
+      const guest = responses.find((item) => item.id === tapSeatAction.guestId);
+      return guest?.guest_name || unseatedUnits.find((unit) => unit.guestId === tapSeatAction.guestId)?.householdName || "Selected guest";
+    }
+
+    const assignment = seatingAssignments.find((item) => item.id === tapSeatAction.assignmentId);
+    return assignment?.name || "Selected guest";
+  }, [responses, seatingAssignments, tapSeatAction, unseatedUnits]);
 
   const tableNumbers = useMemo(() => {
     const existing = seatingAssignments.map((assignment) => assignment.table_number);
@@ -1893,6 +1906,42 @@ export default function FloorPlanPage() {
     </section>`;
   }, [allWaitingGuests, tableModels]);
 
+  const buildTableGuestNameListHtml = useCallback(() => {
+    const tables = [...tableModels].sort((left, right) => left.tableNumber - right.tableNumber);
+
+    if (tables.length === 0) {
+      return `<section class="empty-state">
+        <h2>No tables yet</h2>
+        <p>Add guest tables before printing the table guest list.</p>
+      </section>`;
+    }
+
+    return tables
+      .map((table) => {
+        const guests = Array.from(
+          table.units.reduce((map, unit) => {
+            if (!map.has(unit.inviteCode)) {
+              map.set(unit.inviteCode, unit.householdName);
+            }
+            return map;
+          }, new Map<string, string>()),
+        )
+          .map(([, householdName]) => householdName)
+          .sort((left, right) => left.localeCompare(right));
+
+        const guestRows =
+          guests.length > 0
+            ? guests.map((guestName) => `<li>${escapeHtml(guestName)}</li>`).join("")
+            : `<li class="empty-row">No guests assigned</li>`;
+
+        return `<section class="table-name-card">
+          <h2>Table ${table.tableNumber}</h2>
+          <ol>${guestRows}</ol>
+        </section>`;
+      })
+      .join("");
+  }, [tableModels]);
+
   const openPrintableFloorPlan = useCallback(
     ({ title, subtitle, includeTableList }: { title: string; subtitle: string; includeTableList: boolean }) => {
       const previewWindow = window.open("", "_blank");
@@ -2124,6 +2173,157 @@ export default function FloorPlanPage() {
       includeTableList: false,
     });
   }, [openPrintableFloorPlan]);
+
+  const openTableGuestListPrint = useCallback(() => {
+    const previewWindow = window.open("", "_blank");
+    if (!previewWindow) {
+      showToast("Allow pop-ups to open the table guest list.", "error");
+      return;
+    }
+
+    const tableListHtml = buildTableGuestNameListHtml();
+    const seatedGuestTotal = tableModels.reduce((total, table) => {
+      const uniqueGuests = new Set(table.units.map((unit) => unit.inviteCode));
+      return total + uniqueGuests.size;
+    }, 0);
+
+    previewWindow.opener = null;
+    previewWindow.document.write(`<!doctype html>
+<html>
+  <head>
+    <title>Table Guest List</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        margin: 0;
+        background: #f6f8fb;
+        color: #1c1917;
+        font-family: Arial, sans-serif;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        border-bottom: 1px solid #e7e5e4;
+        background: rgba(255, 255, 255, 0.96);
+        padding: 14px 18px;
+      }
+      h1, h2 {
+        margin: 0;
+        font-family: Georgia, serif;
+        font-weight: 500;
+      }
+      h1 { font-size: 24px; }
+      p {
+        margin: 4px 0 0;
+        color: #78716c;
+        font-size: 12px;
+      }
+      button {
+        border: 1px solid #d6d3d1;
+        border-radius: 999px;
+        background: #fff;
+        color: #44403c;
+        cursor: pointer;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.13em;
+        padding: 10px 14px;
+        text-transform: uppercase;
+      }
+      main {
+        padding: 18px;
+      }
+      .table-name-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 10px;
+        align-items: start;
+      }
+      .table-name-card {
+        break-inside: avoid;
+        border: 1px solid #e7e5e4;
+        border-radius: 14px;
+        background: #fff;
+        padding: 10px 12px 12px;
+      }
+      .table-name-card h2 {
+        border-bottom: 1px solid #f5f5f4;
+        color: #4e5e72;
+        font-size: 18px;
+        padding-bottom: 7px;
+      }
+      ol {
+        list-style-position: inside;
+        margin: 8px 0 0;
+        padding: 0;
+      }
+      li {
+        border-bottom: 1px solid #f5f5f4;
+        font-family: Georgia, serif;
+        font-size: 14px;
+        line-height: 1.25;
+        padding: 5px 0;
+      }
+      li:last-child { border-bottom: 0; }
+      .empty-row {
+        color: #a8a29e;
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+        font-style: italic;
+        list-style: none;
+      }
+      .empty-state {
+        border: 1px solid #e7e5e4;
+        border-radius: 18px;
+        background: #fff;
+        padding: 18px;
+        text-align: center;
+      }
+      @media print {
+        @page { size: letter portrait; margin: 0.35in; }
+        body { background: #fff; }
+        header { display: none; }
+        main { padding: 0; }
+        .table-name-list {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+        .table-name-card {
+          border-radius: 0;
+          padding: 8px 10px;
+        }
+        .table-name-card h2 {
+          font-size: 16px;
+          padding-bottom: 5px;
+        }
+        li {
+          font-size: 12px;
+          padding: 3px 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Table Guest List</h1>
+        <p>${tableModels.length} table${tableModels.length === 1 ? "" : "s"} · ${seatedGuestTotal} guest name${seatedGuestTotal === 1 ? "" : "s"}</p>
+      </div>
+      <button onclick="window.print()">Print</button>
+    </header>
+    <main>
+      <section class="table-name-list">${tableListHtml}</section>
+    </main>
+  </body>
+</html>`);
+    previewWindow.document.close();
+    showToast("Table guest list opened.", "success");
+  }, [buildTableGuestNameListHtml, showToast, tableModels]);
 
   const updateTableCapacity = (tableNumber: number, nextCapacity: number) => {
     const seatedCount = tableModels.find((table) => table.tableNumber === tableNumber)?.units.length || 0;
@@ -2432,9 +2632,31 @@ export default function FloorPlanPage() {
     await seatUnseatedGuest(payload.guestId, payload.inviteCode, tableNumber);
   };
 
+  const handleTapSeatActionOnTable = async (tableNumber: number) => {
+    const payload = tapSeatAction;
+    setTapSeatAction(null);
+    setActiveTarget(null);
+    if (!payload) return;
+
+    if (payload.kind === "assigned") {
+      await moveAssignedSeat(payload.assignmentId, tableNumber);
+      return;
+    }
+
+    await seatUnseatedGuest(payload.guestId, payload.inviteCode, tableNumber);
+  };
+
   const handleDropOnQueue = async () => {
     const payload = dragPayload;
     setDragPayload(null);
+    setActiveTarget(null);
+    if (!payload || payload.kind !== "assigned") return;
+    confirmUnseatAssignedSeat(payload.assignmentId);
+  };
+
+  const handleTapActionToQueue = () => {
+    const payload = tapSeatAction;
+    setTapSeatAction(null);
     setActiveTarget(null);
     if (!payload || payload.kind !== "assigned") return;
     confirmUnseatAssignedSeat(payload.assignmentId);
@@ -2530,6 +2752,9 @@ export default function FloorPlanPage() {
             </button>
             <button type="button" onClick={openPrintPacket} className="studio-compact-button">
               Print Packet
+            </button>
+            <button type="button" onClick={openTableGuestListPrint} className="studio-compact-button">
+              Guest List
             </button>
             <button type="button" onClick={openVendorView} className="studio-compact-button">
               Vendor View
@@ -3014,9 +3239,18 @@ export default function FloorPlanPage() {
                       key={unit.key}
                       unit={unit}
                       busy={busyKeys.includes(`guest:${unit.guestId}`)}
-                      onDragStart={() =>
-                        unit.guestId && setDragPayload({ kind: "unseated", guestId: unit.guestId, inviteCode: unit.inviteCode })
-                      }
+                      selected={tapSeatAction?.kind === "unseated" && tapSeatAction.guestId === unit.guestId}
+                      onSelect={() => {
+                        if (!unit.guestId || busyKeys.includes(`guest:${unit.guestId}`)) return;
+                        setTapSeatAction({ kind: "unseated", guestId: unit.guestId, inviteCode: unit.inviteCode });
+                        setSpotlightInviteCode(unit.inviteCode);
+                        showToast(`${unit.householdName} selected. Tap a table to seat them.`, "info");
+                      }}
+                      onDragStart={() => {
+                        if (!unit.guestId) return;
+                        setTapSeatAction(null);
+                        setDragPayload({ kind: "unseated", guestId: unit.guestId, inviteCode: unit.inviteCode });
+                      }}
                       onDragEnd={() => {
                         setDragPayload(null);
                         setActiveTarget(null);
@@ -3034,6 +3268,28 @@ export default function FloorPlanPage() {
           onPointerDown={startFloorPan}
           className={`overflow-auto ${floorPanState ? "cursor-grabbing" : "cursor-grab"}`}
         >
+          {tapSeatAction && (
+            <div className="sticky top-3 z-30 mx-3 mb-3 rounded-[16px] border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 shadow-xl">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-sky-600">Tap-To-Seat Mode</p>
+                  <p className="mt-1 font-semibold">
+                    {tapSeatAction.kind === "assigned" ? `Moving ${tapSeatActionLabel}. Tap a table to move this seat.` : `${tapSeatActionLabel} selected. Tap a table to seat them.`}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  {tapSeatAction.kind === "assigned" && (
+                    <button type="button" onClick={handleTapActionToQueue} className="studio-compact-button bg-white">
+                      Return to Queue
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setTapSeatAction(null)} className="studio-compact-button bg-white">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div
             ref={floorRef}
             className="relative bg-white"
@@ -3179,6 +3435,7 @@ export default function FloorPlanPage() {
                 position={table.position}
                 active={activeTarget === table.tableNumber}
                 selected={selectedTableNumber === table.tableNumber}
+                tapTargetActive={Boolean(tapSeatAction)}
                 layoutLocked={layoutLocked}
                 spotlightInviteCode={spotlightInviteCode}
                 busyKeys={busyKeys}
@@ -3186,12 +3443,20 @@ export default function FloorPlanPage() {
                 onDrop={() => void handleDropOnTable(table.tableNumber)}
                 onDragOver={() => setActiveTarget(table.tableNumber)}
                 onDragLeave={() => setActiveTarget(null)}
+                onTapSeatAction={() => void handleTapSeatActionOnTable(table.tableNumber)}
                 onStartTableDrag={(event) => startTableDrag(table.tableNumber, event)}
                 onOpenDetails={() => focusTableOnFloor(table.tableNumber)}
                 onDragUnit={(unit) => {
                   if (unit.assignmentId) {
+                    setTapSeatAction(null);
                     setDragPayload({ kind: "assigned", assignmentId: unit.assignmentId, inviteCode: unit.inviteCode });
                   }
+                }}
+                onSelectUnit={(unit) => {
+                  if (!unit.assignmentId || busyKeys.includes(`assignment:${unit.assignmentId}`)) return;
+                  setTapSeatAction({ kind: "assigned", assignmentId: unit.assignmentId, inviteCode: unit.inviteCode });
+                  setSpotlightInviteCode(unit.inviteCode);
+                  showToast(`${unit.householdName} selected. Tap another table to move this seat.`, "info");
                 }}
                 onUnseat={(unit) => {
                   if (unit.assignmentId) confirmUnseatAssignedSeat(unit.assignmentId);
@@ -3214,6 +3479,7 @@ export default function FloorPlanPage() {
           onClose={() => setSelectedTableNumber(null)}
           onHighlightGuest={(inviteCode) => setSpotlightInviteCode(inviteCode)}
           onPrintPacket={openPrintPacket}
+          onTableGuestListPrint={openTableGuestListPrint}
           onVendorView={openVendorView}
         />
       )}
@@ -3283,6 +3549,7 @@ function TableDetailDrawer({
   onClose,
   onHighlightGuest,
   onPrintPacket,
+  onTableGuestListPrint,
   onVendorView,
 }: {
   tableNumber: number;
@@ -3295,6 +3562,7 @@ function TableDetailDrawer({
   onClose: () => void;
   onHighlightGuest: (inviteCode: string) => void;
   onPrintPacket: () => void;
+  onTableGuestListPrint: () => void;
   onVendorView: () => void;
 }) {
   const groupedGuests = Array.from(
@@ -3336,9 +3604,12 @@ function TableDetailDrawer({
             Close
           </button>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-4 grid grid-cols-3 gap-2">
           <button type="button" onClick={onPrintPacket} className="studio-compact-button-primary">
             Print Packet
+          </button>
+          <button type="button" onClick={onTableGuestListPrint} className="studio-compact-button">
+            Guest List
           </button>
           <button type="button" onClick={onVendorView} className="studio-compact-button">
             Vendor View
@@ -3433,24 +3704,34 @@ function ConfirmDialog({
 function GuestChip({
   unit,
   busy,
+  selected,
+  onSelect,
   onDragStart,
   onDragEnd,
 }: {
   unit: SeatUnit;
   busy: boolean;
+  selected: boolean;
+  onSelect: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
 }) {
   return (
-    <div
+    <button
+      type="button"
       draggable={!busy}
+      onClick={onSelect}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";
         onDragStart();
       }}
       onDragEnd={onDragEnd}
-      className={`min-w-0 cursor-grab rounded-[12px] border bg-white px-3 py-2.5 shadow-sm active:cursor-grabbing ${
-        busy ? "opacity-50" : "border-stone-100"
+      className={`w-full min-w-0 cursor-grab rounded-[12px] border px-3 py-2.5 text-left shadow-sm transition active:cursor-grabbing ${
+        selected
+          ? "border-sky-300 bg-sky-50 ring-2 ring-sky-100"
+          : busy
+            ? "border-stone-100 bg-white opacity-50"
+            : "border-stone-100 bg-white hover:border-sky-200 hover:bg-sky-50"
       }`}
     >
       <p title={unit.label} className="truncate font-serif text-base leading-tight text-stone-900">
@@ -3459,7 +3740,7 @@ function GuestChip({
       <p title={unit.inviteCode} className="mt-1 truncate text-[9px] font-bold uppercase tracking-[0.12em] text-stone-400">
         {unit.inviteCode}
       </p>
-    </div>
+    </button>
   );
 }
 
@@ -3534,6 +3815,7 @@ function VisualTable({
   position,
   active,
   selected,
+  tapTargetActive,
   layoutLocked,
   spotlightInviteCode,
   busyKeys,
@@ -3541,9 +3823,11 @@ function VisualTable({
   onDrop,
   onDragOver,
   onDragLeave,
+  onTapSeatAction,
   onStartTableDrag,
   onOpenDetails,
   onDragUnit,
+  onSelectUnit,
   onUnseat,
 }: {
   tableNumber: number;
@@ -3554,6 +3838,7 @@ function VisualTable({
   position: { x: number; y: number };
   active: boolean;
   selected: boolean;
+  tapTargetActive: boolean;
   layoutLocked: boolean;
   spotlightInviteCode: string | null;
   busyKeys: string[];
@@ -3561,9 +3846,11 @@ function VisualTable({
   onDrop: () => void;
   onDragOver: () => void;
   onDragLeave: () => void;
+  onTapSeatAction: () => void;
   onStartTableDrag: (event: ReactPointerEvent<HTMLElement>) => void;
   onOpenDetails: () => void;
   onDragUnit: (unit: SeatUnit) => void;
+  onSelectUnit: (unit: SeatUnit) => void;
   onUnseat: (unit: SeatUnit) => void;
 }) {
   const seats = Array.from({ length: capacity }, (_, index) => units[index] || null);
@@ -3581,11 +3868,23 @@ function VisualTable({
       }}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onClick={(event) => {
+        if (!tapTargetActive) return;
+        if ((event.target as HTMLElement).closest("[data-object-control='true'], [data-seat-token='true']")) return;
+        event.stopPropagation();
+        onTapSeatAction();
+      }}
     >
       <div
-        onPointerDown={onStartTableDrag}
+        onPointerDown={(event) => {
+          if (tapTargetActive) {
+            event.stopPropagation();
+            return;
+          }
+          onStartTableDrag(event);
+        }}
         className={`absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center border bg-white shadow-sm transition ${
-          active
+          active || tapTargetActive
             ? "border-sky-400 ring-8 ring-sky-100"
             : selected
               ? "border-sky-500 ring-4 ring-sky-100"
@@ -3628,6 +3927,14 @@ function VisualTable({
             key={unit?.key || `empty-${tableNumber}-${index}`}
             title={unit ? `${unit.label} · ${unit.inviteCode}` : `Empty seat at table ${tableNumber}`}
             draggable={Boolean(unit) && !busy}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (unit) {
+                onSelectUnit(unit);
+                return;
+              }
+              if (tapTargetActive) onTapSeatAction();
+            }}
             onDragStart={(event) => {
               if (!unit) return;
               event.dataTransfer.effectAllowed = "move";

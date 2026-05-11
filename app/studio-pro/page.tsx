@@ -471,6 +471,7 @@ export default function StudioProPage() {
   const [isGalleryEnabled, setIsGalleryEnabled] = useState(false);
   const [isGalleryFeedEnabled, setIsGalleryFeedEnabled] = useState(true);
   const [isLivestreamEnabled, setIsLivestreamEnabled] = useState(false);
+  const [isRsvpOpen, setIsRsvpOpen] = useState(true);
   const [livestreamEmbedUrl, setLivestreamEmbedUrl] = useState("");
   const [isHomeVenueEnabled, setIsHomeVenueEnabled] = useState(false);
   const [isHomeCarouselEnabled, setIsHomeCarouselEnabled] = useState(true);
@@ -696,6 +697,7 @@ export default function StudioProPage() {
         "is_gallery_enabled",
         "is_gallery_feed_enabled",
         "is_livestream_enabled",
+        "is_rsvp_open",
         "livestream_embed_url",
         "is_home_venue_enabled",
         "is_home_carousel_enabled",
@@ -716,6 +718,7 @@ export default function StudioProPage() {
       setIsGalleryEnabled(settingsMap.is_gallery_enabled === "true");
       setIsGalleryFeedEnabled(settingsMap.is_gallery_feed_enabled ? settingsMap.is_gallery_feed_enabled === "true" : true);
       setIsLivestreamEnabled(settingsMap.is_livestream_enabled === "true");
+      setIsRsvpOpen(settingsMap.is_rsvp_open ? settingsMap.is_rsvp_open !== "false" : true);
       setLivestreamEmbedUrl(settingsMap.livestream_embed_url || "");
       setIsHomeVenueEnabled(settingsMap.is_home_venue_enabled === "true");
       setIsHomeCarouselEnabled(settingsMap.is_home_carousel_enabled ? settingsMap.is_home_carousel_enabled === "true" : true);
@@ -1771,17 +1774,32 @@ export default function StudioProPage() {
   );
 
   const updateSetting = async (key: string, nextValue: boolean, successMessage: string) => {
-    const { error: updateError } = await supabase.from("settings").update({ value: String(nextValue) }).eq("key", key);
+    const { data: updatedSetting, error: updateError } = await supabase
+      .from("settings")
+      .update({ value: String(nextValue) })
+      .eq("key", key)
+      .select("key")
+      .maybeSingle();
 
     if (updateError) {
       showToast(updateError.message, "error");
       return;
     }
 
+    if (!updatedSetting) {
+      const { error: insertError } = await supabase.from("settings").insert({ key, value: String(nextValue) });
+
+      if (insertError) {
+        showToast(insertError.message, "error");
+        return;
+      }
+    }
+
     if (key === "is_seating_chart_enabled") setIsSeatingChartEnabled(nextValue);
     if (key === "is_gallery_enabled") setIsGalleryEnabled(nextValue);
     if (key === "is_gallery_feed_enabled") setIsGalleryFeedEnabled(nextValue);
     if (key === "is_livestream_enabled") setIsLivestreamEnabled(nextValue);
+    if (key === "is_rsvp_open") setIsRsvpOpen(nextValue);
     if (key === "is_home_venue_enabled") setIsHomeVenueEnabled(nextValue);
     if (key === "is_home_carousel_enabled") setIsHomeCarouselEnabled(nextValue);
     if (key === "is_home_dress_code_enabled") setIsHomeDressCodeEnabled(nextValue);
@@ -2939,6 +2957,9 @@ export default function StudioProPage() {
               <Link href="/studio-pro/floor-plan" className="studio-compact-button">
                 Floor Plan
               </Link>
+              <Link href="/" className="studio-compact-button">
+                Open Website
+              </Link>
               <button
                 type="button"
                 onClick={openInvitationImage}
@@ -2989,8 +3010,8 @@ export default function StudioProPage() {
                 key: "settings",
                 eyebrow: "Website",
                 label: "Site Controls",
-                description: "Turn public site sections and livestream access on or off.",
-                meta: isLivestreamEnabled ? "Livestream on" : "Livestream off",
+                description: "Turn RSVPs, public site sections, and livestream access on or off.",
+                meta: isRsvpOpen ? "RSVP open" : "RSVP closed",
               },
             ]}
           />
@@ -3059,6 +3080,79 @@ export default function StudioProPage() {
                           actionLabel="Open Floor Plan"
                           tone="stone"
                           href="/studio-pro/floor-plan"
+                        />
+                      </div>
+                    </StudioPanel>
+
+                    <StudioPanel>
+                      <SectionHeading
+                        kicker="Guest-Facing Website"
+                        title="Open And Check Live Pages"
+                        description="Quickly preview the pages guests can see. Hidden pages point back to Site Controls so a planner can turn them on when ready."
+                      />
+                      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+                        <PlannerActionCard
+                          eyebrow="Always Live"
+                          title="Homepage"
+                          description="Main wedding site with the active guest navigation."
+                          actionLabel="Open Home"
+                          tone="sky"
+                          href="/"
+                        />
+                        <PlannerActionCard
+                          eyebrow={isRsvpOpen ? "Open" : "Closed"}
+                          title="RSVPs"
+                          description={
+                            isRsvpOpen
+                              ? "Invite links can open envelopes and RSVP forms."
+                              : "Invite links show a friendly closed message."
+                          }
+                          actionLabel="Open Controls"
+                          tone={isRsvpOpen ? "emerald" : "rose"}
+                          onAction={() => setActiveView("settings")}
+                        />
+                        <PlannerActionCard
+                          eyebrow={isSeatingChartEnabled ? "Live" : "Hidden"}
+                          title="Find Table"
+                          description={
+                            isSeatingChartEnabled
+                              ? "Check the guest table lookup experience."
+                              : "Enable the table finder when seating is ready."
+                          }
+                          actionLabel={isSeatingChartEnabled ? "Open Page" : "Open Controls"}
+                          tone={isSeatingChartEnabled ? "emerald" : "stone"}
+                          href={isSeatingChartEnabled ? "/mytable" : undefined}
+                          onAction={isSeatingChartEnabled ? undefined : () => setActiveView("settings")}
+                        />
+                        <PlannerActionCard
+                          eyebrow={isGalleryEnabled ? "Live" : "Hidden"}
+                          title="Gallery"
+                          description={isGalleryEnabled ? "Review guest photo uploads and browsing." : "Keep guest photos hidden until launch."}
+                          actionLabel={isGalleryEnabled ? "Open Page" : "Open Controls"}
+                          tone={isGalleryEnabled ? "emerald" : "stone"}
+                          href={isGalleryEnabled ? "/gallery" : undefined}
+                          onAction={isGalleryEnabled ? undefined : () => setActiveView("settings")}
+                        />
+                        <PlannerActionCard
+                          eyebrow={isLivestreamEnabled ? "Live" : "Hidden"}
+                          title="Livestream"
+                          description={
+                            isLivestreamEnabled
+                              ? "Preview the virtual guest livestream page."
+                              : "Enable livestream access when the video link is ready."
+                          }
+                          actionLabel={isLivestreamEnabled ? "Open Page" : "Open Controls"}
+                          tone={isLivestreamEnabled ? "emerald" : "stone"}
+                          href={isLivestreamEnabled ? "/livestream" : undefined}
+                          onAction={isLivestreamEnabled ? undefined : () => setActiveView("settings")}
+                        />
+                        <PlannerActionCard
+                          eyebrow="Controls"
+                          title="Site Toggles"
+                          description="Turn RSVPs, homepage sections, table lookup, gallery, and livestream on or off."
+                          actionLabel="Open Controls"
+                          tone="amber"
+                          onAction={() => setActiveView("settings")}
                         />
                       </div>
                     </StudioPanel>
@@ -5509,6 +5603,18 @@ export default function StudioProPage() {
                   />
 
                   <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                    <ToggleTile
+                      label="RSVPs & Invites"
+                      description="Control whether invite envelopes and RSVP forms are open to guests."
+                      enabled={isRsvpOpen}
+                      onToggle={() =>
+                        void updateSetting(
+                          "is_rsvp_open",
+                          !isRsvpOpen,
+                          `RSVPs and invites ${!isRsvpOpen ? "opened" : "closed"}.`,
+                        )
+                      }
+                    />
                     <ToggleTile
                       label="Homepage Carousel"
                       description="Show or hide the homepage photo carousel."

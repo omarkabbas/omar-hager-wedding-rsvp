@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
+import RsvpClosedMessage from "@/app/components/RsvpClosedMessage";
 import { supabase } from "@/lib/supabase";
 
 const RSVP_BY_DATE = process.env.NEXT_PUBLIC_RSVP_BY_DATE || "May 1, 2026";
@@ -11,10 +12,11 @@ const RSVP_SESSION_KEY = "active_rsvp_code";
 function InviteContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const inviteCode = searchParams.get("code");
+  const inviteCode = searchParams.get("code") || searchParams.get("inviteCode") || searchParams.get("invitecode");
 
   const [guestName, setGuestName] = useState("");
   const [isVirtualGuest, setIsVirtualGuest] = useState(false);
+  const [isRsvpOpen, setIsRsvpOpen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(0);
   const [showButton, setShowButton] = useState(false);
@@ -31,6 +33,14 @@ function InviteContent() {
 
   useEffect(() => {
     async function fetchGuest() {
+      const { data: rsvpSetting } = await supabase
+        .from("settings")
+        .select("value")
+        .eq("key", "is_rsvp_open")
+        .maybeSingle<{ value: string }>();
+      const rsvpIsOpen = rsvpSetting?.value !== "false";
+      setIsRsvpOpen(rsvpIsOpen);
+
       if (!inviteCode) {
         setLoading(false);
         return;
@@ -56,7 +66,7 @@ function InviteContent() {
         setIsVirtualGuest("virtual_guest" in guest ? Boolean(guest.virtual_guest) : false);
         window.sessionStorage.setItem(RSVP_SESSION_KEY, inviteCode.toUpperCase().trim());
 
-        if (guest.attending !== null) {
+        if (rsvpIsOpen && guest.attending !== null) {
           router.push(`/${inviteCode}`);
         }
       }
@@ -66,6 +76,21 @@ function InviteContent() {
 
     fetchGuest();
   }, [inviteCode, router]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("invite_rsvp_open_setting")
+      .on("postgres_changes", { event: "*", schema: "public", table: "settings", filter: "key=eq.is_rsvp_open" }, (payload) => {
+        if (!payload.new) return;
+        const settingValue = (payload.new as { value?: string }).value;
+        if (typeof settingValue === "string") setIsRsvpOpen(settingValue !== "false");
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     if (!showButton || !isAtBottom || hasAutoScrolledRef.current) return;
@@ -111,6 +136,15 @@ function InviteContent() {
             Return Home
           </button>
         </div>
+      </div>
+    );
+  }
+
+  if (!isRsvpOpen) {
+    return (
+      <div className="wedding-shell wedding-center px-4 py-10">
+        <div className="wedding-backdrop" />
+        <RsvpClosedMessage guestName={guestName} />
       </div>
     );
   }
@@ -411,7 +445,7 @@ function InviteContent() {
             </p>
           )}
           <button onClick={handleProceed} className="wedding-button-primary w-full">
-            {isVirtualGuest ? "Virtual RSVP" : "RSVP"}
+            {isVirtualGuest ? "Virtually RSVP" : "RSVP"}
           </button>
         </div>
       </div>
