@@ -20,6 +20,7 @@ type GuestResponse = {
 type SeatingAssignment = {
   id: number;
   name: string;
+  name_aliases?: string | null;
   invite_code?: string | null;
   table_number: number;
   guest_count?: number | null;
@@ -166,10 +167,12 @@ type TableHealth = "empty" | "open" | "full" | "over";
 type GuestFinderResult = {
   key: string;
   guestName: string;
+  aliases: string[];
   inviteCode: string;
   tableNumber: number | null;
   seatCount: number;
   status: "Seated" | "Waiting";
+  spotlightKey: string;
 };
 
 const FLOOR_LAYOUT_KEY = "studio_pro_seat_floor_layout_v1";
@@ -221,7 +224,17 @@ const ROOM_OBJECT_PRESETS: Record<RoomObjectKind, { label: string; width: number
 };
 
 const normalizeInviteCode = (value?: string | null) => (value || "").trim().toUpperCase();
+const normalizeSeatName = (value?: string | null) => (value || "").trim().toLowerCase();
+const parseNameAliases = (value?: string | null) =>
+  (value || "")
+    .split(",")
+    .map((alias) => alias.trim())
+    .filter(Boolean);
+const getSeatUnitGroupKey = (unit: SeatUnit) => (unit.assignmentId ? `assignment:${unit.assignmentId}` : unit.key);
 const getAssignmentSeatCount = (assignment: SeatingAssignment) => Math.max(1, assignment.guest_count || 1);
+const isSameSeatingIdentity = (left: SeatingAssignment, right: SeatingAssignment) =>
+  normalizeInviteCode(left.invite_code) === normalizeInviteCode(right.invite_code) &&
+  normalizeSeatName(left.name) === normalizeSeatName(right.name);
 const getGuestExpectedSeats = (guest: GuestResponse) =>
   guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : Math.max(1, guest.max_guests || 1);
 const getTableHealth = (usedSeats: number, capacity: number): TableHealth => {
@@ -443,7 +456,7 @@ export default function FloorPlanPage() {
   const [printZoom, setPrintZoom] = useState(0.72);
   const [layoutLocked, setLayoutLocked] = useState(false);
   const [spotlightSearch, setSpotlightSearch] = useState("");
-  const [spotlightInviteCode, setSpotlightInviteCode] = useState<string | null>(null);
+  const [spotlightTargetKey, setSpotlightTargetKey] = useState<string | null>(null);
   const [selectedTableNumber, setSelectedTableNumber] = useState<number | null>(null);
   const [showGuestLabels, setShowGuestLabels] = useState(true);
   const [tableDragState, setTableDragState] = useState<TableDragState | null>(null);
@@ -986,29 +999,29 @@ export default function FloorPlanPage() {
     };
   }, [danceFloorPosition.x, danceFloorPosition.y, floorHeight, floorWidth, floorZoom, resizeState, roomObjects, showLayoutUpdatedToast, stagePosition.x, stagePosition.y]);
 
-  const guestsByCode = useMemo(() => {
-    const map = new Map<string, GuestResponse>();
-    responses.forEach((guest) => {
-      const code = normalizeInviteCode(guest.invite_code);
-      if (code) map.set(code, guest);
+  const seatingDisplayNameByCode = useMemo(() => {
+    const map = new Map<string, string>();
+    seatingAssignments.forEach((assignment) => {
+      const inviteCode = normalizeInviteCode(assignment.invite_code);
+      const seatingName = assignment.name.trim();
+      if (inviteCode && seatingName && !map.has(inviteCode)) map.set(inviteCode, seatingName);
     });
     return map;
-  }, [responses]);
+  }, [seatingAssignments]);
 
   const assignedSeatUnits = useMemo(() => {
-    const counters = new Map<string, number>();
+    const counters = new Map<number, number>();
 
     return seatingAssignments.flatMap((assignment) => {
       const inviteCode = normalizeInviteCode(assignment.invite_code);
       if (!inviteCode) return [];
 
-      const linkedGuest = guestsByCode.get(inviteCode);
-      const householdName = linkedGuest?.guest_name || assignment.name;
+      const householdName = assignment.name.trim() || "Assigned guest";
       const seats = getAssignmentSeatCount(assignment);
 
       return Array.from({ length: seats }, (_, index) => {
-        const seatNumber = (counters.get(inviteCode) || 0) + 1;
-        counters.set(inviteCode, seatNumber);
+        const seatNumber = (counters.get(assignment.id) || 0) + 1;
+        counters.set(assignment.id, seatNumber);
 
         return {
           key: `assigned-${assignment.id}-${index}`,
@@ -1021,7 +1034,7 @@ export default function FloorPlanPage() {
         };
       });
     });
-  }, [guestsByCode, seatingAssignments]);
+  }, [seatingAssignments]);
 
   const assignedSeatsByCode = useMemo(() => {
     const map = new Map<string, number>();
@@ -1048,11 +1061,12 @@ export default function FloorPlanPage() {
 
         return Array.from({ length: remainingSeats }, (_, index) => {
           const seatNumber = assignedSeats + index + 1;
+          const householdName = seatingDisplayNameByCode.get(inviteCode) || guest.guest_name;
           return {
             key: `unseated-${guest.id}-${index}`,
             inviteCode,
-            householdName: guest.guest_name,
-            label: expectedSeats === 1 ? guest.guest_name : `${guest.guest_name} ${seatNumber}`,
+            householdName,
+            label: expectedSeats === 1 ? householdName : `${householdName} ${seatNumber}`,
             seatNumber,
             guestId: guest.id,
           };
@@ -1063,14 +1077,14 @@ export default function FloorPlanPage() {
         return [unit.householdName, unit.inviteCode, unit.label].some((value) => value.toLowerCase().includes(query));
       })
       .sort((left, right) => left.householdName.localeCompare(right.householdName) || left.seatNumber - right.seatNumber);
-  }, [assignedSeatsByCode, responses, search]);
+  }, [assignedSeatsByCode, responses, search, seatingDisplayNameByCode]);
 
   const tapSeatActionLabel = useMemo(() => {
     if (!tapSeatAction) return "";
 
     if (tapSeatAction.kind === "unseated") {
       const guest = responses.find((item) => item.id === tapSeatAction.guestId);
-      return guest?.guest_name || unseatedUnits.find((unit) => unit.guestId === tapSeatAction.guestId)?.householdName || "Selected guest";
+      return unseatedUnits.find((unit) => unit.guestId === tapSeatAction.guestId)?.householdName || guest?.guest_name || "Selected guest";
     }
 
     const assignment = seatingAssignments.find((item) => item.id === tapSeatAction.assignmentId);
@@ -1156,57 +1170,72 @@ export default function FloorPlanPage() {
     const query = spotlightSearch.trim().toLowerCase();
     if (!query) return [];
 
-    return responses
-      .flatMap<GuestFinderResult>((guest) => {
-        const inviteCode = normalizeInviteCode(guest.invite_code);
-        if (!inviteCode) return [];
+    const assignedResults = seatingAssignments.flatMap<GuestFinderResult>((assignment) => {
+      const inviteCode = normalizeInviteCode(assignment.invite_code);
+      if (!inviteCode) return [];
 
-        const matchesGuest = [guest.guest_name, inviteCode].some((value) => value.toLowerCase().includes(query));
-        if (!matchesGuest) return [];
+      const aliases = parseNameAliases(assignment.name_aliases);
+      const guestName = assignment.name.trim() || "Assigned guest";
+      const searchableValues = [
+        guestName,
+        inviteCode,
+        String(assignment.table_number),
+        `table ${assignment.table_number}`,
+        ...aliases,
+      ];
+      const matchesAssignment = searchableValues.some((value) => value.toLowerCase().includes(query));
+      if (!matchesAssignment) return [];
 
-        const assignedUnits = assignedSeatUnits.filter((unit) => unit.inviteCode === inviteCode);
-        const tableNumbersForGuest = Array.from(
-          new Set(assignedUnits.map((unit) => unit.tableNumber).filter((tableNumber): tableNumber is number => typeof tableNumber === "number")),
-        ).sort((left, right) => left - right);
+      return [
+        {
+          key: `assignment:${assignment.id}`,
+          guestName,
+          aliases,
+          inviteCode,
+          tableNumber: assignment.table_number,
+          seatCount: Math.max(1, assignment.guest_count || 1),
+          status: "Seated" as const,
+          spotlightKey: `assignment:${assignment.id}`,
+        },
+      ];
+    });
 
-        if (tableNumbersForGuest.length > 0) {
-          return tableNumbersForGuest.map((tableNumber) => ({
-            key: `${guest.id}-${tableNumber}`,
-            guestName: guest.guest_name,
-            inviteCode,
-            tableNumber,
-            seatCount: assignedUnits.filter((unit) => unit.tableNumber === tableNumber).length,
-            status: "Seated" as const,
-          }));
-        }
+    const waitingResults = responses.flatMap<GuestFinderResult>((guest) => {
+      const inviteCode = normalizeInviteCode(guest.invite_code);
+      if (!inviteCode) return [];
 
-        const expectedSeats = guest.attending === true && guest.virtual_guest !== true ? getGuestExpectedSeats(guest) : 0;
-        if (expectedSeats > 0) {
-          return [
-            {
-              key: `${guest.id}-waiting`,
-              guestName: guest.guest_name,
-              inviteCode,
-              tableNumber: null,
-              seatCount: expectedSeats,
-              status: "Waiting" as const,
-            },
-          ];
-        }
+      const seatingDisplayName = seatingDisplayNameByCode.get(inviteCode);
+      const displayName = seatingDisplayName || guest.guest_name;
+      const searchValues = seatingDisplayName ? [seatingDisplayName, inviteCode] : [guest.guest_name, inviteCode];
+      const matchesGuest = searchValues.some((value) => value.toLowerCase().includes(query));
+      if (!matchesGuest) return [];
 
-        return [
-          {
-            key: `${guest.id}-not-seated`,
-            guestName: guest.guest_name,
-            inviteCode,
-            tableNumber: null,
-            seatCount: 0,
-            status: "Waiting" as const,
-          },
-        ];
+      const expectedSeats = guest.attending === true && guest.virtual_guest !== true ? getGuestExpectedSeats(guest) : 0;
+      const assignedSeats = assignedSeatsByCode.get(inviteCode) || 0;
+      const waitingSeats = Math.max(0, expectedSeats - assignedSeats);
+      if (waitingSeats === 0) return [];
+
+      return [
+        {
+          key: `${guest.id}-waiting`,
+          guestName: displayName,
+          aliases: [],
+          inviteCode,
+          tableNumber: null,
+          seatCount: waitingSeats,
+          status: "Waiting" as const,
+          spotlightKey: `waiting:${inviteCode}`,
+        },
+      ];
+    });
+
+    return [...assignedResults, ...waitingResults]
+      .sort((left, right) => {
+        if (left.status !== right.status) return left.status === "Seated" ? -1 : 1;
+        return left.guestName.localeCompare(right.guestName) || (left.tableNumber || 9999) - (right.tableNumber || 9999);
       })
       .slice(0, 12);
-  }, [assignedSeatUnits, responses, spotlightSearch]);
+  }, [assignedSeatsByCode, responses, seatingAssignments, seatingDisplayNameByCode, spotlightSearch]);
 
   const allWaitingGuests = useMemo(
     () =>
@@ -1219,19 +1248,19 @@ export default function FloorPlanPage() {
           const assignedSeats = assignedSeatsByCode.get(inviteCode) || 0;
           const waitingSeats = Math.max(0, expectedSeats - assignedSeats);
           if (waitingSeats === 0) return [];
-          return [{ guestName: guest.guest_name, inviteCode, waitingSeats }];
+          return [{ guestName: seatingDisplayNameByCode.get(inviteCode) || guest.guest_name, inviteCode, waitingSeats }];
         })
         .sort((left, right) => left.guestName.localeCompare(right.guestName)),
-    [assignedSeatsByCode, responses],
+    [assignedSeatsByCode, responses, seatingDisplayNameByCode],
   );
 
   const focusTableOnFloor = useCallback(
-    (tableNumber: number, inviteCode?: string | null) => {
+    (tableNumber: number, spotlightKey?: string | null) => {
       const table = tableModels.find((item) => item.tableNumber === tableNumber);
       if (!table) return;
 
       setSelectedTableNumber(tableNumber);
-      setSpotlightInviteCode(inviteCode ? normalizeInviteCode(inviteCode) : null);
+      setSpotlightTargetKey(spotlightKey || null);
 
       window.requestAnimationFrame(() => {
         floorScrollRef.current?.scrollTo({
@@ -1245,7 +1274,7 @@ export default function FloorPlanPage() {
   );
 
   const focusGuestResult = (result: GuestFinderResult) => {
-    setSpotlightInviteCode(result.inviteCode);
+    setSpotlightTargetKey(result.spotlightKey);
 
     if (result.tableNumber === null) {
       setSearch(result.inviteCode);
@@ -1253,7 +1282,7 @@ export default function FloorPlanPage() {
       return;
     }
 
-    focusTableOnFloor(result.tableNumber, result.inviteCode);
+    focusTableOnFloor(result.tableNumber, result.spotlightKey);
   };
 
   const buildFloorPlanLayout = useCallback(
@@ -1835,13 +1864,14 @@ export default function FloorPlanPage() {
       .map((table) => {
         const groupedGuests = Array.from(
           table.units.reduce((map, unit) => {
-            const existing = map.get(unit.inviteCode);
+            const groupKey = getSeatUnitGroupKey(unit);
+            const existing = map.get(groupKey);
             if (existing) {
               existing.count += 1;
               return map;
             }
 
-            map.set(unit.inviteCode, {
+            map.set(groupKey, {
               householdName: unit.householdName,
               inviteCode: unit.inviteCode,
               count: 1,
@@ -1908,6 +1938,7 @@ export default function FloorPlanPage() {
 
   const buildTableGuestNameListHtml = useCallback(() => {
     const tables = [...tableModels].sort((left, right) => left.tableNumber - right.tableNumber);
+    const assignmentById = new Map(seatingAssignments.map((assignment) => [assignment.id, assignment]));
 
     if (tables.length === 0) {
       return `<section class="empty-state">
@@ -1920,18 +1951,40 @@ export default function FloorPlanPage() {
       .map((table) => {
         const guests = Array.from(
           table.units.reduce((map, unit) => {
-            if (!map.has(unit.inviteCode)) {
-              map.set(unit.inviteCode, unit.householdName);
+            const groupKey = getSeatUnitGroupKey(unit);
+            if (!map.has(groupKey)) {
+              const assignment = unit.assignmentId ? assignmentById.get(unit.assignmentId) : null;
+              map.set(groupKey, {
+                householdName: unit.householdName,
+                aliases: new Set(parseNameAliases(assignment?.name_aliases)),
+              });
+            } else {
+              const assignment = unit.assignmentId ? assignmentById.get(unit.assignmentId) : null;
+              parseNameAliases(assignment?.name_aliases).forEach((alias) => map.get(groupKey)?.aliases.add(alias));
             }
             return map;
-          }, new Map<string, string>()),
+          }, new Map<string, { householdName: string; aliases: Set<string> }>()),
         )
-          .map(([, householdName]) => householdName)
-          .sort((left, right) => left.localeCompare(right));
+          .map(([, guest]) => ({
+            householdName: guest.householdName,
+            aliases: Array.from(guest.aliases).sort((left, right) => left.localeCompare(right)),
+          }))
+          .sort((left, right) => left.householdName.localeCompare(right.householdName));
 
         const guestRows =
           guests.length > 0
-            ? guests.map((guestName) => `<li>${escapeHtml(guestName)}</li>`).join("")
+            ? guests
+                .map(
+                  (guest) => `<li>
+                    <strong>${escapeHtml(guest.householdName)}</strong>
+                    ${
+                      guest.aliases.length > 0
+                        ? `<span class="alias-line">Aliases: ${guest.aliases.map((alias) => escapeHtml(alias)).join(", ")}</span>`
+                        : ""
+                    }
+                  </li>`,
+                )
+                .join("")
             : `<li class="empty-row">No guests assigned</li>`;
 
         return `<section class="table-name-card">
@@ -1940,7 +1993,7 @@ export default function FloorPlanPage() {
         </section>`;
       })
       .join("");
-  }, [tableModels]);
+  }, [seatingAssignments, tableModels]);
 
   const openPrintableFloorPlan = useCallback(
     ({ title, subtitle, includeTableList }: { title: string; subtitle: string; includeTableList: boolean }) => {
@@ -2183,7 +2236,7 @@ export default function FloorPlanPage() {
 
     const tableListHtml = buildTableGuestNameListHtml();
     const seatedGuestTotal = tableModels.reduce((total, table) => {
-      const uniqueGuests = new Set(table.units.map((unit) => unit.inviteCode));
+      const uniqueGuests = new Set(table.units.map((unit) => getSeatUnitGroupKey(unit)));
       return total + uniqueGuests.size;
     }, 0);
 
@@ -2268,6 +2321,17 @@ export default function FloorPlanPage() {
         font-size: 14px;
         line-height: 1.25;
         padding: 5px 0;
+      }
+      li strong {
+        display: block;
+        font-weight: 500;
+      }
+      .alias-line {
+        display: block;
+        margin-top: 2px;
+        color: #78716c;
+        font-family: Arial, sans-serif;
+        font-size: 10px;
       }
       li:last-child { border-bottom: 0; }
       .empty-row {
@@ -2505,7 +2569,7 @@ export default function FloorPlanPage() {
       (assignment) =>
         assignment.id !== sourceAssignment.id &&
         assignment.table_number === targetTable &&
-        normalizeInviteCode(assignment.invite_code) === inviteCode,
+        isSameSeatingIdentity(assignment, sourceAssignment),
     );
 
     if (targetAssignment) {
@@ -2560,18 +2624,22 @@ export default function FloorPlanPage() {
   const seatUnseatedGuest = async (guestId: string, inviteCode: string, targetTable: number) => {
     const guest = responses.find((item) => item.id === guestId);
     if (!guest) return;
+    const displayName = seatingDisplayNameByCode.get(inviteCode) || guest.guest_name;
 
     const busyKey = `guest:${guestId}`;
     setBusy(busyKey, true);
 
     const targetAssignment = seatingAssignments.find(
-      (assignment) => assignment.table_number === targetTable && normalizeInviteCode(assignment.invite_code) === inviteCode,
+      (assignment) =>
+        assignment.table_number === targetTable &&
+        normalizeInviteCode(assignment.invite_code) === inviteCode &&
+        normalizeSeatName(assignment.name) === normalizeSeatName(displayName),
     );
 
     const result = targetAssignment
       ? await incrementAssignment(targetAssignment, 1)
       : await createSingleSeatAssignment({
-          guestName: guest.guest_name,
+          guestName: displayName,
           inviteCode,
           tableNumber: targetTable,
         });
@@ -2583,7 +2651,7 @@ export default function FloorPlanPage() {
       return;
     }
 
-    showToast(`${guest.guest_name} seated at table ${targetTable}.`, "success");
+    showToast(`${displayName} seated at table ${targetTable}.`, "success");
     void fetchData();
   };
 
@@ -2716,6 +2784,9 @@ export default function FloorPlanPage() {
             <Link href="/studio-pro" className="studio-compact-button">
               Studio Pro
             </Link>
+            <Link href="/studio-pro/coordinator" className="studio-compact-button">
+              Coordinator List
+            </Link>
             <button
               type="button"
               onClick={() => {
@@ -2797,12 +2868,12 @@ export default function FloorPlanPage() {
                 value={spotlightSearch}
                 onChange={(event) => setSpotlightSearch(event.target.value)}
                 className="studio-input-compact"
-                placeholder="Find a guest and jump to their seat"
+                placeholder="Search seating name, alias, table, or invite code"
               />
               <div className="mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
                 {spotlightSearch.trim().length === 0 ? (
                   <p className="text-[11px] leading-relaxed text-sky-700">
-                    Search a name or invite code. Selecting a seated guest will pan the floor plan to their table.
+                    Search a seating-row name, alias, table, or invite code. Selecting a seated row will pan the floor plan to that table.
                   </p>
                 ) : guestFinderResults.length === 0 ? (
                   <p className="text-[11px] leading-relaxed text-sky-700">No matching guests found.</p>
@@ -2818,6 +2889,9 @@ export default function FloorPlanPage() {
                         <div className="min-w-0">
                           <p className="truncate font-serif text-base leading-tight text-stone-900">{result.guestName}</p>
                           <p className="mt-1 truncate text-[9px] font-bold uppercase tracking-[0.12em] text-sky-600">{result.inviteCode}</p>
+                          {result.aliases.length > 0 && (
+                            <p className="mt-1 truncate text-[10px] text-stone-500">Aliases: {result.aliases.join(", ")}</p>
+                          )}
                         </div>
                         <span className="shrink-0 rounded-full bg-sky-50 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.08em] text-sky-700">
                           {result.tableNumber === null ? "Waiting" : `Table ${result.tableNumber}`}
@@ -2827,11 +2901,11 @@ export default function FloorPlanPage() {
                   ))
                 )}
               </div>
-              {spotlightInviteCode ? (
+              {spotlightTargetKey ? (
                 <button
                   type="button"
                   onClick={() => {
-                    setSpotlightInviteCode(null);
+                    setSpotlightTargetKey(null);
                     setSpotlightSearch("");
                   }}
                   className="studio-mini-button mt-3 w-full"
@@ -3243,7 +3317,7 @@ export default function FloorPlanPage() {
                       onSelect={() => {
                         if (!unit.guestId || busyKeys.includes(`guest:${unit.guestId}`)) return;
                         setTapSeatAction({ kind: "unseated", guestId: unit.guestId, inviteCode: unit.inviteCode });
-                        setSpotlightInviteCode(unit.inviteCode);
+                        setSpotlightTargetKey(`waiting:${unit.inviteCode}`);
                         showToast(`${unit.householdName} selected. Tap a table to seat them.`, "info");
                       }}
                       onDragStart={() => {
@@ -3437,7 +3511,7 @@ export default function FloorPlanPage() {
                 selected={selectedTableNumber === table.tableNumber}
                 tapTargetActive={Boolean(tapSeatAction)}
                 layoutLocked={layoutLocked}
-                spotlightInviteCode={spotlightInviteCode}
+                spotlightTargetKey={spotlightTargetKey}
                 busyKeys={busyKeys}
                 showGuestLabels={showGuestLabels}
                 onDrop={() => void handleDropOnTable(table.tableNumber)}
@@ -3455,7 +3529,7 @@ export default function FloorPlanPage() {
                 onSelectUnit={(unit) => {
                   if (!unit.assignmentId || busyKeys.includes(`assignment:${unit.assignmentId}`)) return;
                   setTapSeatAction({ kind: "assigned", assignmentId: unit.assignmentId, inviteCode: unit.inviteCode });
-                  setSpotlightInviteCode(unit.inviteCode);
+                  setSpotlightTargetKey(getSeatUnitGroupKey(unit));
                   showToast(`${unit.householdName} selected. Tap another table to move this seat.`, "info");
                 }}
                 onUnseat={(unit) => {
@@ -3471,13 +3545,13 @@ export default function FloorPlanPage() {
         <TableDetailDrawer
           tableNumber={selectedTable.tableNumber}
           units={selectedTable.units}
-                capacity={selectedTable.capacity}
-                shape={selectedTable.shape}
-                health={selectedTable.health}
-                openSeats={selectedTable.openSeats}
-                spotlightInviteCode={spotlightInviteCode}
+          capacity={selectedTable.capacity}
+          shape={selectedTable.shape}
+          health={selectedTable.health}
+          openSeats={selectedTable.openSeats}
+          spotlightTargetKey={spotlightTargetKey}
           onClose={() => setSelectedTableNumber(null)}
-          onHighlightGuest={(inviteCode) => setSpotlightInviteCode(inviteCode)}
+          onHighlightGuest={(spotlightKey) => setSpotlightTargetKey(spotlightKey)}
           onPrintPacket={openPrintPacket}
           onTableGuestListPrint={openTableGuestListPrint}
           onVendorView={openVendorView}
@@ -3545,7 +3619,7 @@ function TableDetailDrawer({
   shape,
   health,
   openSeats,
-  spotlightInviteCode,
+  spotlightTargetKey,
   onClose,
   onHighlightGuest,
   onPrintPacket,
@@ -3558,28 +3632,30 @@ function TableDetailDrawer({
   shape: GuestTableShape;
   health: TableHealth;
   openSeats: number;
-  spotlightInviteCode: string | null;
+  spotlightTargetKey: string | null;
   onClose: () => void;
-  onHighlightGuest: (inviteCode: string) => void;
+  onHighlightGuest: (spotlightKey: string) => void;
   onPrintPacket: () => void;
   onTableGuestListPrint: () => void;
   onVendorView: () => void;
 }) {
   const groupedGuests = Array.from(
     units.reduce((map, unit) => {
-      const existing = map.get(unit.inviteCode);
+      const groupKey = getSeatUnitGroupKey(unit);
+      const existing = map.get(groupKey);
       if (existing) {
         existing.count += 1;
         return map;
       }
 
-      map.set(unit.inviteCode, {
+      map.set(groupKey, {
+        key: groupKey,
         householdName: unit.householdName,
         inviteCode: unit.inviteCode,
         count: 1,
       });
       return map;
-    }, new Map<string, { householdName: string; inviteCode: string; count: number }>()),
+    }, new Map<string, { key: string; householdName: string; inviteCode: string; count: number }>()),
   ).map(([, guest]) => guest);
   const status = getTableHealthLabel(health, openSeats);
   const healthStyle = TABLE_HEALTH_STYLES[health];
@@ -3631,12 +3707,12 @@ function TableDetailDrawer({
               <EmptyState title="No guests here yet" detail="Drag guests into this table from the waiting list." />
             ) : (
               groupedGuests.map((guest) => {
-                const highlighted = spotlightInviteCode === guest.inviteCode;
+                const highlighted = spotlightTargetKey === guest.key;
                 return (
                   <button
-                    key={guest.inviteCode}
+                    key={guest.key}
                     type="button"
-                    onClick={() => onHighlightGuest(guest.inviteCode)}
+                    onClick={() => onHighlightGuest(guest.key)}
                     className={`w-full rounded-[14px] border px-3 py-3 text-left transition ${
                       highlighted ? "border-sky-300 bg-sky-50 ring-2 ring-sky-100" : "border-stone-100 bg-stone-50 hover:border-stone-200"
                     }`}
@@ -3817,7 +3893,7 @@ function VisualTable({
   selected,
   tapTargetActive,
   layoutLocked,
-  spotlightInviteCode,
+  spotlightTargetKey,
   busyKeys,
   showGuestLabels,
   onDrop,
@@ -3840,7 +3916,7 @@ function VisualTable({
   selected: boolean;
   tapTargetActive: boolean;
   layoutLocked: boolean;
-  spotlightInviteCode: string | null;
+  spotlightTargetKey: string | null;
   busyKeys: string[];
   showGuestLabels: boolean;
   onDrop: () => void;
@@ -3919,7 +3995,7 @@ function VisualTable({
         const seatPosition = getTableSeatPosition(index, capacity, shape);
         const busy = unit?.assignmentId ? busyKeys.includes(`assignment:${unit.assignmentId}`) : false;
         const seatLabel = unit ? getSeatDisplayParts(unit, showGuestLabels) : null;
-        const highlighted = Boolean(unit && spotlightInviteCode === unit.inviteCode);
+        const highlighted = Boolean(unit && spotlightTargetKey === getSeatUnitGroupKey(unit));
 
         return (
           <div

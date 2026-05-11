@@ -191,6 +191,12 @@ const parseNameAliases = (value?: string | null) =>
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+const formatSeatingGroupName = (assignments: SeatingAssignment[]) => {
+  const names = Array.from(new Set(assignments.map((assignment) => assignment.name.trim()).filter(Boolean)));
+  if (names.length === 0) return "Unnamed seating assignment";
+  if (names.length <= 2) return names.join(" + ");
+  return `${names.slice(0, 2).join(" + ")} + ${names.length - 2} more`;
+};
 
 const buildGuestInviteMessage = (guest: GuestResponse) =>
   `Dear ${guest.guest_name}, with great joy, Omar & Hager invite you to celebrate their wedding. Please RSVP here: ${getGuestInviteUrl(guest)}`;
@@ -2133,22 +2139,14 @@ export default function StudioProPage() {
   const filteredSeatingAssignments = useMemo(() => {
     const query = deferredSeatingSearch.trim().toLowerCase();
     const byQuery = query
-      ? seatingAssignments.filter(
-          (assignment) => {
-            const linkedGuestName =
-              findLinkedGuestForSeating({
-                inviteCode: assignment.invite_code,
-              })?.guest_name.toLowerCase() || "";
-
-            return (
-              assignment.name.toLowerCase().includes(query) ||
-              linkedGuestName.includes(query) ||
-              parseNameAliases(assignment.name_aliases).some((alias) => alias.toLowerCase().includes(query)) ||
-              normalizeInviteCode(assignment.invite_code).toLowerCase().includes(query) ||
-              String(assignment.table_number).includes(query)
-            );
-          },
-        )
+      ? seatingAssignments.filter((assignment) => {
+          return (
+            assignment.name.toLowerCase().includes(query) ||
+            parseNameAliases(assignment.name_aliases).some((alias) => alias.toLowerCase().includes(query)) ||
+            normalizeInviteCode(assignment.invite_code).toLowerCase().includes(query) ||
+            String(assignment.table_number).includes(query)
+          );
+        })
       : seatingAssignments;
 
     const byTable =
@@ -2161,7 +2159,7 @@ export default function StudioProPage() {
         ? left.name.localeCompare(right.name)
         : left.table_number - right.table_number || left.name.localeCompare(right.name),
     );
-  }, [deferredSeatingSearch, findLinkedGuestForSeating, seatingAssignments, seatingSort, seatingTableFilter]);
+  }, [deferredSeatingSearch, seatingAssignments, seatingSort, seatingTableFilter]);
 
   const filteredSeatingGuestCount = useMemo(
     () => filteredSeatingAssignments.reduce((sum, assignment) => sum + Math.max(1, assignment.guest_count || 1), 0),
@@ -2192,6 +2190,7 @@ export default function StudioProPage() {
         inviteCode: string | null;
         linkedGuest: GuestResponse | null;
         displayName: string;
+        linkedInvitationName: string | null;
         assignments: SeatingAssignment[];
         tableNumbers: number[];
         assignedSeats: number;
@@ -2215,7 +2214,8 @@ export default function StudioProPage() {
         key,
         inviteCode,
         linkedGuest,
-        displayName: linkedGuest?.guest_name || assignment.name,
+        displayName: formatSeatingGroupName(nextAssignments),
+        linkedInvitationName: linkedGuest?.guest_name || null,
         assignments: nextAssignments.sort((left, right) => left.table_number - right.table_number || left.name.localeCompare(right.name)),
         tableNumbers: nextTableNumbers,
         assignedSeats,
@@ -2957,6 +2957,9 @@ export default function StudioProPage() {
               <Link href="/studio-pro/floor-plan" className="studio-compact-button">
                 Floor Plan
               </Link>
+              <Link href="/studio-pro/coordinator" className="studio-compact-button">
+                Coordinator List
+              </Link>
               <Link href="/" className="studio-compact-button">
                 Open Website
               </Link>
@@ -3040,7 +3043,7 @@ export default function StudioProPage() {
                         title="What Needs Attention Now"
                         description="Start here when you open Studio Pro. Each card takes you straight to the workspace that fixes the item."
                       />
-                      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
                         <PlannerActionCard
                           eyebrow="Follow Up"
                           title={`${followUpGuests.length} awaiting reply`}
@@ -3080,6 +3083,14 @@ export default function StudioProPage() {
                           actionLabel="Open Floor Plan"
                           tone="stone"
                           href="/studio-pro/floor-plan"
+                        />
+                        <PlannerActionCard
+                          eyebrow="Day Of"
+                          title="Coordinator guest list"
+                          description="Guest names, aliases, and table numbers for the wedding day."
+                          actionLabel="Open List"
+                          tone="sky"
+                          href="/studio-pro/coordinator"
                         />
                       </div>
                     </StudioPanel>
@@ -5032,6 +5043,11 @@ export default function StudioProPage() {
                         const acceptedSeats =
                           linkedGuest?.attending === true ? Math.max(1, linkedGuest.confirmed_guests || 1) : null;
                         const remainingSeats = acceptedSeats === null ? null : Math.max(0, acceptedSeats - group.assignedSeats);
+                        const linkedInvitationNote =
+                          group.linkedInvitationName &&
+                          normalizeNameKey(group.linkedInvitationName) !== normalizeNameKey(group.displayName)
+                            ? group.linkedInvitationName
+                            : null;
                         const tableLabel =
                           group.tableNumbers.length === 0
                             ? "No table"
@@ -5059,6 +5075,11 @@ export default function StudioProPage() {
                                       ? ` · ${acceptedSeats} guest${acceptedSeats === 1 ? "" : "s"} attending · ${remainingSeats === 0 ? "fully seated" : `${remainingSeats} seat${remainingSeats === 1 ? "" : "s"} still needed`}`
                                       : ""}
                                   </p>
+                                  {linkedInvitationNote && (
+                                    <p className="mt-1 text-xs font-medium text-stone-400">
+                                      Linked RSVP: {linkedInvitationNote}
+                                    </p>
+                                  )}
                                 </div>
 
                                 <div className="flex shrink-0 flex-wrap gap-2">
@@ -5941,25 +5962,29 @@ function StatTile({
   tone: "sky" | "emerald" | "stone" | "rose" | "amber";
 }) {
   const toneStyles = {
-    sky: "text-sky-700",
-    emerald: "text-emerald-700",
-    stone: "text-stone-900",
-    rose: "text-rose-700",
-    amber: "text-amber-700",
+    sky: "border-sky-100 bg-sky-50 text-sky-800",
+    emerald: "border-emerald-100 bg-emerald-50 text-emerald-800",
+    stone: "border-stone-200 bg-stone-50 text-stone-800",
+    rose: "border-rose-100 bg-rose-50 text-rose-800",
+    amber: "border-amber-100 bg-amber-50 text-amber-800",
   }[tone];
 
   return (
-    <div className="min-w-0 rounded-[14px] border border-stone-100 bg-stone-50 px-3 py-2.5">
-      <p title={label} className="text-[8px] font-bold uppercase leading-tight tracking-[0.08em] text-stone-400">{label}</p>
-      <p className={`mt-1 font-serif text-[1.65rem] leading-none ${toneStyles}`}>{value}</p>
+    <div className={`min-w-0 overflow-hidden rounded-[18px] border px-4 py-4 text-left shadow-sm ${toneStyles}`}>
+      <p title={label} className="text-[9px] font-bold uppercase leading-snug tracking-[0.16em] opacity-65">
+        {label}
+      </p>
+      <p className="mt-2 font-serif text-4xl leading-none md:text-[2.65rem]">{value}</p>
     </div>
   );
 }
 
 function MetricGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-[22px] border border-stone-100 bg-stone-50/70 p-3">
-      <p className="wedding-kicker mb-3">{title}</p>
+    <div className="rounded-[22px] border border-stone-100 bg-stone-50/70 p-4 shadow-inner">
+      <div className="mb-4 border-b border-stone-200/80 pb-3">
+        <p className="text-[12px] font-extrabold uppercase tracking-[0.18em] text-stone-500">{title}</p>
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">{children}</div>
     </div>
   );
