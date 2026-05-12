@@ -153,6 +153,8 @@ export default function AdminDashboard() {
   const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState(false);
   const [isGalleryEnabled, setIsGalleryEnabled] = useState(false);
   const [isGalleryFeedEnabled, setIsGalleryFeedEnabled] = useState(true);
+  const [isLivestreamEnabled, setIsLivestreamEnabled] = useState(false);
+  const [isRsvpOpen, setIsRsvpOpen] = useState(true);
   const [isHomeVenueEnabled, setIsHomeVenueEnabled] = useState(false);
   const [isHomeCarouselEnabled, setIsHomeCarouselEnabled] = useState(true);
   const [isHomeDressCodeEnabled, setIsHomeDressCodeEnabled] = useState(false);
@@ -244,6 +246,8 @@ export default function AdminDashboard() {
         "is_seating_chart_enabled",
         "is_gallery_enabled",
         "is_gallery_feed_enabled",
+        "is_livestream_enabled",
+        "is_rsvp_open",
         "is_home_venue_enabled",
         "is_home_carousel_enabled",
         "is_home_dress_code_enabled",
@@ -259,6 +263,8 @@ export default function AdminDashboard() {
     const seatingSetting = data.find((setting) => setting.key === "is_seating_chart_enabled");
     const gallerySetting = data.find((setting) => setting.key === "is_gallery_enabled");
     const galleryFeedSetting = data.find((setting) => setting.key === "is_gallery_feed_enabled");
+    const livestreamSetting = data.find((setting) => setting.key === "is_livestream_enabled");
+    const rsvpOpenSetting = data.find((setting) => setting.key === "is_rsvp_open");
     const homeVenueSetting = data.find((setting) => setting.key === "is_home_venue_enabled");
     const homeCarouselSetting = data.find((setting) => setting.key === "is_home_carousel_enabled");
     const homeDressCodeSetting = data.find((setting) => setting.key === "is_home_dress_code_enabled");
@@ -267,6 +273,8 @@ export default function AdminDashboard() {
       setIsSeatingChartEnabled(seatingSetting?.value === "true");
       setIsGalleryEnabled(gallerySetting?.value === "true");
       setIsGalleryFeedEnabled(galleryFeedSetting ? galleryFeedSetting.value === "true" : true);
+      setIsLivestreamEnabled(livestreamSetting?.value === "true");
+      setIsRsvpOpen(rsvpOpenSetting ? rsvpOpenSetting.value !== "false" : true);
       setIsHomeVenueEnabled(homeVenueSetting?.value === "true");
       setIsHomeCarouselEnabled(homeCarouselSetting ? homeCarouselSetting.value === "true" : true);
       setIsHomeDressCodeEnabled(homeDressCodeSetting?.value === "true");
@@ -305,6 +313,7 @@ export default function AdminDashboard() {
       .channel("admin_live")
       .on("postgres_changes", { event: "*", table: "rsvp_list", schema: "public" }, fetchData)
       .on("postgres_changes", { event: "*", table: "seating", schema: "public" }, fetchSeatingAssignments)
+      .on("postgres_changes", { event: "*", table: "settings", schema: "public" }, fetchSettings)
       .subscribe();
 
     return () => {
@@ -415,6 +424,33 @@ export default function AdminDashboard() {
     showToast(`Find Your Table ${nextValue ? "enabled" : "disabled"}.`, "success");
   };
 
+  const toggleRsvpOpen = async () => {
+    const nextValue = !isRsvpOpen;
+    const { data: updatedSetting, error: updateError } = await supabase
+      .from("settings")
+      .update({ value: nextValue.toString() })
+      .eq("key", "is_rsvp_open")
+      .select("key")
+      .maybeSingle();
+
+    if (updateError) {
+      showToast(updateError.message, "error");
+      return;
+    }
+
+    if (!updatedSetting) {
+      const { error: insertError } = await supabase.from("settings").insert({ key: "is_rsvp_open", value: nextValue.toString() });
+
+      if (insertError) {
+        showToast(insertError.message, "error");
+        return;
+      }
+    }
+
+    setIsRsvpOpen(nextValue);
+    showToast(`RSVPs and invites ${nextValue ? "opened" : "closed"}.`, "success");
+  };
+
   const toggleGallery = async () => {
     const nextValue = !isGalleryEnabled;
     const { error: updateError } = await supabase
@@ -445,6 +481,22 @@ export default function AdminDashboard() {
 
     setIsGalleryFeedEnabled(nextValue);
     showToast(`Shared photos section ${nextValue ? "enabled" : "hidden"}.`, "success");
+  };
+
+  const toggleLivestream = async () => {
+    const nextValue = !isLivestreamEnabled;
+    const { error: updateError } = await supabase
+      .from("settings")
+      .update({ value: nextValue.toString() })
+      .eq("key", "is_livestream_enabled");
+
+    if (updateError) {
+      showToast(updateError.message, "error");
+      return;
+    }
+
+    setIsLivestreamEnabled(nextValue);
+    showToast(`Livestream page ${nextValue ? "enabled" : "disabled"}.`, "success");
   };
 
   const toggleHomeVenue = async () => {
@@ -994,6 +1046,12 @@ export default function AdminDashboard() {
 
             <div className="space-y-3">
               <ToggleRow
+                label="RSVPs & Invites"
+                description="Control whether invite envelopes and RSVP forms are open to guests."
+                enabled={isRsvpOpen}
+                onToggle={toggleRsvpOpen}
+              />
+              <ToggleRow
                 label="Homepage Carousel"
                 description="Show or hide the photo carousel on the home page."
                 enabled={isHomeCarouselEnabled}
@@ -1028,6 +1086,12 @@ export default function AdminDashboard() {
                 description="Show or hide the shared photos section under uploads."
                 enabled={isGalleryFeedEnabled}
                 onToggle={toggleGalleryFeed}
+              />
+              <ToggleRow
+                label="Livestream Page"
+                description="Show or hide the livestream button and livestream page access."
+                enabled={isLivestreamEnabled}
+                onToggle={toggleLivestream}
               />
             </div>
           </section>

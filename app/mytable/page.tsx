@@ -6,6 +6,18 @@ import Navigation from "@/app/components/Navigation";
 import { supabase } from "@/lib/supabase";
 
 type SeatingSearchEntry = { name: string; table_number: number; name_aliases?: string | null };
+type SeatingSuggestion = {
+  displayName: string;
+  secondaryName?: string;
+  tableNumber: number;
+  searchValue: string;
+};
+type SeatingSearchResult = {
+  displayName: string;
+  invitationName: string;
+  table_number: number;
+  matchedAlias?: string;
+};
 
 const normalizeLookupName = (value: string) =>
   value
@@ -78,16 +90,82 @@ const getEntrySuggestionScore = (query: string, entry: SeatingSearchEntry) => {
   return Math.max(primaryScore, aliasScore);
 };
 
+const getBestMatchingAlias = (query: string, entry: SeatingSearchEntry) => {
+  const normalizedQuery = normalizeLookupName(query);
+  if (!normalizedQuery) return null;
+
+  return (
+    parseNameAliases(entry.name_aliases)
+      .map((alias) => ({ alias, score: getSuggestionScore(query, alias) }))
+      .filter(({ score }) => score > 0)
+      .sort((left, right) => right.score - left.score || left.alias.localeCompare(right.alias))[0]?.alias || null
+  );
+};
+
+const getEntryDisplayMatch = (
+  query: string,
+  entry: SeatingSearchEntry,
+): { displayName: string; secondaryName?: string; matchedAlias?: string } => {
+  const alias = getBestMatchingAlias(query, entry);
+  if (!alias) return { displayName: entry.name };
+
+  const normalizedQuery = normalizeLookupName(query);
+  const normalizedAlias = normalizeLookupName(alias);
+  const primaryScore = getSuggestionScore(query, entry.name);
+  const aliasStartsWithQuery = normalizedAlias.startsWith(normalizedQuery);
+  const exactAliasMatch = normalizedAlias === normalizedQuery;
+  const shouldLeadWithAlias = exactAliasMatch || aliasStartsWithQuery || primaryScore === 0;
+
+  if (!shouldLeadWithAlias) return { displayName: entry.name };
+
+  return {
+    displayName: alias,
+    secondaryName: normalizeLookupName(alias) === normalizeLookupName(entry.name) ? undefined : entry.name,
+    matchedAlias: alias,
+  };
+};
+
+const buildSuggestions = (query: string, entries: SeatingSearchEntry[]) => {
+  const seen = new Set<string>();
+
+  return entries
+    .map((entry) => {
+      const score = getEntrySuggestionScore(query, entry);
+      const display = getEntryDisplayMatch(query, entry);
+
+      return { entry, score, ...display };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => right.score - left.score || left.displayName.localeCompare(right.displayName))
+    .filter((suggestion) => {
+      const key = `${normalizeLookupName(suggestion.displayName)}|${normalizeLookupName(suggestion.entry.name)}|${suggestion.entry.table_number}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 6)
+    .map(
+      (suggestion): SeatingSuggestion => ({
+        displayName: suggestion.displayName,
+        secondaryName: suggestion.secondaryName,
+        tableNumber: suggestion.entry.table_number,
+        searchValue: suggestion.displayName,
+      }),
+    );
+};
+
 export default function MyTablePage() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResult, setSearchResult] = useState<{ name: string; table_number: number } | null>(null);
-  const [suggestions, setSuggestions] = useState<{ name: string }[]>([]);
+  const [searchResults, setSearchResults] = useState<SeatingSearchResult[]>([]);
+  const [suggestions, setSuggestions] = useState<SeatingSuggestion[]>([]);
   const [seatingEntries, setSeatingEntries] = useState<SeatingSearchEntry[]>([]);
   const [isSeatingAliasesAvailable, setIsSeatingAliasesAvailable] = useState<boolean | null>(null);
   const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState<boolean | null>(null);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
   const [searchAttempted, setSearchAttempted] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const resultSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -176,6 +254,16 @@ export default function MyTablePage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (searchResults.length === 0) return;
+
+    const scrollToResult = window.setTimeout(() => {
+      resultSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+
+    return () => window.clearTimeout(scrollToResult);
+  }, [searchResults]);
+
   const performSearch = async (name: string) => {
     const trimmedName = name.trim();
     if (trimmedName === "") return;
@@ -190,22 +278,27 @@ export default function MyTablePage() {
       .filter(({ score }) => score > 0)
       .sort((left, right) => right.score - left.score || left.entry.name.localeCompare(right.entry.name));
 
-    const exactMatch =
-      seatingEntries.find((entry) => normalizeLookupName(entry.name) === normalizedQuery) ||
-      seatingEntries.find((entry) => parseNameAliases(entry.name_aliases).some((alias) => normalizeLookupName(alias) === normalizedQuery)) ||
-      rankedMatches[0]?.entry ||
-      null;
-
-    setSearchResult(exactMatch);
-    setSuggestions(
-      exactMatch
-        ? []
-        : rankedMatches
-            .map(({ entry }) => entry.name)
-            .filter((entryName, index, list) => list.indexOf(entryName) === index)
-            .slice(0, 6)
-            .map((entryName) => ({ name: entryName })),
+    const exactAliasMatches = seatingEntries.filter((entry) =>
+      parseNameAliases(entry.name_aliases).some((alias) => normalizeLookupName(alias) === normalizedQuery),
     );
+    const exactNameMatches = seatingEntries.filter((entry) => normalizeLookupName(entry.name) === normalizedQuery);
+    const topScore = rankedMatches[0]?.score || 0;
+    const topRankedMatches = topScore > 0 ? rankedMatches.filter(({ score }) => score === topScore).map(({ entry }) => entry) : [];
+    const matches = exactAliasMatches.length > 0 ? exactAliasMatches : exactNameMatches.length > 0 ? exactNameMatches : topRankedMatches;
+
+    setSearchResults(
+      matches.map((entry) => {
+        const display = getEntryDisplayMatch(trimmedName, entry);
+
+        return {
+          displayName: display.displayName,
+          invitationName: entry.name,
+          table_number: entry.table_number,
+          matchedAlias: display.matchedAlias,
+        };
+      }),
+    );
+    setSuggestions(matches.length > 0 ? [] : buildSuggestions(trimmedName, seatingEntries));
   };
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -217,7 +310,7 @@ export default function MyTablePage() {
     setSearchQuery(query);
     setActiveSuggestionIndex(0);
     if (clearSearchResult) {
-      setSearchResult(null);
+      setSearchResults([]);
     }
 
     if (query.trim().length === 0) {
@@ -230,16 +323,7 @@ export default function MyTablePage() {
       setSearchAttempted(false);
     }
 
-    const nextSuggestions = seatingEntries
-      .map((entry) => ({ name: entry.name, score: getEntrySuggestionScore(query, entry) }))
-      .filter(({ score }) => score > 0)
-      .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name))
-      .map(({ name }) => name)
-      .filter((name, index, list) => list.indexOf(name) === index)
-      .slice(0, 6)
-      .map((name) => ({ name }));
-
-    setSuggestions(nextSuggestions);
+    setSuggestions(buildSuggestions(query, seatingEntries));
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -253,7 +337,7 @@ export default function MyTablePage() {
       setActiveSuggestionIndex((prevIndex) => (prevIndex - 1 + suggestions.length) % suggestions.length);
     } else if (e.key === "Enter" || e.key === "Tab") {
       e.preventDefault();
-      const selectedName = suggestions[activeSuggestionIndex].name;
+      const selectedName = suggestions[activeSuggestionIndex].searchValue;
       setSearchQuery(selectedName);
       void performSearch(selectedName);
     } else if (e.key === "Escape") {
@@ -263,10 +347,11 @@ export default function MyTablePage() {
 
   const resetSearch = () => {
     setSearchQuery("");
-    setSearchResult(null);
+    setSearchResults([]);
     setSuggestions([]);
     setSearchAttempted(false);
     setActiveSuggestionIndex(0);
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
   };
 
   if (isSeatingChartEnabled === null) {
@@ -320,7 +405,7 @@ export default function MyTablePage() {
 
       <main className="wedding-main wedding-center text-center">
         <section className="wedding-page-panel wedding-animate-up text-center">
-          <div className="flex justify-center mb-6">
+          <div className="flex justify-center mb-4 md:mb-6">
             <Image
               src="/logo.png"
               alt="Omar & Hager logo"
@@ -331,39 +416,51 @@ export default function MyTablePage() {
           </div>
 
           <p className="wedding-kicker mb-3">Seating</p>
-          <h1 className="wedding-page-title mb-4 text-[#4E5E72]">Find your table</h1>
-          <p className="wedding-lead mb-8 md:mb-10">
-            Start typing the name from your invitation and choose the closest match if it appears.
+          <h1 className="wedding-page-title mb-3 text-[#4E5E72]">Find your table</h1>
+          <p className="wedding-lead mb-6 md:mb-8">
+            Type your name or your family&apos;s party name. Choose the match that feels right and your table will pop up.
           </p>
 
-          <form onSubmit={handleSearch} className="space-y-5">
+          <form onSubmit={handleSearch} className="space-y-4">
             <div ref={searchBoxRef} className="relative text-left">
-              <label className="wedding-kicker block ml-2 mb-2">Guest Name</label>
+              <label className="wedding-kicker block ml-2 mb-2">Guest or Party Name</label>
               <div className="relative mt-2">
                 <input
+                  ref={searchInputRef}
                   type="text"
                   value={searchQuery}
                   onChange={(e) => void handleSearchQueryChange(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Start typing your name"
+                  placeholder="Your name or party name"
                   className="wedding-input"
+                  autoComplete="name"
+                  autoCapitalize="words"
                   enterKeyHint="search"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={suggestions.length > 0}
+                  aria-controls={suggestions.length > 0 ? "table-search-suggestions" : undefined}
                 />
 
                 {suggestions.length > 0 && (
-                  <ul className="absolute z-20 w-full mt-2 overflow-auto rounded-[24px] border border-stone-100 bg-white text-left shadow-xl max-h-56">
+                  <ul id="table-search-suggestions" className="absolute z-20 w-full mt-2 overflow-auto rounded-[24px] border border-stone-100 bg-white text-left shadow-xl max-h-64">
                     {suggestions.map((suggestion, index) => (
                       <li
-                        key={suggestion.name}
+                        key={`${suggestion.displayName}-${suggestion.tableNumber}-${suggestion.secondaryName || "primary"}`}
                         onClick={() => {
-                          setSearchQuery(suggestion.name);
-                          void performSearch(suggestion.name);
+                          setSearchQuery(suggestion.searchValue);
+                          void performSearch(suggestion.searchValue);
                         }}
-                        className={`px-5 py-4 cursor-pointer text-sm text-stone-700 transition-colors border-b border-stone-50 last:border-none ${
+                        className={`px-5 py-4 cursor-pointer text-stone-700 transition-colors border-b border-stone-50 last:border-none ${
                           index === activeSuggestionIndex ? "bg-stone-50 font-bold text-stone-900" : "hover:bg-stone-50"
                         }`}
                       >
-                        {suggestion.name}
+                        <span className="block text-sm font-semibold leading-snug">{suggestion.displayName}</span>
+                        {suggestion.secondaryName && (
+                          <span className="mt-1 block text-xs font-medium leading-snug text-stone-500">
+                            Listed under {suggestion.secondaryName}
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -372,10 +469,10 @@ export default function MyTablePage() {
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row">
-              <button type="submit" className="wedding-button-primary w-full">
-                Find My Table
+              <button type="submit" disabled={searchQuery.trim().length === 0} className="wedding-button-primary w-full disabled:cursor-not-allowed disabled:opacity-45">
+                Show My Table
               </button>
-              {(searchQuery.trim().length > 0 || searchResult || searchAttempted) && (
+              {(searchQuery.trim().length > 0 || searchResults.length > 0 || searchAttempted) && (
                 <button type="button" onClick={resetSearch} className="wedding-button-secondary w-full sm:w-auto">
                   Start Over
                 </button>
@@ -383,22 +480,34 @@ export default function MyTablePage() {
             </div>
           </form>
 
-          {searchResult && (
-            <div className="wedding-animate-up mt-8 md:mt-10">
-              <div className="wedding-divider mb-8" />
-              <div className="wedding-subpanel px-6 py-7 md:px-8 md:py-8">
-                <p className="wedding-lead text-lg mb-2">Welcome, {searchResult.name}!</p>
-                <h2 className="wedding-title text-2xl leading-tight text-[#4E5E72] md:text-4xl">
-                  Please find your seat at
-                  <span className="block mt-3 text-4xl md:text-5xl underline underline-offset-8 decoration-stone-200">
-                    Table {searchResult.table_number}
-                  </span>
-                </h2>
+          {searchResults.length > 0 && (
+            <div ref={resultSectionRef} className="wedding-animate-up scroll-mt-24 mt-5 md:mt-7">
+              <div className="space-y-4">
+                {searchResults.map((result, index) => (
+                  <div key={`${result.displayName}-${result.table_number}-${index}`} className="wedding-subpanel overflow-hidden px-5 py-5 md:px-8 md:py-7">
+                    <div className="mx-auto mb-5 w-full rounded-[24px] border border-white bg-white px-5 py-5 shadow-sm">
+                      <p className="wedding-kicker mb-2 text-stone-500">Your Table</p>
+                      <p className="font-serif text-5xl leading-none text-[#4E5E72] md:text-6xl">{result.table_number}</p>
+                    </div>
+                    <p className="wedding-lead text-lg mb-2">Welcome, {result.displayName}.</p>
+                    {result.matchedAlias && result.invitationName !== result.displayName && (
+                      <p className="mb-4 text-sm font-semibold leading-relaxed text-stone-500">
+                        Listed under {result.invitationName}
+                      </p>
+                    )}
+                    <p className="wedding-copy mx-auto max-w-md">
+                      Please head to table {result.table_number}. If you need help, show this screen to anyone helping with seating.
+                    </p>
+                  </div>
+                ))}
               </div>
+              <button type="button" onClick={resetSearch} className="wedding-button-secondary mt-4 w-full">
+                Search Another Name
+              </button>
             </div>
           )}
 
-          {searchAttempted && !searchResult && searchQuery.trim().length > 0 && (
+          {searchAttempted && searchResults.length === 0 && searchQuery.trim().length > 0 && (
             <div className="wedding-animate-up mt-8 md:mt-10">
               <div className="wedding-divider mb-8" />
               <div className="wedding-subpanel px-6 py-7 text-center md:px-8 md:py-8">
@@ -414,15 +523,15 @@ export default function MyTablePage() {
                     <div className="flex flex-wrap justify-center gap-2">
                       {suggestions.map((suggestion) => (
                         <button
-                          key={suggestion.name}
+                          key={`${suggestion.displayName}-${suggestion.tableNumber}-${suggestion.secondaryName || "primary"}`}
                           type="button"
                           onClick={() => {
-                            setSearchQuery(suggestion.name);
-                            void performSearch(suggestion.name);
+                            setSearchQuery(suggestion.searchValue);
+                            void performSearch(suggestion.searchValue);
                           }}
                           className="wedding-button-secondary"
                         >
-                          {suggestion.name}
+                          {suggestion.displayName}
                         </button>
                       ))}
                     </div>

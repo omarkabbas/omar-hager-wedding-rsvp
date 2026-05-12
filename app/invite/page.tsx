@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
+import RsvpClosedMessage from "@/app/components/RsvpClosedMessage";
 import { supabase } from "@/lib/supabase";
 
 const RSVP_BY_DATE = process.env.NEXT_PUBLIC_RSVP_BY_DATE || "May 1, 2026";
@@ -11,9 +12,11 @@ const RSVP_SESSION_KEY = "active_rsvp_code";
 function InviteContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const inviteCode = searchParams.get("code");
+  const inviteCode = searchParams.get("code") || searchParams.get("inviteCode") || searchParams.get("invitecode");
 
   const [guestName, setGuestName] = useState("");
+  const [isVirtualGuest, setIsVirtualGuest] = useState(false);
+  const [isRsvpOpen, setIsRsvpOpen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(0);
   const [showButton, setShowButton] = useState(false);
@@ -30,22 +33,40 @@ function InviteContent() {
 
   useEffect(() => {
     async function fetchGuest() {
+      const { data: rsvpSetting } = await supabase
+        .from("settings")
+        .select("value")
+        .eq("key", "is_rsvp_open")
+        .maybeSingle<{ value: string }>();
+      const rsvpIsOpen = rsvpSetting?.value !== "false";
+      setIsRsvpOpen(rsvpIsOpen);
+
       if (!inviteCode) {
         setLoading(false);
         return;
       }
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("rsvp_list")
-        .select("guest_name, attending")
+        .select("guest_name, attending, virtual_guest")
         .eq("invite_code", inviteCode.toUpperCase().trim())
         .maybeSingle();
 
-      if (data) {
-        setGuestName(data.guest_name);
+      const fallbackResult = error
+        ? await supabase
+            .from("rsvp_list")
+            .select("guest_name, attending")
+            .eq("invite_code", inviteCode.toUpperCase().trim())
+            .maybeSingle()
+        : null;
+      const guest = data || fallbackResult?.data;
+
+      if (guest) {
+        setGuestName(guest.guest_name);
+        setIsVirtualGuest("virtual_guest" in guest ? Boolean(guest.virtual_guest) : false);
         window.sessionStorage.setItem(RSVP_SESSION_KEY, inviteCode.toUpperCase().trim());
 
-        if (data.attending !== null) {
+        if (rsvpIsOpen && guest.attending !== null) {
           router.push(`/${inviteCode}`);
         }
       }
@@ -55,6 +76,21 @@ function InviteContent() {
 
     fetchGuest();
   }, [inviteCode, router]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("invite_rsvp_open_setting")
+      .on("postgres_changes", { event: "*", schema: "public", table: "settings", filter: "key=eq.is_rsvp_open" }, (payload) => {
+        if (!payload.new) return;
+        const settingValue = (payload.new as { value?: string }).value;
+        if (typeof settingValue === "string") setIsRsvpOpen(settingValue !== "false");
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     if (!showButton || !isAtBottom || hasAutoScrolledRef.current) return;
@@ -100,6 +136,15 @@ function InviteContent() {
             Return Home
           </button>
         </div>
+      </div>
+    );
+  }
+
+  if (!isRsvpOpen) {
+    return (
+      <div className="wedding-shell wedding-center px-4 py-10">
+        <div className="wedding-backdrop" />
+        <RsvpClosedMessage guestName={guestName} />
       </div>
     );
   }
@@ -394,11 +439,13 @@ function InviteContent() {
           ref={buttonRef}
           className={`relative z-30 w-full max-w-[280px] transition-all duration-1000 mt-12 md:mt-16 ${showButton ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4 pointer-events-none"}`}
         >
-          <p className="mb-3 text-center text-base font-medium italic tracking-[0.01em] text-stone-700">
-            Kindly reply by {rsvpByLabel}.
-          </p>
+          {!isVirtualGuest && (
+            <p className="mb-3 text-center text-base font-medium italic tracking-[0.01em] text-stone-700">
+              Kindly reply by {rsvpByLabel}.
+            </p>
+          )}
           <button onClick={handleProceed} className="wedding-button-primary w-full">
-            RSVP
+            {isVirtualGuest ? "Virtually RSVP" : "RSVP"}
           </button>
         </div>
       </div>

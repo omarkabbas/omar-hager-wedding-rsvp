@@ -13,6 +13,7 @@ export default function HomePage() {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
   const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState(false);
   const [isGalleryEnabled, setIsGalleryEnabled] = useState(false);
+  const [isLivestreamEnabled, setIsLivestreamEnabled] = useState(false);
   const [isHomeVenueEnabled, setIsHomeVenueEnabled] = useState(false);
   const [isHomeCarouselEnabled, setIsHomeCarouselEnabled] = useState(true);
   const [isHomeDressCodeEnabled, setIsHomeDressCodeEnabled] = useState(false);
@@ -26,6 +27,7 @@ export default function HomePage() {
         .in("key", [
           "is_seating_chart_enabled",
           "is_gallery_enabled",
+          "is_livestream_enabled",
           "is_home_venue_enabled",
           "is_home_carousel_enabled",
           "is_home_dress_code_enabled",
@@ -38,12 +40,14 @@ export default function HomePage() {
 
       const seatingSetting = data.find((setting) => setting.key === "is_seating_chart_enabled");
       const gallerySetting = data.find((setting) => setting.key === "is_gallery_enabled");
+      const livestreamSetting = data.find((setting) => setting.key === "is_livestream_enabled");
       const homeVenueSetting = data.find((setting) => setting.key === "is_home_venue_enabled");
       const homeCarouselSetting = data.find((setting) => setting.key === "is_home_carousel_enabled");
       const homeDressCodeSetting = data.find((setting) => setting.key === "is_home_dress_code_enabled");
 
       if (seatingSetting) setIsSeatingChartEnabled(seatingSetting.value === "true");
       if (gallerySetting) setIsGalleryEnabled(gallerySetting.value === "true");
+      if (livestreamSetting) setIsLivestreamEnabled(livestreamSetting.value === "true");
       if (homeVenueSetting) setIsHomeVenueEnabled(homeVenueSetting.value === "true");
       setIsHomeCarouselEnabled(homeCarouselSetting ? homeCarouselSetting.value === "true" : true);
       setIsHomeDressCodeEnabled(homeDressCodeSetting?.value === "true");
@@ -78,6 +82,16 @@ export default function HomePage() {
           const settingValue = (payload.new as { value?: string }).value;
           if (typeof settingValue !== "string") return;
           setIsGalleryEnabled(settingValue === "true");
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "settings", filter: "key=eq.is_livestream_enabled" },
+        (payload) => {
+          if (!payload.new) return;
+          const settingValue = (payload.new as { value?: string }).value;
+          if (typeof settingValue !== "string") return;
+          setIsLivestreamEnabled(settingValue === "true");
         },
       )
       .on(
@@ -227,7 +241,7 @@ export default function HomePage() {
             </div>
           )}
 
-          {settingsLoaded && (isSeatingChartEnabled || isGalleryEnabled) && (
+          {settingsLoaded && (isSeatingChartEnabled || isGalleryEnabled || isLivestreamEnabled) && (
             <div className="flex flex-col md:flex-row justify-center items-stretch md:items-center gap-4 md:gap-5">
               {isSeatingChartEnabled && (
                 <Link href="/mytable" className="wedding-button-primary w-full md:w-auto">
@@ -237,6 +251,11 @@ export default function HomePage() {
               {isGalleryEnabled && (
                 <Link href="/gallery" className="wedding-button-primary w-full md:w-auto">
                   Guest Gallery
+                </Link>
+              )}
+              {isLivestreamEnabled && (
+                <Link href="/livestream" className="wedding-button-primary w-full md:w-auto">
+                  Go to Livestream
                 </Link>
               )}
             </div>
