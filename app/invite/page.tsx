@@ -4,19 +4,30 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import RsvpClosedMessage from "@/app/components/RsvpClosedMessage";
+import {
+  formatRsvpByDateLabel,
+  getRsvpByDateValue,
+  getRsvpByDateVisibility,
+  RSVP_BY_DATE_SETTING_KEY,
+  RSVP_BY_DATE_VISIBILITY_SETTING_KEY,
+} from "@/lib/rsvpSettings";
 import { supabase } from "@/lib/supabase";
 
-const RSVP_BY_DATE = process.env.NEXT_PUBLIC_RSVP_BY_DATE || "May 1, 2026";
 const RSVP_SESSION_KEY = "active_rsvp_code";
 
 function InviteContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const inviteCode = searchParams.get("code") || searchParams.get("inviteCode") || searchParams.get("invitecode");
+  const inviteViewMode = (searchParams.get("view") || searchParams.get("show") || searchParams.get("mode") || "").toLowerCase();
+  const shouldReplayInvitation = ["invite", "invitation", "envelope"].includes(inviteViewMode);
 
   const [guestName, setGuestName] = useState("");
   const [isVirtualGuest, setIsVirtualGuest] = useState(false);
+  const [hasGuestResponded, setHasGuestResponded] = useState(false);
   const [isRsvpOpen, setIsRsvpOpen] = useState(true);
+  const [rsvpByDate, setRsvpByDate] = useState(getRsvpByDateValue());
+  const [isRsvpByDateVisible, setIsRsvpByDateVisible] = useState(true);
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(0);
   const [showButton, setShowButton] = useState(false);
@@ -25,21 +36,19 @@ function InviteContent() {
   const cardRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLDivElement>(null);
   const hasAutoScrolledRef = useRef(false);
-  const rsvpByLabel = useMemo(() => {
-    const parsed = new Date(RSVP_BY_DATE);
-    if (Number.isNaN(parsed.getTime())) return RSVP_BY_DATE;
-    return parsed.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-  }, []);
+  const rsvpByLabel = useMemo(() => formatRsvpByDateLabel(rsvpByDate), [rsvpByDate]);
 
   useEffect(() => {
     async function fetchGuest() {
-      const { data: rsvpSetting } = await supabase
+      const { data: settings } = await supabase
         .from("settings")
-        .select("value")
-        .eq("key", "is_rsvp_open")
-        .maybeSingle<{ value: string }>();
-      const rsvpIsOpen = rsvpSetting?.value !== "false";
+        .select("key, value")
+        .in("key", ["is_rsvp_open", RSVP_BY_DATE_SETTING_KEY, RSVP_BY_DATE_VISIBILITY_SETTING_KEY]);
+      const settingsMap = Object.fromEntries((settings || []).map((setting) => [setting.key, setting.value]));
+      const rsvpIsOpen = settingsMap.is_rsvp_open !== "false";
       setIsRsvpOpen(rsvpIsOpen);
+      setRsvpByDate(getRsvpByDateValue(settingsMap[RSVP_BY_DATE_SETTING_KEY]));
+      setIsRsvpByDateVisible(getRsvpByDateVisibility(settingsMap[RSVP_BY_DATE_VISIBILITY_SETTING_KEY]));
 
       if (!inviteCode) {
         setLoading(false);
@@ -64,10 +73,12 @@ function InviteContent() {
       if (guest) {
         setGuestName(guest.guest_name);
         setIsVirtualGuest("virtual_guest" in guest ? Boolean(guest.virtual_guest) : false);
+        setHasGuestResponded(guest.attending !== null);
         window.sessionStorage.setItem(RSVP_SESSION_KEY, inviteCode.toUpperCase().trim());
 
-        if (rsvpIsOpen && guest.attending !== null) {
-          router.push(`/${inviteCode}`);
+        if (guest.attending !== null && !shouldReplayInvitation) {
+          router.replace(`/${inviteCode}`);
+          return;
         }
       }
 
@@ -75,7 +86,7 @@ function InviteContent() {
     }
 
     fetchGuest();
-  }, [inviteCode, router]);
+  }, [inviteCode, router, shouldReplayInvitation]);
 
   useEffect(() => {
     const channel = supabase
@@ -84,6 +95,16 @@ function InviteContent() {
         if (!payload.new) return;
         const settingValue = (payload.new as { value?: string }).value;
         if (typeof settingValue === "string") setIsRsvpOpen(settingValue !== "false");
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "settings", filter: `key=eq.${RSVP_BY_DATE_SETTING_KEY}` }, (payload) => {
+        if (!payload.new) return;
+        const settingValue = (payload.new as { value?: string }).value;
+        setRsvpByDate(getRsvpByDateValue(settingValue));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "settings", filter: `key=eq.${RSVP_BY_DATE_VISIBILITY_SETTING_KEY}` }, (payload) => {
+        if (!payload.new) return;
+        const settingValue = (payload.new as { value?: string }).value;
+        setIsRsvpByDateVisible(getRsvpByDateVisibility(settingValue));
       })
       .subscribe();
 
@@ -140,7 +161,7 @@ function InviteContent() {
     );
   }
 
-  if (!isRsvpOpen) {
+  if (!isRsvpOpen && !hasGuestResponded) {
     return (
       <div className="wedding-shell wedding-center px-4 py-10">
         <div className="wedding-backdrop" />
@@ -439,13 +460,13 @@ function InviteContent() {
           ref={buttonRef}
           className={`relative z-30 w-full max-w-[280px] transition-all duration-1000 mt-12 md:mt-16 ${showButton ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4 pointer-events-none"}`}
         >
-          {!isVirtualGuest && (
+          {isRsvpByDateVisible && !hasGuestResponded && !isVirtualGuest && (
             <p className="mb-3 text-center text-base font-medium italic tracking-[0.01em] text-stone-700">
               Kindly reply by {rsvpByLabel}.
             </p>
           )}
-          <button onClick={handleProceed} className="wedding-button-primary w-full">
-            {isVirtualGuest ? "Virtually RSVP" : "RSVP"}
+          <button onClick={handleProceed} className={`${hasGuestResponded ? "wedding-button-secondary" : "wedding-button-primary"} w-full`}>
+            {hasGuestResponded ? "Back to Your RSVP Details" : isVirtualGuest ? "Virtually RSVP" : "RSVP"}
           </button>
         </div>
       </div>

@@ -244,7 +244,7 @@ export default function HomePage() {
           {settingsLoaded && (isSeatingChartEnabled || isGalleryEnabled || isLivestreamEnabled) && (
             <div className="flex flex-col md:flex-row justify-center items-stretch md:items-center gap-4 md:gap-5">
               {isSeatingChartEnabled && (
-                <Link href="/mytable" className="wedding-button-primary w-full md:w-auto">
+                <Link href="/table" className="wedding-button-primary w-full md:w-auto">
                   Find Your Table
                 </Link>
               )}
