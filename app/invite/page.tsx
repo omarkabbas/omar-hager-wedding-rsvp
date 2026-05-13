@@ -37,6 +37,7 @@ function InviteContent() {
   const buttonRef = useRef<HTMLDivElement>(null);
   const hasAutoScrolledRef = useRef(false);
   const rsvpByLabel = useMemo(() => formatRsvpByDateLabel(rsvpByDate), [rsvpByDate]);
+  const shouldShowRsvpClosed = !isRsvpOpen && !hasGuestResponded && !isVirtualGuest;
 
   useEffect(() => {
     async function fetchGuest() {
@@ -161,7 +162,7 @@ function InviteContent() {
     );
   }
 
-  if (!isRsvpOpen && !hasGuestResponded) {
+  if (shouldShowRsvpClosed) {
     return (
       <div className="wedding-shell wedding-center px-4 py-10">
         <div className="wedding-backdrop" />

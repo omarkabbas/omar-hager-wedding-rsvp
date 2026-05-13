@@ -84,7 +84,9 @@ export default function GuestRSVP() {
   const calendarLink = CALENDAR_FILE_PATH;
   const shouldRequestContactDetails = guestData?.request_contact_details === true;
   const isVirtualGuest = guestData?.virtual_guest === true;
-  const hasGuestResponded = guestData?.attending !== null;
+  const hasGuestResponded = guestData ? guestData.attending !== null : false;
+  const canUseRsvpFlow = isRsvpOpen || isVirtualGuest;
+  const shouldShowRsvpClosed = Boolean(guestData && !isRsvpOpen && !hasGuestResponded && !isVirtualGuest);
   const attendingLabel = isVirtualGuest ? "Will Happily Join 😊" : "Happily Accept 😊";
   const decliningLabel = isVirtualGuest ? "Unable to Join Sadly 😔" : "Regretfully Decline 😔";
 
@@ -120,7 +122,7 @@ export default function GuestRSVP() {
         } else {
           const hasSeenEnvelope = sessionStorage.getItem(`seen_envelope_${inviteCode}`);
 
-          if (rsvpIsOpen && !hasSeenEnvelope) {
+          if ((rsvpIsOpen || data.virtual_guest === true) && !hasSeenEnvelope) {
             router.push(`/invite?code=${inviteCode}`);
             return;
           }
@@ -192,7 +194,7 @@ export default function GuestRSVP() {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!guestData || !isRsvpOpen) return;
+    if (!guestData || !canUseRsvpFlow) return;
 
     const formData = new FormData(e.currentTarget);
     const attendingValue = formData.get("attending") === "true";
@@ -309,7 +311,7 @@ export default function GuestRSVP() {
                   Return Home
                 </Link>
               </div>
-            ) : !isRsvpOpen && !hasGuestResponded ? (
+            ) : shouldShowRsvpClosed ? (
               <RsvpClosedMessage guestName={guestData.guest_name} embedded showLogo={false} />
             ) : submitted ? (
               <div className="wedding-animate-fade py-2 text-center">
@@ -362,6 +364,11 @@ export default function GuestRSVP() {
                     "We’ll miss you, but thanks for letting us know!"
                   )}
                 </p>
+                {guestData.attending === false && (
+                  <p className="mx-auto mb-8 max-w-lg text-sm leading-relaxed text-stone-500 md:mb-10 md:text-base">
+                    If you need to make a change, please reach out to Omar & Hager directly ASAP.
+                  </p>
+                )}
 
                 {guestData.attending && isVirtualGuest && (
                   <div className="space-y-5 text-left max-w-xl mx-auto">

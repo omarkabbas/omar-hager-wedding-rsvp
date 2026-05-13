@@ -3362,7 +3362,7 @@ export default function StudioProPage() {
                           description={
                             isRsvpOpen
                               ? "Invite links can open envelopes and RSVP forms."
-                              : "Invite links show a friendly closed message."
+                              : "Unanswered in-person invite links show a friendly closed message. Virtual RSVPs stay open."
                           }
                           actionLabel="Open Controls"
                           tone={isRsvpOpen ? "emerald" : "rose"}
@@ -5872,7 +5872,7 @@ export default function StudioProPage() {
                   <div className="mt-5 grid gap-4 xl:grid-cols-2">
                     <ToggleTile
                       label="RSVPs & Invites"
-                      description="Control whether invite envelopes and RSVP forms are open to guests."
+                      description="Control whether unanswered in-person invite envelopes and RSVP forms are open. Virtual RSVPs stay open."
                       enabled={isRsvpOpen}
                       onToggle={() =>
                         void updateSetting(
