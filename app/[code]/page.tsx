@@ -6,6 +6,13 @@ import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import Navigation from "@/app/components/Navigation";
 import RsvpClosedMessage from "@/app/components/RsvpClosedMessage";
+import {
+  formatRsvpByDateLabel,
+  getRsvpByDateValue,
+  getRsvpByDateVisibility,
+  RSVP_BY_DATE_SETTING_KEY,
+  RSVP_BY_DATE_VISIBILITY_SETTING_KEY,
+} from "@/lib/rsvpSettings";
 import { supabase } from "@/lib/supabase";
 import {
   CALENDAR_FILE_PATH,
@@ -31,7 +38,6 @@ type GuestData = {
   virtual_guest?: boolean | null;
 };
 
-const RSVP_BY_DATE = process.env.NEXT_PUBLIC_RSVP_BY_DATE || "May 1, 2026";
 const RSVP_SESSION_KEY = "active_rsvp_code";
 
 const formatPhoneNumberInput = (value?: string | null) => {
@@ -68,18 +74,19 @@ export default function GuestRSVP() {
   const [confirmSavedPhone, setConfirmSavedPhone] = useState(true);
   const [isLivestreamEnabled, setIsLivestreamEnabled] = useState(false);
   const [isRsvpOpen, setIsRsvpOpen] = useState(true);
+  const [rsvpByDate, setRsvpByDate] = useState(getRsvpByDateValue());
+  const [isRsvpByDateVisible, setIsRsvpByDateVisible] = useState(true);
   const confettiPieces = useMemo(() => Array.from({ length: 240 }, (_, i) => i), []);
-  const rsvpByLabel = useMemo(() => {
-    const parsed = new Date(RSVP_BY_DATE);
-    if (Number.isNaN(parsed.getTime())) return RSVP_BY_DATE;
-    return parsed.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-  }, []);
+  const rsvpByLabel = useMemo(() => formatRsvpByDateLabel(rsvpByDate), [rsvpByDate]);
 
   const mapLink = VENUE_MAP_LINK;
   const mapEmbedLink = VENUE_MAP_EMBED;
   const calendarLink = CALENDAR_FILE_PATH;
   const shouldRequestContactDetails = guestData?.request_contact_details === true;
   const isVirtualGuest = guestData?.virtual_guest === true;
+  const hasGuestResponded = guestData ? guestData.attending !== null : false;
+  const canUseRsvpFlow = isRsvpOpen || isVirtualGuest;
+  const shouldShowRsvpClosed = Boolean(guestData && !isRsvpOpen && !hasGuestResponded && !isVirtualGuest);
   const attendingLabel = isVirtualGuest ? "Will Happily Join 😊" : "Happily Accept 😊";
   const decliningLabel = isVirtualGuest ? "Unable to Join Sadly 😔" : "Regretfully Decline 😔";
 
@@ -93,13 +100,15 @@ export default function GuestRSVP() {
           .select("*")
           .eq("invite_code", inviteCode.toUpperCase().trim())
           .maybeSingle<GuestData>(),
-        supabase.from("settings").select("key, value").in("key", ["is_rsvp_open"]),
+        supabase.from("settings").select("key, value").in("key", ["is_rsvp_open", RSVP_BY_DATE_SETTING_KEY, RSVP_BY_DATE_VISIBILITY_SETTING_KEY]),
       ]);
 
       const data = guestResult.data;
-      const rsvpSetting = settingsResult.data?.find((setting) => setting.key === "is_rsvp_open");
-      const rsvpIsOpen = rsvpSetting?.value !== "false";
+      const settingsMap = Object.fromEntries((settingsResult.data || []).map((setting) => [setting.key, setting.value]));
+      const rsvpIsOpen = settingsMap.is_rsvp_open !== "false";
       setIsRsvpOpen(rsvpIsOpen);
+      setRsvpByDate(getRsvpByDateValue(settingsMap[RSVP_BY_DATE_SETTING_KEY]));
+      setIsRsvpByDateVisible(getRsvpByDateVisibility(settingsMap[RSVP_BY_DATE_VISIBILITY_SETTING_KEY]));
 
       if (data) {
         setGuestData(data);
@@ -113,7 +122,7 @@ export default function GuestRSVP() {
         } else {
           const hasSeenEnvelope = sessionStorage.getItem(`seen_envelope_${inviteCode}`);
 
-          if (rsvpIsOpen && !hasSeenEnvelope) {
+          if ((rsvpIsOpen || data.virtual_guest === true) && !hasSeenEnvelope) {
             router.push(`/invite?code=${inviteCode}`);
             return;
           }
@@ -131,13 +140,15 @@ export default function GuestRSVP() {
       const { data, error } = await supabase
         .from("settings")
         .select("key, value")
-        .in("key", ["is_livestream_enabled", "is_rsvp_open"]);
+        .in("key", ["is_livestream_enabled", "is_rsvp_open", RSVP_BY_DATE_SETTING_KEY, RSVP_BY_DATE_VISIBILITY_SETTING_KEY]);
 
       if (error) return;
 
       const settingsMap = Object.fromEntries((data || []).map((setting) => [setting.key, setting.value]));
       if (settingsMap.is_livestream_enabled) setIsLivestreamEnabled(settingsMap.is_livestream_enabled === "true");
       setIsRsvpOpen(settingsMap.is_rsvp_open ? settingsMap.is_rsvp_open !== "false" : true);
+      setRsvpByDate(getRsvpByDateValue(settingsMap[RSVP_BY_DATE_SETTING_KEY]));
+      setIsRsvpByDateVisible(getRsvpByDateVisibility(settingsMap[RSVP_BY_DATE_VISIBILITY_SETTING_KEY]));
     }
 
     const handleVisibilityOrFocus = () => {
@@ -160,6 +171,16 @@ export default function GuestRSVP() {
         const settingValue = (payload.new as { value?: string }).value;
         if (typeof settingValue === "string") setIsRsvpOpen(settingValue !== "false");
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "settings", filter: `key=eq.${RSVP_BY_DATE_SETTING_KEY}` }, (payload) => {
+        if (!payload.new) return;
+        const settingValue = (payload.new as { value?: string }).value;
+        setRsvpByDate(getRsvpByDateValue(settingValue));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "settings", filter: `key=eq.${RSVP_BY_DATE_VISIBILITY_SETTING_KEY}` }, (payload) => {
+        if (!payload.new) return;
+        const settingValue = (payload.new as { value?: string }).value;
+        setIsRsvpByDateVisible(getRsvpByDateVisibility(settingValue));
+      })
       .subscribe();
     window.addEventListener("focus", handleVisibilityOrFocus);
     document.addEventListener("visibilitychange", handleVisibilityOrFocus);
@@ -173,7 +194,7 @@ export default function GuestRSVP() {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!guestData || !isRsvpOpen) return;
+    if (!guestData || !canUseRsvpFlow) return;
 
     const formData = new FormData(e.currentTarget);
     const attendingValue = formData.get("attending") === "true";
@@ -290,7 +311,7 @@ export default function GuestRSVP() {
                   Return Home
                 </Link>
               </div>
-            ) : !isRsvpOpen ? (
+            ) : shouldShowRsvpClosed ? (
               <RsvpClosedMessage guestName={guestData.guest_name} embedded showLogo={false} />
             ) : submitted ? (
               <div className="wedding-animate-fade py-2 text-center">
@@ -333,7 +354,7 @@ export default function GuestRSVP() {
                   {guestData.attending ? "You’re RSVP’d!" : "We’ve received your response"}
                 </h2>
                 <div className="wedding-divider mb-8" />
-                <p className="wedding-lead text-stone-600 text-lg md:text-xl mb-8 md:mb-10">
+                <p className={`wedding-lead text-lg text-stone-600 md:text-xl ${guestData.attending === false ? "mb-5" : "mb-8 md:mb-10"}`}>
                   {guestData.attending ? (
                     <>
                       We can’t wait to celebrate with you,
@@ -343,6 +364,14 @@ export default function GuestRSVP() {
                     "We’ll miss you, but thanks for letting us know!"
                   )}
                 </p>
+                {guestData.attending === false && (
+                  <div className="wedding-subpanel mx-auto mb-8 max-w-xl px-5 py-5 text-center md:mb-10 md:px-6">
+                    <p className="wedding-kicker mb-2">Need to Update?</p>
+                    <p className="wedding-copy">
+                      If you need to make a change, please reach out to Omar & Hager directly ASAP.
+                    </p>
+                  </div>
+                )}
 
                 {guestData.attending && isVirtualGuest && (
                   <div className="space-y-5 text-left max-w-xl mx-auto">
@@ -424,7 +453,10 @@ export default function GuestRSVP() {
                   </div>
                 )}
 
-                <div className="mt-10">
+                <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
+                  <Link href={`/invite?code=${encodeURIComponent(inviteCode)}&view=invite`} className="wedding-button-secondary w-full md:w-auto">
+                    View Invitation Again
+                  </Link>
                   <Link href="/" className="wedding-button-primary w-full md:w-auto">
                     Explore Our Website
                   </Link>
@@ -449,7 +481,7 @@ export default function GuestRSVP() {
                 </div>
 
                 <div className="space-y-2 text-left">
-                  {!isVirtualGuest && (
+                  {isRsvpByDateVisible && !isVirtualGuest && (
                     <p className="text-center text-sm font-medium tracking-[0.01em] text-stone-700">
                       Kindly reply by {rsvpByLabel}.
                     </p>

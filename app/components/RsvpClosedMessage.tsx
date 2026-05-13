@@ -32,9 +32,6 @@ export default function RsvpClosedMessage({
         {guestName ? `Hi ${guestName}, thank you for checking in.` : "Thank you for checking in."} The RSVP window has closed so we can
         finalize the celebration details.
       </p>
-      <p className="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-stone-500 md:text-base">
-        If you need to make a change, please reach out to Omar & Hager directly.
-      </p>
       <div className="mt-8">
         <Link href="/" className="wedding-button-primary w-full md:w-auto">
           Return Home

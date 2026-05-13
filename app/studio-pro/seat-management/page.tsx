@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 
 import { supabase } from "@/lib/supabase";
 import { DatabaseEnvironmentBadge } from "../DatabaseEnvironmentBadge";
@@ -2024,26 +2024,66 @@ export default function SeatManagementPage() {
         <section className="mx-auto max-w-xl rounded-[28px] border border-white bg-white p-8 text-center shadow-xl">
           <p className="wedding-kicker mb-3">Private Access</p>
           <h1 className="font-serif text-4xl text-stone-900">Seat Management</h1>
-          <p className="mt-4 text-sm leading-relaxed text-stone-500">Open Studio Pro first, then return to this page.</p>
+          <p className="mt-4 text-sm leading-relaxed text-stone-500">Open Admin Studio first, then return to this page.</p>
           <Link href="/studio-pro" className="wedding-button-primary mt-8">
-            Open Studio Pro
+            Open Admin Studio
           </Link>
         </section>
       </div>
     );
   }
 
+  const renderSeatManagementActions = () => (
+    <>
+      <Link href="/studio-pro" className="studio-compact-button">
+        Admin Studio
+      </Link>
+      <button
+        type="button"
+        onClick={undoLastLayoutChange}
+        disabled={layoutHistory.length === 0}
+        className="studio-compact-button disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Layout Undo
+      </button>
+      <button
+        type="button"
+        onClick={() => void saveFloorPlanLayout()}
+        disabled={isSavingLayout}
+        className={`studio-compact-button disabled:cursor-not-allowed disabled:opacity-60 ${
+          isSavingLayout ? "animate-pulse ring-2 ring-emerald-200" : hasUnsavedLayoutChanges ? "ring-2 ring-amber-200" : ""
+        }`}
+      >
+        {isSavingLayout ? (layoutSaveMode === "auto" ? "Autosaving..." : "Saving...") : "Save Layout"}
+      </button>
+      <button type="button" onClick={() => void captureFloorPlan()} className="studio-compact-button">
+        Capture Image
+      </button>
+      <button type="button" onClick={openFloorPlanPreview} className="studio-compact-button">
+        Share Preview
+      </button>
+      <button
+        type="button"
+        onClick={() => void refreshFloorPlan()}
+        disabled={isRefreshing}
+        className="studio-compact-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {isRefreshing ? "Refreshing..." : "Refresh"}
+      </button>
+    </>
+  );
+
   return (
     <div className="min-h-screen bg-[#f6f8fb] text-stone-900">
       <header className="sticky top-0 z-40 border-b border-stone-200 bg-white/95 px-3 py-2.5 shadow-sm backdrop-blur md:px-5">
         <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_minmax(360px,500px)_auto] xl:items-center">
           <div className="min-w-0">
-            <p className="wedding-kicker mb-1">Studio Pro</p>
+            <p className="wedding-kicker mb-1">Admin Studio</p>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="truncate font-serif text-2xl tracking-tight text-stone-900 md:text-3xl">Floor Plan Seat Manager</h1>
               <DatabaseEnvironmentBadge />
             </div>
-            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-stone-500 md:text-sm">
+            <p className="mt-1 hidden max-w-3xl text-xs leading-relaxed text-stone-500 sm:block md:text-sm">
               Drag tables, guests, the dance floor, and room elements. Guest seating and floor layout are saved separately so planning stays controlled.
             </p>
           </div>
@@ -2055,47 +2095,24 @@ export default function SeatManagementPage() {
             <Metric label="Seat Groups" value={stats.seatingRows} />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end xl:max-w-[430px]">
-            <Link href="/studio-pro" className="studio-compact-button">
-              Studio Pro
-            </Link>
-            <button
-              type="button"
-              onClick={undoLastLayoutChange}
-              disabled={layoutHistory.length === 0}
-              className="studio-compact-button disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Layout Undo
-            </button>
-            <button
-              type="button"
-              onClick={() => void saveFloorPlanLayout()}
-              disabled={isSavingLayout}
-              className={`studio-compact-button disabled:cursor-not-allowed disabled:opacity-60 ${
-                isSavingLayout ? "animate-pulse ring-2 ring-emerald-200" : hasUnsavedLayoutChanges ? "ring-2 ring-amber-200" : ""
-              }`}
-            >
-              {isSavingLayout ? (layoutSaveMode === "auto" ? "Autosaving..." : "Saving...") : "Save Layout"}
-            </button>
-            <button type="button" onClick={() => void captureFloorPlan()} className="studio-compact-button">
-              Capture Image
-            </button>
-            <button type="button" onClick={openFloorPlanPreview} className="studio-compact-button">
-              Share Preview
-            </button>
-            <button
-              type="button"
-              onClick={() => void refreshFloorPlan()}
-              disabled={isRefreshing}
-              className="studio-compact-button-primary disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isRefreshing ? "Refreshing..." : "Refresh"}
-            </button>
+          <details className="group rounded-[16px] border border-stone-100 bg-stone-50 p-2 xl:hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-stone-600 [&::-webkit-details-marker]:hidden">
+              Page Actions
+              <span className="rounded-full bg-white px-2 py-1 text-[9px] text-stone-500 ring-1 ring-stone-200">
+                <span className="group-open:hidden">Open</span>
+                <span className="hidden group-open:inline">Hide</span>
+              </span>
+            </summary>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">{renderSeatManagementActions()}</div>
+          </details>
+
+          <div className="hidden grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end xl:flex xl:max-w-[430px]">
+            {renderSeatManagementActions()}
           </div>
         </div>
       </header>
 
-      <div className="grid min-h-[calc(100vh-82px)] lg:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="grid lg:min-h-[calc(100vh-82px)] lg:grid-cols-[340px_minmax(0,1fr)]">
         <aside
           onDragOver={(event) => {
             event.preventDefault();
@@ -2103,19 +2120,18 @@ export default function SeatManagementPage() {
           }}
           onDragLeave={() => setActiveTarget(null)}
           onDrop={() => void handleDropOnQueue()}
-          className={`border-r border-stone-200 bg-white p-3 transition md:p-4 ${activeTarget === "queue" ? "bg-rose-50" : ""}`}
+          className={`order-2 border-r border-stone-200 bg-white p-3 transition md:p-4 lg:order-1 ${activeTarget === "queue" ? "bg-rose-50" : ""}`}
         >
-          <div className="space-y-3">
+          <div className="flex flex-col gap-3">
             <input
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="studio-input-compact"
+              className="studio-input-compact order-1 lg:order-none"
               placeholder="Search names or invite codes"
             />
 
-            <div className="studio-panel bg-white">
-              <p className="wedding-kicker mb-2">Planner Flow</p>
+            <MobileCollapsiblePanel eyebrow="Guide" title="Planner Flow" className="order-3 bg-white lg:order-none">
               <div className="space-y-2 text-sm leading-relaxed text-stone-600">
                 <p><span className="font-bold text-stone-900">1.</span> Add or adjust guest tables.</p>
                 <p><span className="font-bold text-stone-900">2.</span> Drag guests from the queue into open seats.</p>
@@ -2124,10 +2140,9 @@ export default function SeatManagementPage() {
               <div className="mt-3 rounded-[12px] border border-stone-100 bg-stone-50 px-3 py-2 text-[11px] leading-relaxed text-stone-500">
                 Refresh pulls new RSVPs and seating. Capture Image saves the current floor plan view.
               </div>
-            </div>
+            </MobileCollapsiblePanel>
 
-            <div className="studio-panel">
-              <p className="wedding-kicker mb-1">Guest Tables</p>
+            <MobileCollapsiblePanel eyebrow="Setup" title="Guest Tables" className="order-3 lg:order-none">
               <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                 <input
                   type="number"
@@ -2238,10 +2253,9 @@ export default function SeatManagementPage() {
               >
                 Reset Layout
               </button>
-            </div>
+            </MobileCollapsiblePanel>
 
-            <div className="studio-panel">
-              <p className="wedding-kicker mb-2">Floor Elements</p>
+            <MobileCollapsiblePanel eyebrow="Room" title="Floor Elements" className="order-3 lg:order-none">
               <label className="block text-xs font-bold uppercase tracking-[0.14em] text-stone-400">
                 Center Logo Text
                 <input
@@ -2277,10 +2291,9 @@ export default function SeatManagementPage() {
                 </button>
               </div>
               <p className="mt-2 text-[11px] leading-relaxed text-stone-400">Stage/Kosha and Dance Floor can also be removed from the floor plan itself.</p>
-            </div>
+            </MobileCollapsiblePanel>
 
-            <div className="studio-panel">
-              <p className="wedding-kicker mb-2">Add Room Object</p>
+            <MobileCollapsiblePanel eyebrow="Room" title="Add Room Object" className="order-3 lg:order-none">
               <div className="grid gap-2">
                 <select
                   value={roomObjectKind}
@@ -2336,10 +2349,9 @@ export default function SeatManagementPage() {
                 </button>
               </div>
               <p className="mt-2 text-[11px] leading-relaxed text-stone-400">Objects can be dragged, resized, removed, and captured with the floor plan.</p>
-            </div>
+            </MobileCollapsiblePanel>
 
-            <div className="studio-panel">
-              <p className="wedding-kicker mb-2">View</p>
+            <MobileCollapsiblePanel eyebrow="Display" title="View & Layout Tools" className="order-3 lg:order-none">
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
@@ -2420,9 +2432,9 @@ export default function SeatManagementPage() {
                     ? "Layout saves on this device until shared floor-plan saving is set up."
                     : "Checking layout storage..."}
               </p>
-            </div>
+            </MobileCollapsiblePanel>
 
-            <div>
+            <div className="order-2 lg:order-none">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="wedding-kicker mb-1">Seat Queue</p>
@@ -2460,7 +2472,7 @@ export default function SeatManagementPage() {
         <main
           ref={floorScrollRef}
           onPointerDown={startFloorPan}
-          className={`overflow-auto ${floorPanState ? "cursor-grabbing" : "cursor-grab"}`}
+          className={`order-1 h-[68svh] min-h-[430px] overflow-auto lg:order-2 lg:h-auto lg:min-h-0 ${floorPanState ? "cursor-grabbing" : "cursor-grab"}`}
         >
           <div
             ref={floorRef}
@@ -2661,6 +2673,42 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
       <p className="font-serif text-xl text-stone-900">{title}</p>
       <p className="mt-2 text-sm leading-relaxed text-stone-500">{detail}</p>
     </div>
+  );
+}
+
+function MobileCollapsiblePanel({
+  eyebrow,
+  title,
+  className = "",
+  defaultOpenMobile = false,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  className?: string;
+  defaultOpenMobile?: boolean;
+  children: ReactNode;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpenMobile);
+
+  return (
+    <section className={`studio-panel ${className}`}>
+      <button
+        type="button"
+        onClick={() => setIsOpen((open) => !open)}
+        className="flex w-full items-center justify-between gap-3 text-left lg:pointer-events-none"
+        aria-expanded={isOpen}
+      >
+        <span className="min-w-0">
+          <span className="wedding-kicker mb-1 block">{eyebrow}</span>
+          <span className="block truncate font-serif text-xl leading-tight text-stone-900">{title}</span>
+        </span>
+        <span className="rounded-full bg-white px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-stone-500 ring-1 ring-stone-200 lg:hidden">
+          {isOpen ? "Hide" : "Open"}
+        </span>
+      </button>
+      <div className={`${isOpen ? "block" : "hidden"} pt-3 lg:block lg:pt-2`}>{children}</div>
+    </section>
   );
 }
 

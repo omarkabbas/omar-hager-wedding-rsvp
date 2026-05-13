@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 
 import { supabase } from "@/lib/supabase";
 import { DatabaseEnvironmentBadge } from "../DatabaseEnvironmentBadge";
@@ -458,6 +458,7 @@ export default function FloorPlanPage() {
   const [spotlightSearch, setSpotlightSearch] = useState("");
   const [spotlightTargetKey, setSpotlightTargetKey] = useState<string | null>(null);
   const [selectedTableNumber, setSelectedTableNumber] = useState<number | null>(null);
+  const [selectedSeatUnitKey, setSelectedSeatUnitKey] = useState<string | null>(null);
   const [showGuestLabels, setShowGuestLabels] = useState(true);
   const [tableDragState, setTableDragState] = useState<TableDragState | null>(null);
   const [stageDragState, setStageDragState] = useState<StageDragState | null>(null);
@@ -1009,6 +1010,15 @@ export default function FloorPlanPage() {
     return map;
   }, [seatingAssignments]);
 
+  const rsvpByCode = useMemo(() => {
+    const map = new Map<string, GuestResponse>();
+    responses.forEach((guest) => {
+      const inviteCode = normalizeInviteCode(guest.invite_code);
+      if (inviteCode) map.set(inviteCode, guest);
+    });
+    return map;
+  }, [responses]);
+
   const assignedSeatUnits = useMemo(() => {
     const counters = new Map<number, number>();
 
@@ -1165,6 +1175,16 @@ export default function FloorPlanPage() {
     () => tableModels.find((table) => table.tableNumber === selectedTableNumber) ?? null,
     [selectedTableNumber, tableModels],
   );
+
+  const selectedSeatUnit = useMemo(
+    () => assignedSeatUnits.find((unit) => unit.key === selectedSeatUnitKey) ?? null,
+    [assignedSeatUnits, selectedSeatUnitKey],
+  );
+  const selectedSeatAssignment = useMemo(
+    () => seatingAssignments.find((assignment) => assignment.id === selectedSeatUnit?.assignmentId) ?? null,
+    [seatingAssignments, selectedSeatUnit?.assignmentId],
+  );
+  const selectedSeatLinkedGuest = selectedSeatUnit ? rsvpByCode.get(selectedSeatUnit.inviteCode) ?? null : null;
 
   const guestFinderResults = useMemo<GuestFinderResult[]>(() => {
     const query = spotlightSearch.trim().toLowerCase();
@@ -1639,6 +1659,48 @@ export default function FloorPlanPage() {
     showLayoutUpdatedToast("Grid fitted around the current layout.");
   };
 
+  const tidyGuestTables = () => {
+    if (layoutLocked) {
+      showToast("Layout is locked. Unlock it before tidying tables.", "info");
+      return;
+    }
+
+    if (tableNumbers.length === 0) {
+      showToast("Add guest tables before using tidy tables.", "info");
+      return;
+    }
+
+    const sortedTables = [...tableNumbers].sort((left, right) => left - right);
+    const columns = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(sortedTables.length))));
+    const xGap = 282;
+    const yGap = 268;
+    const xStart = floorLeftPadding + 90;
+    const yStart =
+      Math.max(
+        390,
+        stageVisible ? stagePosition.y + stageSize.height + 80 : 0,
+        danceFloorVisible ? danceFloorPosition.y + danceFloorSize.height + 80 : 0,
+      ) || 390;
+    const rows = Math.ceil(sortedTables.length / columns);
+
+    pushLayoutUndo(buildFloorPlanLayout());
+    setTablePositions((prev) => ({
+      ...prev,
+      ...Object.fromEntries(
+        sortedTables.map((tableNumber, index) => [
+          tableNumber,
+          {
+            x: xStart + (index % columns) * xGap,
+            y: yStart + Math.floor(index / columns) * yGap,
+          },
+        ]),
+      ),
+    }));
+    setFloorWidth(Math.max(FLOOR_WIDTH, xStart + columns * xGap + 120));
+    setFloorHeight(Math.max(FLOOR_MIN_HEIGHT, yStart + rows * yGap + 160));
+    showLayoutUpdatedToast("Guest tables tidied into clean rows.");
+  };
+
   const updateFloorMonogram = (value: string) => {
     setFloorMonogram(value);
     setHasUnsavedLayoutChanges(true);
@@ -1885,8 +1947,9 @@ export default function FloorPlanPage() {
           groupedGuests.length > 0
             ? groupedGuests
                 .map(
-                  (guest) => `<li>
-                    <div>
+                  (guest, guestIndex) => `<li class="guest-list-row">
+                    <span class="guest-index">${guestIndex + 1}</span>
+                    <div class="guest-copy">
                       <strong>${escapeHtml(guest.householdName)}</strong>
                       <span>${escapeHtml(guest.inviteCode)}</span>
                     </div>
@@ -1913,8 +1976,9 @@ export default function FloorPlanPage() {
       allWaitingGuests.length > 0
         ? allWaitingGuests
             .map(
-              (guest) => `<li>
-                <div>
+              (guest, guestIndex) => `<li class="guest-list-row">
+                <span class="guest-index">${guestIndex + 1}</span>
+                <div class="guest-copy">
                   <strong>${escapeHtml(guest.guestName)}</strong>
                   <span>${escapeHtml(guest.inviteCode)}</span>
                 </div>
@@ -1956,17 +2020,25 @@ export default function FloorPlanPage() {
               const assignment = unit.assignmentId ? assignmentById.get(unit.assignmentId) : null;
               map.set(groupKey, {
                 householdName: unit.householdName,
+                inviteCode: unit.inviteCode,
+                seatCount: 1,
                 aliases: new Set(parseNameAliases(assignment?.name_aliases)),
               });
             } else {
               const assignment = unit.assignmentId ? assignmentById.get(unit.assignmentId) : null;
-              parseNameAliases(assignment?.name_aliases).forEach((alias) => map.get(groupKey)?.aliases.add(alias));
+              const existing = map.get(groupKey);
+              if (existing) {
+                existing.seatCount += 1;
+                parseNameAliases(assignment?.name_aliases).forEach((alias) => existing.aliases.add(alias));
+              }
             }
             return map;
-          }, new Map<string, { householdName: string; aliases: Set<string> }>()),
+          }, new Map<string, { householdName: string; inviteCode: string; seatCount: number; aliases: Set<string> }>()),
         )
           .map(([, guest]) => ({
             householdName: guest.householdName,
+            inviteCode: guest.inviteCode,
+            seatCount: guest.seatCount,
             aliases: Array.from(guest.aliases).sort((left, right) => left.localeCompare(right)),
           }))
           .sort((left, right) => left.householdName.localeCompare(right.householdName));
@@ -1975,20 +2047,30 @@ export default function FloorPlanPage() {
           guests.length > 0
             ? guests
                 .map(
-                  (guest) => `<li>
-                    <strong>${escapeHtml(guest.householdName)}</strong>
-                    ${
-                      guest.aliases.length > 0
-                        ? `<span class="alias-line">Aliases: ${guest.aliases.map((alias) => escapeHtml(alias)).join(", ")}</span>`
-                        : ""
-                    }
+                  (guest, guestIndex) => `<li class="guest-list-row table-name-row">
+                    <span class="guest-index">${guestIndex + 1}</span>
+                    <div class="guest-copy">
+                      <div class="guest-name-line">
+                        <strong>${escapeHtml(guest.householdName)}</strong>
+                        <b>${guest.seatCount} seat${guest.seatCount === 1 ? "" : "s"}</b>
+                      </div>
+                      ${
+                        guest.aliases.length > 0
+                          ? `<span class="alias-line">Aliases: ${guest.aliases.map((alias) => escapeHtml(alias)).join(", ")}</span>`
+                          : ""
+                      }
+                      <span class="code-line">${escapeHtml(guest.inviteCode || "No RSVP code")}</span>
+                    </div>
                   </li>`,
                 )
                 .join("")
             : `<li class="empty-row">No guests assigned</li>`;
 
         return `<section class="table-name-card">
-          <h2>Table ${table.tableNumber}</h2>
+          <div class="table-name-card-header">
+            <h2>Table ${table.tableNumber}</h2>
+            <span>${table.units.length}/${table.capacity} seats</span>
+          </div>
           <ol>${guestRows}</ol>
         </section>`;
       })
@@ -2121,22 +2203,38 @@ export default function FloorPlanPage() {
         margin: 10px 0 0;
         padding: 0;
       }
-      li {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
+      .guest-list-row {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr) auto;
+        align-items: start;
         gap: 12px;
         border-bottom: 1px solid #f5f5f4;
         padding: 8px 0;
       }
-      li:last-child { border-bottom: 0; }
-      li strong {
+      .guest-list-row:last-child { border-bottom: 0; }
+      .guest-index {
+        align-items: center;
+        background: #f5f5f4;
+        border: 1px solid #e7e5e4;
+        border-radius: 999px;
+        color: #78716c;
+        display: inline-flex;
+        font-size: 11px;
+        font-weight: 700;
+        height: 24px;
+        justify-content: center;
+        width: 24px;
+      }
+      .guest-copy {
+        min-width: 0;
+      }
+      .guest-list-row strong {
         display: block;
         font-family: Georgia, serif;
         font-size: 16px;
         font-weight: 500;
       }
-      li span {
+      .guest-copy span {
         display: block;
         margin-top: 2px;
         color: #78716c;
@@ -2145,7 +2243,7 @@ export default function FloorPlanPage() {
         letter-spacing: 0.14em;
         text-transform: uppercase;
       }
-      li b {
+      .guest-list-row b {
         color: #57534e;
         font-size: 12px;
         white-space: nowrap;
@@ -2161,6 +2259,7 @@ export default function FloorPlanPage() {
         main { padding: 0; overflow: visible; }
         .floor-sheet { box-shadow: none; }
         .table-list { grid-template-columns: repeat(2, 1fr); }
+        .guest-list-row { grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; }
       }
     </style>
   </head>
@@ -2244,7 +2343,7 @@ export default function FloorPlanPage() {
     previewWindow.document.write(`<!doctype html>
 <html>
   <head>
-    <title>Table Guest List</title>
+    <title>Coordinator Table Cards</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       body {
@@ -2304,27 +2403,77 @@ export default function FloorPlanPage() {
         background: #fff;
         padding: 10px 12px 12px;
       }
-      .table-name-card h2 {
+      .table-name-card-header {
+        align-items: center;
         border-bottom: 1px solid #f5f5f4;
-        color: #4e5e72;
-        font-size: 18px;
+        display: flex;
+        gap: 12px;
+        justify-content: space-between;
         padding-bottom: 7px;
       }
+      .table-name-card h2 {
+        color: #4e5e72;
+        font-size: 18px;
+      }
+      .table-name-card-header span {
+        border: 1px solid #e7e5e4;
+        border-radius: 999px;
+        color: #57534e;
+        flex: 0 0 auto;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 5px 8px;
+        text-transform: uppercase;
+      }
       ol {
-        list-style-position: inside;
+        list-style: none;
         margin: 8px 0 0;
         padding: 0;
       }
-      li {
+      .guest-list-row {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr);
+        gap: 10px;
         border-bottom: 1px solid #f5f5f4;
-        font-family: Georgia, serif;
-        font-size: 14px;
-        line-height: 1.25;
+        align-items: start;
         padding: 5px 0;
       }
-      li strong {
+      .guest-index {
+        align-items: center;
+        background: #f5f5f4;
+        border: 1px solid #e7e5e4;
+        border-radius: 999px;
+        color: #78716c;
+        display: inline-flex;
+        font-size: 11px;
+        font-weight: 700;
+        height: 24px;
+        justify-content: center;
+        width: 24px;
+      }
+      .guest-copy {
+        min-width: 0;
+      }
+      .guest-name-line {
+        align-items: start;
+        display: flex;
+        gap: 8px;
+        justify-content: space-between;
+      }
+      .guest-list-row strong {
         display: block;
+        font-family: Georgia, serif;
+        font-size: 14px;
         font-weight: 500;
+        line-height: 1.25;
+      }
+      .guest-name-line b {
+        background: #f5f5f4;
+        border-radius: 999px;
+        color: #57534e;
+        flex: 0 0 auto;
+        font-size: 10px;
+        padding: 3px 7px;
       }
       .alias-line {
         display: block;
@@ -2333,7 +2482,16 @@ export default function FloorPlanPage() {
         font-family: Arial, sans-serif;
         font-size: 10px;
       }
-      li:last-child { border-bottom: 0; }
+      .code-line {
+        display: block;
+        margin-top: 3px;
+        color: #a8a29e;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      .guest-list-row:last-child { border-bottom: 0; }
       .empty-row {
         color: #a8a29e;
         font-family: Arial, sans-serif;
@@ -2361,13 +2519,26 @@ export default function FloorPlanPage() {
           border-radius: 0;
           padding: 8px 10px;
         }
+        .table-name-card-header {
+          padding-bottom: 5px !important;
+        }
         .table-name-card h2 {
           font-size: 16px;
-          padding-bottom: 5px;
         }
-        li {
+        .table-name-card-header span {
+          font-size: 9px;
+          padding: 4px 7px;
+        }
+        .guest-list-row {
           font-size: 12px;
           padding: 3px 0;
+          grid-template-columns: 22px minmax(0, 1fr);
+          gap: 7px;
+        }
+        .guest-index {
+          height: 20px;
+          width: 20px;
+          font-size: 10px;
         }
       }
     </style>
@@ -2375,8 +2546,8 @@ export default function FloorPlanPage() {
   <body>
     <header>
       <div>
-        <h1>Table Guest List</h1>
-        <p>${tableModels.length} table${tableModels.length === 1 ? "" : "s"} · ${seatedGuestTotal} guest name${seatedGuestTotal === 1 ? "" : "s"}</p>
+        <h1>Coordinator Table Cards</h1>
+        <p>${tableModels.length} table${tableModels.length === 1 ? "" : "s"} · ${seatedGuestTotal} guest name${seatedGuestTotal === 1 ? "" : "s"} · names, aliases, RSVP codes, and seat counts</p>
       </div>
       <button onclick="window.print()">Print</button>
     </header>
@@ -2386,7 +2557,7 @@ export default function FloorPlanPage() {
   </body>
 </html>`);
     previewWindow.document.close();
-    showToast("Table guest list opened.", "success");
+    showToast("Coordinator table cards opened.", "success");
   }, [buildTableGuestNameListHtml, showToast, tableModels]);
 
   const updateTableCapacity = (tableNumber: number, nextCapacity: number) => {
@@ -2744,21 +2915,83 @@ export default function FloorPlanPage() {
         <section className="mx-auto max-w-xl rounded-[28px] border border-white bg-white p-8 text-center shadow-xl">
           <p className="wedding-kicker mb-3">Private Access</p>
           <h1 className="font-serif text-4xl text-stone-900">Floor Plan</h1>
-          <p className="mt-4 text-sm leading-relaxed text-stone-500">Open Studio Pro first, then return to this page.</p>
+          <p className="mt-4 text-sm leading-relaxed text-stone-500">Open Admin Studio first, then return to this page.</p>
           <Link href="/studio-pro" className="wedding-button-primary mt-8">
-            Open Studio Pro
+            Open Admin Studio
           </Link>
         </section>
       </div>
     );
   }
 
+  const renderFloorPlanActions = () => (
+    <>
+      <Link href="/studio-pro" className="studio-compact-button">
+        Admin Studio
+      </Link>
+      <Link href="/studio-pro/coordinator" className="studio-compact-button">
+        Coordinator List
+      </Link>
+      <button
+        type="button"
+        onClick={() => {
+          setLayoutLocked((prev) => !prev);
+          showToast(layoutLocked ? "Layout unlocked. Tables and room objects can move again." : "Layout locked. Guest seating can still be edited.", "success");
+        }}
+        className={layoutLocked ? "studio-compact-button-primary" : "studio-compact-button"}
+      >
+        {layoutLocked ? "Locked" : "Lock Layout"}
+      </button>
+      <button
+        type="button"
+        onClick={undoLastLayoutChange}
+        disabled={layoutHistory.length === 0}
+        className="studio-compact-button disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Layout Undo
+      </button>
+      <button
+        type="button"
+        onClick={() => void saveFloorPlanLayout()}
+        disabled={isSavingLayout}
+        className={`studio-compact-button disabled:cursor-not-allowed disabled:opacity-60 ${
+          isSavingLayout ? "animate-pulse ring-2 ring-emerald-200" : hasUnsavedLayoutChanges ? "ring-2 ring-amber-200" : ""
+        }`}
+      >
+        {isSavingLayout ? (layoutSaveMode === "auto" ? "Autosaving..." : "Saving...") : "Save Layout"}
+      </button>
+      <button type="button" onClick={() => void captureFloorPlan()} className="studio-compact-button">
+        Capture Image
+      </button>
+      <button type="button" onClick={openFloorPlanPreview} className="studio-compact-button">
+        Share Preview
+      </button>
+      <button type="button" onClick={openPrintPacket} className="studio-compact-button">
+        Print Packet
+      </button>
+      <button type="button" onClick={openTableGuestListPrint} className="studio-compact-button">
+        Table Cards
+      </button>
+      <button type="button" onClick={openVendorView} className="studio-compact-button">
+        Vendor View
+      </button>
+      <button
+        type="button"
+        onClick={() => void refreshFloorPlan()}
+        disabled={isRefreshing}
+        className="studio-compact-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {isRefreshing ? "Refreshing..." : "Refresh"}
+      </button>
+    </>
+  );
+
   return (
     <div className="min-h-screen bg-[#f6f8fb] text-stone-900">
       <header className="sticky top-0 z-40 border-b border-stone-200 bg-white/95 px-3 py-2.5 shadow-sm backdrop-blur md:px-5">
         <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_minmax(360px,500px)_auto] xl:items-center">
           <div className="min-w-0">
-            <p className="wedding-kicker mb-1">Studio Pro</p>
+            <p className="wedding-kicker mb-1">Admin Studio</p>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="font-serif text-2xl tracking-tight text-stone-900 md:text-3xl">Floor Plan Seat Manager</h1>
               <DatabaseEnvironmentBadge />
@@ -2768,7 +3001,7 @@ export default function FloorPlanPage() {
                 </span>
               ) : null}
             </div>
-            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-stone-500 md:text-sm">
+            <p className="mt-1 hidden max-w-3xl text-xs leading-relaxed text-stone-500 sm:block md:text-sm">
               Drag tables, guests, the dance floor, and room elements. Guest seating and floor layout are saved separately so planning stays controlled.
             </p>
           </div>
@@ -2780,69 +3013,24 @@ export default function FloorPlanPage() {
             <Metric label="Open Seats" value={stats.openSeats} />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end xl:max-w-[430px]">
-            <Link href="/studio-pro" className="studio-compact-button">
-              Studio Pro
-            </Link>
-            <Link href="/studio-pro/coordinator" className="studio-compact-button">
-              Coordinator List
-            </Link>
-            <button
-              type="button"
-              onClick={() => {
-                setLayoutLocked((prev) => !prev);
-                showToast(layoutLocked ? "Layout unlocked. Tables and room objects can move again." : "Layout locked. Guest seating can still be edited.", "success");
-              }}
-              className={layoutLocked ? "studio-compact-button-primary" : "studio-compact-button"}
-            >
-              {layoutLocked ? "Locked" : "Lock Layout"}
-            </button>
-            <button
-              type="button"
-              onClick={undoLastLayoutChange}
-              disabled={layoutHistory.length === 0}
-              className="studio-compact-button disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Layout Undo
-            </button>
-            <button
-              type="button"
-              onClick={() => void saveFloorPlanLayout()}
-              disabled={isSavingLayout}
-              className={`studio-compact-button disabled:cursor-not-allowed disabled:opacity-60 ${
-                isSavingLayout ? "animate-pulse ring-2 ring-emerald-200" : hasUnsavedLayoutChanges ? "ring-2 ring-amber-200" : ""
-              }`}
-            >
-              {isSavingLayout ? (layoutSaveMode === "auto" ? "Autosaving..." : "Saving...") : "Save Layout"}
-            </button>
-            <button type="button" onClick={() => void captureFloorPlan()} className="studio-compact-button">
-              Capture Image
-            </button>
-            <button type="button" onClick={openFloorPlanPreview} className="studio-compact-button">
-              Share Preview
-            </button>
-            <button type="button" onClick={openPrintPacket} className="studio-compact-button">
-              Print Packet
-            </button>
-            <button type="button" onClick={openTableGuestListPrint} className="studio-compact-button">
-              Guest List
-            </button>
-            <button type="button" onClick={openVendorView} className="studio-compact-button">
-              Vendor View
-            </button>
-            <button
-              type="button"
-              onClick={() => void refreshFloorPlan()}
-              disabled={isRefreshing}
-              className="studio-compact-button-primary disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isRefreshing ? "Refreshing..." : "Refresh"}
-            </button>
+          <details className="group rounded-[16px] border border-stone-100 bg-stone-50 p-2 xl:hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-stone-600 [&::-webkit-details-marker]:hidden">
+              Page Actions
+              <span className="rounded-full bg-white px-2 py-1 text-[9px] text-stone-500 ring-1 ring-stone-200">
+                <span className="group-open:hidden">Open</span>
+                <span className="hidden group-open:inline">Hide</span>
+              </span>
+            </summary>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">{renderFloorPlanActions()}</div>
+          </details>
+
+          <div className="hidden grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end xl:flex xl:max-w-[430px]">
+            {renderFloorPlanActions()}
           </div>
         </div>
       </header>
 
-      <div className="grid min-h-[calc(100vh-82px)] lg:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="grid lg:min-h-[calc(100vh-82px)] lg:grid-cols-[340px_minmax(0,1fr)]">
         <aside
           onDragOver={(event) => {
             event.preventDefault();
@@ -2850,19 +3038,18 @@ export default function FloorPlanPage() {
           }}
           onDragLeave={() => setActiveTarget(null)}
           onDrop={() => void handleDropOnQueue()}
-          className={`border-r border-stone-200 bg-white p-3 transition md:p-4 ${activeTarget === "queue" ? "bg-rose-50" : ""}`}
+          className={`order-2 border-r border-stone-200 bg-white p-3 transition md:p-4 lg:order-1 ${activeTarget === "queue" ? "bg-rose-50" : ""}`}
         >
-          <div className="space-y-3">
+          <div className="flex flex-col gap-3">
             <input
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="studio-input-compact"
+              className="studio-input-compact order-1 lg:order-none"
               placeholder="Search names or invite codes"
             />
 
-            <div className="studio-panel border-sky-100 bg-sky-50">
-              <p className="wedding-kicker mb-2 text-sky-600">Guest Finder Spotlight</p>
+            <MobileCollapsiblePanel eyebrow="Search" title="Guest Finder Spotlight" className="order-4 border-sky-100 bg-sky-50 lg:order-none">
               <input
                 type="search"
                 value={spotlightSearch}
@@ -2913,10 +3100,9 @@ export default function FloorPlanPage() {
                   Clear Spotlight
                 </button>
               ) : null}
-            </div>
+            </MobileCollapsiblePanel>
 
-            <div className="studio-panel bg-white">
-              <p className="wedding-kicker mb-2">Table Health</p>
+            <MobileCollapsiblePanel eyebrow="Quick Check" title="Table Health" className="order-4 bg-white lg:order-none">
               <div className="grid grid-cols-3 gap-2">
                 <Metric label="Open" value={stats.openTables} />
                 <Metric label="Full" value={stats.fullTables} />
@@ -2944,10 +3130,9 @@ export default function FloorPlanPage() {
                   })
                 )}
               </div>
-            </div>
+            </MobileCollapsiblePanel>
 
-            <div className="studio-panel bg-white">
-              <p className="wedding-kicker mb-2">Planner Flow</p>
+            <MobileCollapsiblePanel eyebrow="Guide" title="Planner Flow" className="order-4 bg-white lg:order-none">
               <div className="space-y-2 text-sm leading-relaxed text-stone-600">
                 <p><span className="font-bold text-stone-900">1.</span> Add or adjust guest tables.</p>
                 <p><span className="font-bold text-stone-900">2.</span> Drag guests from the queue into open seats.</p>
@@ -2956,10 +3141,18 @@ export default function FloorPlanPage() {
               <div className="mt-3 rounded-[12px] border border-stone-100 bg-stone-50 px-3 py-2 text-[11px] leading-relaxed text-stone-500">
                 Refresh pulls new RSVPs and seating. Capture Image saves the current floor plan view.
               </div>
+            </MobileCollapsiblePanel>
+
+            <div className="studio-panel order-2 border-sky-100 bg-sky-50 lg:hidden">
+              <p className="wedding-kicker mb-2 text-sky-600">Mobile Seating Mode</p>
+              <div className="space-y-1.5 text-xs leading-relaxed text-sky-800">
+                <p><span className="font-bold">Seat someone:</span> tap a waiting guest, then tap the destination table.</p>
+                <p><span className="font-bold">Move someone:</span> tap their seat, choose Move Seat, then tap the new table.</p>
+                <p><span className="font-bold">Inspect:</span> tap any occupied seat to see aliases, RSVP link, status, and table actions.</p>
+              </div>
             </div>
 
-            <div className="studio-panel">
-              <p className="wedding-kicker mb-1">Guest Tables</p>
+            <MobileCollapsiblePanel eyebrow="Setup" title="Guest Tables" className="order-4 lg:order-none">
               <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                 <input
                   type="number"
@@ -3090,10 +3283,9 @@ export default function FloorPlanPage() {
               >
                 Reset Layout
               </button>
-            </div>
+            </MobileCollapsiblePanel>
 
-            <div className="studio-panel">
-              <p className="wedding-kicker mb-2">Floor Elements</p>
+            <MobileCollapsiblePanel eyebrow="Room" title="Floor Elements" className="order-4 lg:order-none">
               <label className="block text-xs font-bold uppercase tracking-[0.14em] text-stone-400">
                 Center Logo Text
                 <input
@@ -3131,10 +3323,9 @@ export default function FloorPlanPage() {
                 </button>
               </div>
               <p className="mt-2 text-[11px] leading-relaxed text-stone-400">Stage/Kosha and Dance Floor can also be removed from the floor plan itself.</p>
-            </div>
+            </MobileCollapsiblePanel>
 
-            <div className="studio-panel">
-              <p className="wedding-kicker mb-2">Add Room Object</p>
+            <MobileCollapsiblePanel eyebrow="Room" title="Add Room Object" className="order-4 lg:order-none">
               <div className="grid gap-2">
                 <select
                   value={roomObjectKind}
@@ -3191,10 +3382,9 @@ export default function FloorPlanPage() {
                 </button>
               </div>
               <p className="mt-2 text-[11px] leading-relaxed text-stone-400">Objects can be dragged, resized, removed, and captured with the floor plan.</p>
-            </div>
+            </MobileCollapsiblePanel>
 
-            <div className="studio-panel">
-              <p className="wedding-kicker mb-2">View</p>
+            <MobileCollapsiblePanel eyebrow="Display" title="View & Layout Tools" className="order-4 lg:order-none">
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
@@ -3219,6 +3409,14 @@ export default function FloorPlanPage() {
                 </button>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={tidyGuestTables}
+                  disabled={layoutLocked}
+                  className="studio-compact-button-primary disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Tidy Tables
+                </button>
                 <button
                   type="button"
                   onClick={fitGridToLayout}
@@ -3291,9 +3489,9 @@ export default function FloorPlanPage() {
                     ? "Layout saves on this device until shared floor-plan saving is set up."
                     : "Checking layout storage..."}
               </p>
-            </div>
+            </MobileCollapsiblePanel>
 
-            <div>
+            <div className="order-3 lg:order-none">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="wedding-kicker mb-1">Seat Queue</p>
@@ -3340,7 +3538,7 @@ export default function FloorPlanPage() {
         <main
           ref={floorScrollRef}
           onPointerDown={startFloorPan}
-          className={`overflow-auto ${floorPanState ? "cursor-grabbing" : "cursor-grab"}`}
+          className={`order-1 h-[68svh] min-h-[430px] overflow-auto lg:order-2 lg:h-auto lg:min-h-0 ${floorPanState ? "cursor-grabbing" : "cursor-grab"}`}
         >
           {tapSeatAction && (
             <div className="sticky top-3 z-30 mx-3 mb-3 rounded-[16px] border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 shadow-xl">
@@ -3394,7 +3592,9 @@ export default function FloorPlanPage() {
               </p>
             </div>
             <div className="pointer-events-none absolute right-4 top-4 max-w-[260px] rounded-[12px] border border-stone-200 bg-white/90 px-3 py-2 text-xs leading-snug text-stone-500 shadow-sm">
-              {layoutLocked ? "Layout is locked. Drag guests into seats, or unlock to move tables and room objects." : "Drag empty floor to pan. Drag objects to arrange."}
+              {layoutLocked
+                ? "Layout is locked. Tap a seated guest to inspect, or tap a waiting guest then a table to seat."
+                : "Tap seats to inspect. Drag empty floor to pan, or drag objects to arrange."}
             </div>
 
             {stageVisible && (
@@ -3526,11 +3726,11 @@ export default function FloorPlanPage() {
                     setDragPayload({ kind: "assigned", assignmentId: unit.assignmentId, inviteCode: unit.inviteCode });
                   }
                 }}
-                onSelectUnit={(unit) => {
+                onInspectUnit={(unit) => {
                   if (!unit.assignmentId || busyKeys.includes(`assignment:${unit.assignmentId}`)) return;
-                  setTapSeatAction({ kind: "assigned", assignmentId: unit.assignmentId, inviteCode: unit.inviteCode });
+                  setSelectedTableNumber(null);
+                  setSelectedSeatUnitKey(unit.key);
                   setSpotlightTargetKey(getSeatUnitGroupKey(unit));
-                  showToast(`${unit.householdName} selected. Tap another table to move this seat.`, "info");
                 }}
                 onUnseat={(unit) => {
                   if (unit.assignmentId) confirmUnseatAssignedSeat(unit.assignmentId);
@@ -3555,6 +3755,36 @@ export default function FloorPlanPage() {
           onPrintPacket={openPrintPacket}
           onTableGuestListPrint={openTableGuestListPrint}
           onVendorView={openVendorView}
+        />
+      )}
+
+      {selectedSeatUnit && (
+        <GuestInspectorDrawer
+          unit={selectedSeatUnit}
+          assignment={selectedSeatAssignment}
+          linkedGuest={selectedSeatLinkedGuest}
+          onClose={() => setSelectedSeatUnitKey(null)}
+          onMove={() => {
+            if (!selectedSeatUnit.assignmentId) return;
+            setTapSeatAction({
+              kind: "assigned",
+              assignmentId: selectedSeatUnit.assignmentId,
+              inviteCode: selectedSeatUnit.inviteCode,
+            });
+            setSpotlightTargetKey(getSeatUnitGroupKey(selectedSeatUnit));
+            setSelectedSeatUnitKey(null);
+            showToast(`${selectedSeatUnit.householdName} selected. Tap another table to move this seat.`, "info");
+          }}
+          onUnseat={() => {
+            if (!selectedSeatUnit.assignmentId) return;
+            setSelectedSeatUnitKey(null);
+            confirmUnseatAssignedSeat(selectedSeatUnit.assignmentId);
+          }}
+          onOpenTable={() => {
+            if (!selectedSeatUnit.tableNumber) return;
+            focusTableOnFloor(selectedSeatUnit.tableNumber, getSeatUnitGroupKey(selectedSeatUnit));
+            setSelectedSeatUnitKey(null);
+          }}
         />
       )}
 
@@ -3592,7 +3822,7 @@ export default function FloorPlanPage() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
+function Metric({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="min-w-0 rounded-[12px] border border-stone-100 bg-stone-50 px-2.5 py-2">
       <p title={label} className="text-[8px] font-bold uppercase leading-tight tracking-[0.1em] text-stone-400">
@@ -3609,6 +3839,163 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
       <p className="font-serif text-xl text-stone-900">{title}</p>
       <p className="mt-2 text-sm leading-relaxed text-stone-500">{detail}</p>
     </div>
+  );
+}
+
+function MobileCollapsiblePanel({
+  eyebrow,
+  title,
+  className = "",
+  defaultOpenMobile = false,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  className?: string;
+  defaultOpenMobile?: boolean;
+  children: ReactNode;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpenMobile);
+
+  return (
+    <section className={`studio-panel ${className}`}>
+      <button
+        type="button"
+        onClick={() => setIsOpen((open) => !open)}
+        className="flex w-full items-center justify-between gap-3 text-left lg:pointer-events-none"
+        aria-expanded={isOpen}
+      >
+        <span className="min-w-0">
+          <span className="wedding-kicker mb-1 block">{eyebrow}</span>
+          <span className="block truncate font-serif text-xl leading-tight text-stone-900">{title}</span>
+        </span>
+        <span className="rounded-full bg-white px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-stone-500 ring-1 ring-stone-200 lg:hidden">
+          {isOpen ? "Hide" : "Open"}
+        </span>
+      </button>
+      <div className={`${isOpen ? "block" : "hidden"} pt-3 lg:block lg:pt-2`}>{children}</div>
+    </section>
+  );
+}
+
+function GuestInspectorDrawer({
+  unit,
+  assignment,
+  linkedGuest,
+  onClose,
+  onMove,
+  onUnseat,
+  onOpenTable,
+}: {
+  unit: SeatUnit;
+  assignment: SeatingAssignment | null;
+  linkedGuest: GuestResponse | null;
+  onClose: () => void;
+  onMove: () => void;
+  onUnseat: () => void;
+  onOpenTable: () => void;
+}) {
+  const aliases = parseNameAliases(assignment?.name_aliases);
+  const status = !linkedGuest
+    ? "No linked RSVP"
+    : linkedGuest.attending === true
+      ? "Attending"
+      : linkedGuest.attending === false
+        ? "Declined"
+        : "Pending";
+  const statusStyle = !linkedGuest
+    ? "bg-stone-100 text-stone-600"
+    : linkedGuest.attending === true
+      ? "bg-emerald-50 text-emerald-700"
+      : linkedGuest.attending === false
+        ? "bg-rose-50 text-rose-700"
+        : "bg-amber-50 text-amber-700";
+  const rsvpName = linkedGuest?.guest_name?.trim();
+  const showLinkedName = rsvpName && normalizeSeatName(rsvpName) !== normalizeSeatName(unit.householdName);
+
+  return (
+    <>
+      <button type="button" aria-label="Close guest inspector" onClick={onClose} className="fixed inset-0 z-[74] bg-stone-900/20" />
+      <aside className="fixed inset-x-0 bottom-0 z-[75] flex max-h-[92vh] w-full flex-col rounded-t-[24px] border border-stone-200 bg-white shadow-2xl md:inset-y-0 md:left-auto md:right-0 md:max-h-none md:max-w-md md:rounded-none md:border-y-0 md:border-r-0">
+        <div className="border-b border-stone-100 px-5 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="wedding-kicker mb-1">Guest Inspector</p>
+              <h2 className="truncate font-serif text-3xl text-stone-900">{unit.householdName}</h2>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <span className="rounded-full bg-stone-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-stone-600">
+                  Table {unit.tableNumber ?? "?"}
+                </span>
+                <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${statusStyle}`}>
+                  {status}
+                </span>
+              </div>
+            </div>
+            <button type="button" onClick={onClose} className="studio-compact-button">
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <div className="grid grid-cols-2 gap-2">
+            <Metric label="RSVP Code" value={unit.inviteCode} />
+            <Metric label="Seat" value={String(unit.seatNumber)} />
+            <Metric label="Assignment Seats" value={String(Math.max(1, assignment?.guest_count || 1))} />
+            <Metric label="Table" value={String(unit.tableNumber ?? "-")} />
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {showLinkedName && (
+              <div className="rounded-[16px] border border-stone-100 bg-stone-50 px-4 py-3">
+                <p className="wedding-kicker mb-1">Linked RSVP</p>
+                <p className="font-serif text-lg text-stone-900">{rsvpName}</p>
+              </div>
+            )}
+
+            <div className="rounded-[16px] border border-stone-100 bg-stone-50 px-4 py-3">
+              <p className="wedding-kicker mb-1">Search Aliases</p>
+              {aliases.length > 0 ? (
+                <p className="text-sm leading-relaxed text-stone-600">{aliases.join(", ")}</p>
+              ) : (
+                <p className="text-sm text-stone-400">No aliases saved for this seating row.</p>
+              )}
+            </div>
+
+            {linkedGuest && (
+              <div className="rounded-[16px] border border-stone-100 bg-stone-50 px-4 py-3">
+                <p className="wedding-kicker mb-1">RSVP Count</p>
+                <p className="text-sm leading-relaxed text-stone-600">
+                  {linkedGuest.attending === true
+                    ? `${Math.max(1, linkedGuest.confirmed_guests || 1)} confirmed guest${
+                        Math.max(1, linkedGuest.confirmed_guests || 1) === 1 ? "" : "s"
+                      }`
+                    : `${Math.max(1, linkedGuest.max_guests || 1)} invited guest${
+                        Math.max(1, linkedGuest.max_guests || 1) === 1 ? "" : "s"
+                      }`}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-5 grid gap-2">
+            <button type="button" onClick={onMove} className="wedding-button-primary w-full">
+              Move Seat
+            </button>
+            <button type="button" onClick={onOpenTable} className="wedding-button-secondary w-full">
+              Open Table Details
+            </button>
+            <button
+              type="button"
+              onClick={onUnseat}
+              className="wedding-button-secondary w-full border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+            >
+              Return To Queue
+            </button>
+          </div>
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -3685,7 +4072,7 @@ function TableDetailDrawer({
             Print Packet
           </button>
           <button type="button" onClick={onTableGuestListPrint} className="studio-compact-button">
-            Guest List
+            Table Cards
           </button>
           <button type="button" onClick={onVendorView} className="studio-compact-button">
             Vendor View
@@ -3903,7 +4290,7 @@ function VisualTable({
   onStartTableDrag,
   onOpenDetails,
   onDragUnit,
-  onSelectUnit,
+  onInspectUnit,
   onUnseat,
 }: {
   tableNumber: number;
@@ -3926,7 +4313,7 @@ function VisualTable({
   onStartTableDrag: (event: ReactPointerEvent<HTMLElement>) => void;
   onOpenDetails: () => void;
   onDragUnit: (unit: SeatUnit) => void;
-  onSelectUnit: (unit: SeatUnit) => void;
+  onInspectUnit: (unit: SeatUnit) => void;
   onUnseat: (unit: SeatUnit) => void;
 }) {
   const seats = Array.from({ length: capacity }, (_, index) => units[index] || null);
@@ -4006,7 +4393,7 @@ function VisualTable({
             onClick={(event) => {
               event.stopPropagation();
               if (unit) {
-                onSelectUnit(unit);
+                onInspectUnit(unit);
                 return;
               }
               if (tapTargetActive) onTapSeatAction();

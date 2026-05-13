@@ -5,6 +5,14 @@ import type { ReactNode, WheelEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { createPortal } from "react-dom";
+import {
+  formatRsvpByDateLabel,
+  getRsvpByDateValue,
+  getRsvpByDateVisibility,
+  RSVP_BY_DATE_SETTING_KEY,
+  RSVP_BY_DATE_VISIBILITY_SETTING_KEY,
+  toRsvpDateInputValue,
+} from "@/lib/rsvpSettings";
 import { supabase } from "@/lib/supabase";
 import { SITE_URL } from "@/lib/wedding";
 import { toYoutubeEmbedUrl } from "@/lib/youtube";
@@ -57,6 +65,16 @@ type GuestExtraFilter = "sent" | "not_sent" | "has_children" | "virtual" | "need
 type GuestSort = "recent" | "name" | "invite_code" | "largest_party";
 type SeatingSort = "table" | "name";
 type SeatingTableFilter = number[] | "all";
+type StudioSavedView = "follow_up" | "needs_seating" | "sent_pending" | "not_sent" | "seating_board" | "checks";
+type QuickViewTone = "amber" | "emerald" | "stone";
+
+type QuickViewItem = {
+  key: StudioSavedView;
+  label: string;
+  count: number;
+  detail: string;
+  tone: QuickViewTone;
+};
 
 type InlineGuestDraft = {
   guest_name: string;
@@ -119,6 +137,10 @@ type WorkspaceLocation = {
 
 const INVITE_BASE_URL = SITE_URL.replace(/\/+$/, "");
 const INVITATION_IMAGE_PATH = "/O&H_invitation.jpeg";
+const STUDIO_WORKSPACE_STATE_KEY = "studio_pro_workspace_state_v2";
+
+const buildCoordinatorShareUrl = (accessCode: string) =>
+  `${INVITE_BASE_URL}/studio-pro/coordinator?access=${encodeURIComponent(accessCode.trim())}`;
 
 const pemToArrayBuffer = (pem: string) => {
   const base64 = pem.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, "");
@@ -185,6 +207,7 @@ const getGuestInviteUrl = (guest: GuestResponse) => `${INVITE_BASE_URL}/${guest.
 const getSeatingGuestCount = (guest: GuestResponse) =>
   guest.virtual_guest === true ? 0 : guest.attending === true ? Math.max(1, guest.confirmed_guests || 1) : Math.max(1, guest.max_guests || 1);
 const normalizeInviteCode = (value?: string | null) => (value || "").trim().toUpperCase();
+const getGuestIssueKey = (guest: GuestResponse) => normalizeInviteCode(guest.invite_code) || normalizeNameKey(guest.guest_name);
 const normalizePhoneForSmsLink = (value?: string | null) => (value || "").replace(/[^\d+]/g, "");
 const parseNameAliases = (value?: string | null) =>
   (value || "")
@@ -454,7 +477,7 @@ export default function StudioProPage() {
   const [guestSearch, setGuestSearch] = useState("");
   const [guestStatusFilters, setGuestStatusFilters] = useState<GuestStatusFilter[]>([]);
   const [guestExtraFilters, setGuestExtraFilters] = useState<GuestExtraFilter[]>([]);
-  const [guestSort, setGuestSort] = useState<GuestSort>("name");
+  const [guestSort, setGuestSort] = useState<GuestSort>("recent");
   const deferredGuestSearch = useDeferredValue(guestSearch);
 
   const [seatingSearch, setSeatingSearch] = useState("");
@@ -478,7 +501,13 @@ export default function StudioProPage() {
   const [isGalleryFeedEnabled, setIsGalleryFeedEnabled] = useState(true);
   const [isLivestreamEnabled, setIsLivestreamEnabled] = useState(false);
   const [isRsvpOpen, setIsRsvpOpen] = useState(true);
+  const [rsvpByDate, setRsvpByDate] = useState(getRsvpByDateValue());
+  const [rsvpByDateDraft, setRsvpByDateDraft] = useState(toRsvpDateInputValue());
+  const [isRsvpByDateVisible, setIsRsvpByDateVisible] = useState(true);
   const [livestreamEmbedUrl, setLivestreamEmbedUrl] = useState("");
+  const [isCoordinatorShareEnabled, setIsCoordinatorShareEnabled] = useState(false);
+  const [coordinatorShareCode, setCoordinatorShareCode] = useState("");
+  const [coordinatorShareCodeDraft, setCoordinatorShareCodeDraft] = useState("");
   const [isHomeVenueEnabled, setIsHomeVenueEnabled] = useState(false);
   const [isHomeCarouselEnabled, setIsHomeCarouselEnabled] = useState(true);
   const [isHomeDressCodeEnabled, setIsHomeDressCodeEnabled] = useState(false);
@@ -495,9 +524,9 @@ export default function StudioProPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [hasRestoredWorkspaceState, setHasRestoredWorkspaceState] = useState(false);
-  const [guestFiltersOpen, setGuestFiltersOpen] = useState(true);
+  const [guestFiltersOpen, setGuestFiltersOpen] = useState(false);
   const [guestSummaryOpen, setGuestSummaryOpen] = useState(false);
-  const [seatingControlsOpen, setSeatingControlsOpen] = useState(true);
+  const [seatingControlsOpen, setSeatingControlsOpen] = useState(false);
   const [tableToolsOpen, setTableToolsOpen] = useState(false);
   const [followUpSentBefore, setFollowUpSentBefore] = useState("");
   const [guestComposerReturnLocation, setGuestComposerReturnLocation] = useState<WorkspaceLocation | null>(null);
@@ -567,7 +596,7 @@ export default function StudioProPage() {
   useEffect(() => {
     if (!authorized || hasRestoredWorkspaceState) return;
 
-    const savedState = window.sessionStorage.getItem("studio_pro_workspace_state_v1");
+    const savedState = window.sessionStorage.getItem(STUDIO_WORKSPACE_STATE_KEY);
     if (savedState) {
       try {
         const parsed = JSON.parse(savedState) as {
@@ -623,7 +652,7 @@ export default function StudioProPage() {
         if (parsed.tableToolsOpen !== undefined) setTableToolsOpen(parsed.tableToolsOpen);
         if (typeof parsed.followUpSentBefore === "string") setFollowUpSentBefore(parsed.followUpSentBefore);
       } catch {
-        window.sessionStorage.removeItem("studio_pro_workspace_state_v1");
+        window.sessionStorage.removeItem(STUDIO_WORKSPACE_STATE_KEY);
       }
     }
 
@@ -634,7 +663,7 @@ export default function StudioProPage() {
     if (!authorized || !hasRestoredWorkspaceState) return;
 
     window.sessionStorage.setItem(
-      "studio_pro_workspace_state_v1",
+      STUDIO_WORKSPACE_STATE_KEY,
       JSON.stringify({
         activeView,
         overviewTab,
@@ -704,7 +733,11 @@ export default function StudioProPage() {
         "is_gallery_feed_enabled",
         "is_livestream_enabled",
         "is_rsvp_open",
+        RSVP_BY_DATE_SETTING_KEY,
+        RSVP_BY_DATE_VISIBILITY_SETTING_KEY,
         "livestream_embed_url",
+        "is_coordinator_share_enabled",
+        "coordinator_share_code",
         "is_home_venue_enabled",
         "is_home_carousel_enabled",
         "is_home_dress_code_enabled",
@@ -725,7 +758,13 @@ export default function StudioProPage() {
       setIsGalleryFeedEnabled(settingsMap.is_gallery_feed_enabled ? settingsMap.is_gallery_feed_enabled === "true" : true);
       setIsLivestreamEnabled(settingsMap.is_livestream_enabled === "true");
       setIsRsvpOpen(settingsMap.is_rsvp_open ? settingsMap.is_rsvp_open !== "false" : true);
+      setRsvpByDate(getRsvpByDateValue(settingsMap[RSVP_BY_DATE_SETTING_KEY]));
+      setRsvpByDateDraft(toRsvpDateInputValue(settingsMap[RSVP_BY_DATE_SETTING_KEY]));
+      setIsRsvpByDateVisible(getRsvpByDateVisibility(settingsMap[RSVP_BY_DATE_VISIBILITY_SETTING_KEY]));
       setLivestreamEmbedUrl(settingsMap.livestream_embed_url || "");
+      setIsCoordinatorShareEnabled(settingsMap.is_coordinator_share_enabled === "true");
+      setCoordinatorShareCode(settingsMap.coordinator_share_code || "");
+      setCoordinatorShareCodeDraft(settingsMap.coordinator_share_code || "");
       setIsHomeVenueEnabled(settingsMap.is_home_venue_enabled === "true");
       setIsHomeCarouselEnabled(settingsMap.is_home_carousel_enabled ? settingsMap.is_home_carousel_enabled === "true" : true);
       setIsHomeDressCodeEnabled(settingsMap.is_home_dress_code_enabled === "true");
@@ -1779,6 +1818,64 @@ export default function StudioProPage() {
     [getTableNumbersForGuest],
   );
 
+  const applySavedView = (view: StudioSavedView) => {
+    setInlineGuestEdits({});
+    setInlineSeatingEdits({});
+
+    if (view === "follow_up") {
+      setActiveView("overview");
+      setOverviewTab("follow_up");
+      setFollowUpSentBefore("");
+      showToast("Saved view opened: follow up.", "success");
+      return;
+    }
+
+    if (view === "needs_seating") {
+      setActiveView("overview");
+      setOverviewTab("needs_seating");
+      showToast("Saved view opened: seats needed.", "success");
+      return;
+    }
+
+    if (view === "sent_pending") {
+      setActiveView("invitations");
+      setInvitationTab("manage");
+      setGuestStatusFilters(["pending"]);
+      setGuestExtraFilters(["sent_awaiting_response"]);
+      setGuestSort("recent");
+      setGuestSearch("");
+      showToast("Saved view opened: sent and awaiting reply.", "success");
+      return;
+    }
+
+    if (view === "not_sent") {
+      setActiveView("invitations");
+      setInvitationTab("manage");
+      setGuestStatusFilters([]);
+      setGuestExtraFilters(["not_sent"]);
+      setGuestSort("name");
+      setGuestSearch("");
+      showToast("Saved view opened: invitations not sent.", "success");
+      return;
+    }
+
+    if (view === "seating_board") {
+      setActiveView("seating");
+      setSeatingTab("board");
+      setSeatingBoardMode("assignments");
+      setSeatingTableFilter("all");
+      setSeatingSearch("");
+      setSeatingSort("table");
+      showToast("Saved view opened: seating board.", "success");
+      return;
+    }
+
+    setActiveView("overview");
+    setOverviewTab("checks");
+    setChecksTab("seating");
+    showToast("Saved view opened: checks.", "success");
+  };
+
   const updateSetting = async (key: string, nextValue: boolean, successMessage: string) => {
     const { data: updatedSetting, error: updateError } = await supabase
       .from("settings")
@@ -1806,6 +1903,8 @@ export default function StudioProPage() {
     if (key === "is_gallery_feed_enabled") setIsGalleryFeedEnabled(nextValue);
     if (key === "is_livestream_enabled") setIsLivestreamEnabled(nextValue);
     if (key === "is_rsvp_open") setIsRsvpOpen(nextValue);
+    if (key === RSVP_BY_DATE_VISIBILITY_SETTING_KEY) setIsRsvpByDateVisible(nextValue);
+    if (key === "is_coordinator_share_enabled") setIsCoordinatorShareEnabled(nextValue);
     if (key === "is_home_venue_enabled") setIsHomeVenueEnabled(nextValue);
     if (key === "is_home_carousel_enabled") setIsHomeCarouselEnabled(nextValue);
     if (key === "is_home_dress_code_enabled") setIsHomeDressCodeEnabled(nextValue);
@@ -1814,14 +1913,36 @@ export default function StudioProPage() {
   };
 
   const updateTextSetting = async (key: string, nextValue: string, successMessage: string) => {
-    const { error: updateError } = await supabase.from("settings").update({ value: nextValue }).eq("key", key);
+    const { data: updatedSetting, error: updateError } = await supabase
+      .from("settings")
+      .update({ value: nextValue })
+      .eq("key", key)
+      .select("key")
+      .maybeSingle();
 
     if (updateError) {
       showToast(updateError.message, "error");
       return;
     }
 
+    if (!updatedSetting) {
+      const { error: insertError } = await supabase.from("settings").insert({ key, value: nextValue });
+
+      if (insertError) {
+        showToast(insertError.message, "error");
+        return;
+      }
+    }
+
     if (key === "livestream_embed_url") setLivestreamEmbedUrl(nextValue);
+    if (key === RSVP_BY_DATE_SETTING_KEY) {
+      setRsvpByDate(nextValue);
+      setRsvpByDateDraft(toRsvpDateInputValue(nextValue));
+    }
+    if (key === "coordinator_share_code") {
+      setCoordinatorShareCode(nextValue);
+      setCoordinatorShareCodeDraft(nextValue);
+    }
     showToast(successMessage, "success");
   };
 
@@ -1839,6 +1960,51 @@ export default function StudioProPage() {
     }
 
     await updateTextSetting("livestream_embed_url", embedLink, "Livestream link saved.");
+  };
+
+  const saveRsvpByDate = async () => {
+    const cleanedDate = rsvpByDateDraft.trim();
+    if (!cleanedDate) {
+      showToast("Choose an RSVP reply-by date before saving.", "error");
+      return;
+    }
+
+    await updateTextSetting(RSVP_BY_DATE_SETTING_KEY, cleanedDate, "RSVP reply-by date saved.");
+  };
+
+  const saveCoordinatorShareCode = async () => {
+    const cleanedCode = coordinatorShareCodeDraft.trim();
+    if (!cleanedCode) {
+      showToast("Add an access code before saving the coordinator link.", "error");
+      return;
+    }
+
+    await updateTextSetting("coordinator_share_code", cleanedCode, "Coordinator access code saved.");
+  };
+
+  const generateCoordinatorShareCode = () => {
+    const randomPart =
+      typeof window.crypto?.getRandomValues === "function"
+        ? Array.from(window.crypto.getRandomValues(new Uint8Array(4)))
+            .map((value) => value.toString(36).padStart(2, "0"))
+            .join("")
+        : Math.random().toString(36).slice(2, 10);
+    setCoordinatorShareCodeDraft(`DAYOF-${randomPart.slice(0, 8).toUpperCase()}`);
+  };
+
+  const copyCoordinatorShareLink = async () => {
+    const cleanedCode = coordinatorShareCode.trim();
+    if (!cleanedCode) {
+      showToast("Save an access code before copying the coordinator link.", "error");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(buildCoordinatorShareUrl(cleanedCode));
+      showToast("Coordinator link copied.", "success");
+    } catch (copyError) {
+      showToast(copyError instanceof Error ? copyError.message : "Could not copy coordinator link.", "error");
+    }
   };
 
   const getTableForGuest = useCallback(
@@ -1885,7 +2051,7 @@ export default function StudioProPage() {
   }, [getAssignedSeatCountForGuest, getSeatingAssignmentsForGuest, responses]);
 
   const guestsNeedingSeatingKeys = useMemo(
-    () => new Set(acceptedGuestsNeedingSeating.map(({ guest }) => normalizeNameKey(guest.guest_name))),
+    () => new Set(acceptedGuestsNeedingSeating.map(({ guest }) => getGuestIssueKey(guest))),
     [acceptedGuestsNeedingSeating],
   );
 
@@ -1916,7 +2082,7 @@ export default function StudioProPage() {
   }, [getAssignedSeatCountForGuest, getSeatingAssignmentsForGuest, responses]);
 
   const seatedPendingOrDeclinedKeys = useMemo(
-    () => new Set(seatedPendingOrDeclinedGuests.map(({ guest }) => normalizeNameKey(guest.guest_name))),
+    () => new Set(seatedPendingOrDeclinedGuests.map(({ guest }) => getGuestIssueKey(guest))),
     [seatedPendingOrDeclinedGuests],
   );
 
@@ -1955,7 +2121,7 @@ export default function StudioProPage() {
   }, [getAssignedSeatCountForGuest, getSeatingAssignmentsForGuest, responses]);
 
   const acceptedSeatOverageKeys = useMemo(
-    () => new Set(acceptedSeatOverages.map(({ guest }) => normalizeNameKey(guest.guest_name))),
+    () => new Set(acceptedSeatOverages.map(({ guest }) => getGuestIssueKey(guest))),
     [acceptedSeatOverages],
   );
 
@@ -1968,7 +2134,7 @@ export default function StudioProPage() {
   }, [responses]);
 
   const guestCountIntegrityIssueKeys = useMemo(
-    () => new Set(guestCountIntegrityIssues.map((guest) => normalizeNameKey(guest.guest_name))),
+    () => new Set(guestCountIntegrityIssues.map((guest) => getGuestIssueKey(guest))),
     [guestCountIntegrityIssues],
   );
 
@@ -2088,7 +2254,7 @@ export default function StudioProPage() {
         if (filter === "has_children") return guest.has_children === true;
         if (filter === "sent_awaiting_response") return guest.invitation_sent === true && guest.attending === null;
         if (filter === "virtual") return guest.virtual_guest === true;
-        return guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name));
+        return guestsNeedingSeatingKeys.has(getGuestIssueKey(guest));
       });
     });
 
@@ -2117,7 +2283,7 @@ export default function StudioProPage() {
     const invitedGuests = physicalResponses.reduce((sum, guest) => sum + (guest.max_guests || 0), 0);
     const awaiting = physicalResponses.filter((guest) => guest.attending === null).length;
     const declined = physicalResponses.filter((guest) => guest.attending === false).length;
-    const needsSeating = physicalResponses.filter((guest) => guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name))).length;
+    const needsSeating = physicalResponses.filter((guest) => guestsNeedingSeatingKeys.has(getGuestIssueKey(guest))).length;
     const virtualAccepted = virtualResponses.filter((guest) => guest.attending === true).length;
     const virtualDeclined = virtualResponses.filter((guest) => guest.attending === false).length;
     const virtualAwaiting = virtualResponses.filter((guest) => guest.attending === null).length;
@@ -2297,6 +2463,51 @@ export default function StudioProPage() {
         return leftSentAt - rightSentAt || left.guest_name.localeCompare(right.guest_name);
       });
   }, [followUpSentBefore, responses]);
+
+  const quickViewItems: QuickViewItem[] = [
+    {
+      key: "follow_up",
+      label: "Follow Up",
+      count: followUpGuests.length,
+      detail: `${followUpGuests.length} awaiting reply`,
+      tone: followUpGuests.length > 0 ? "amber" : "stone",
+    },
+    {
+      key: "needs_seating",
+      label: "Seats Needed",
+      count: stats.acceptedNeedingSeating,
+      detail: `${stats.acceptedNeedingSeating} ${stats.acceptedNeedingSeating === 1 ? "guest" : "guests"} to seat`,
+      tone: stats.acceptedNeedingSeating > 0 ? "amber" : "emerald",
+    },
+    {
+      key: "sent_pending",
+      label: "Sent Pending",
+      count: stats.awaitingResponse,
+      detail: `${stats.awaitingResponse} sent invites`,
+      tone: stats.awaitingResponse > 0 ? "stone" : "emerald",
+    },
+    {
+      key: "not_sent",
+      label: "Not Sent",
+      count: stats.pendingInvitations,
+      detail: `${stats.pendingInvitations} unsent invites`,
+      tone: stats.pendingInvitations > 0 ? "amber" : "emerald",
+    },
+    {
+      key: "seating_board",
+      label: "Seating Board",
+      count: seatingAssignments.length,
+      detail: `${seatingAssignments.length} assigned seats`,
+      tone: "stone",
+    },
+    {
+      key: "checks",
+      label: "Checks",
+      count: integrityIssueCount,
+      detail: `${integrityIssueCount} ${integrityIssueCount === 1 ? "item" : "items"} to review`,
+      tone: integrityIssueCount > 0 ? "amber" : "emerald",
+    },
+  ];
 
   const seatingComposerCapacityCheck = getSeatingCapacityCheck({
     inviteCode: seatingInviteCode,
@@ -2925,7 +3136,7 @@ export default function StudioProPage() {
                   <div className="min-w-0">
                     <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.26em] text-stone-400">Omar & Hager 2026</p>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h1 className="font-serif text-2xl tracking-tight text-stone-900 md:text-3xl">Studio Pro</h1>
+                      <h1 className="font-serif text-2xl tracking-tight text-stone-900 md:text-3xl">Admin Studio</h1>
                       <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-sky-700">
                         Pro
                       </span>
@@ -2939,7 +3150,7 @@ export default function StudioProPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap">
               <button
                 type="button"
                 onClick={beginGuestFormCreate}
@@ -2954,29 +3165,62 @@ export default function StudioProPage() {
               >
                 Seat Guests
               </button>
-              <Link href="/studio-pro/floor-plan" className="studio-compact-button">
+              <Link href="/studio-pro/floor-plan" className="studio-compact-button col-span-2 md:col-span-1">
                 Floor Plan
               </Link>
-              <Link href="/studio-pro/coordinator" className="studio-compact-button">
-                Coordinator List
-              </Link>
-              <Link href="/" className="studio-compact-button">
-                Open Website
-              </Link>
-              <button
-                type="button"
-                onClick={openInvitationImage}
-                className="studio-compact-button"
-              >
-                Open Invitation Image
-              </button>
-              <button
-                type="button"
-                onClick={exportInvitationCsv}
-                className="studio-compact-button"
-              >
-                Export CSV
-              </button>
+              <details className="group col-span-2 rounded-[16px] border border-stone-100 bg-stone-50 p-2 md:hidden">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-stone-600 [&::-webkit-details-marker]:hidden">
+                  More Studio Actions
+                  <span className="rounded-full bg-white px-2 py-1 text-[9px] text-stone-500 ring-1 ring-stone-200">
+                    <span className="group-open:hidden">Open</span>
+                    <span className="hidden group-open:inline">Hide</span>
+                  </span>
+                </summary>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Link href="/studio-pro/coordinator" className="studio-compact-button">
+                    Coordinator List
+                  </Link>
+                  <Link href="/" className="studio-compact-button">
+                    Open Website
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={openInvitationImage}
+                    className="studio-compact-button"
+                  >
+                    Invitation Image
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exportInvitationCsv}
+                    className="studio-compact-button"
+                  >
+                    Export CSV
+                  </button>
+                </div>
+              </details>
+              <div className="hidden gap-2 md:flex md:flex-wrap">
+                <Link href="/studio-pro/coordinator" className="studio-compact-button">
+                  Coordinator List
+                </Link>
+                <Link href="/" className="studio-compact-button">
+                  Open Website
+                </Link>
+                <button
+                  type="button"
+                  onClick={openInvitationImage}
+                  className="studio-compact-button"
+                >
+                  Open Invitation Image
+                </button>
+                <button
+                  type="button"
+                  onClick={exportInvitationCsv}
+                  className="studio-compact-button"
+                >
+                  Export CSV
+                </button>
+              </div>
             </div>
           </div>
         </header>
@@ -3020,6 +3264,8 @@ export default function StudioProPage() {
           />
         </div>
 
+        <QuickViewsPanel items={quickViewItems} onSelect={applySavedView} />
+
         <main className="mt-4 min-w-0 space-y-4 pb-8 md:space-y-5">
             {activeView === "overview" && (
               <div className="space-y-5">
@@ -3041,7 +3287,7 @@ export default function StudioProPage() {
                       <SectionHeading
                         kicker="Planner Command Center"
                         title="What Needs Attention Now"
-                        description="Start here when you open Studio Pro. Each card takes you straight to the workspace that fixes the item."
+                        description="Start here when you open Admin Studio. Each card takes you straight to the workspace that fixes the item."
                       />
                       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
                         <PlannerActionCard
@@ -3116,7 +3362,7 @@ export default function StudioProPage() {
                           description={
                             isRsvpOpen
                               ? "Invite links can open envelopes and RSVP forms."
-                              : "Invite links show a friendly closed message."
+                              : "Unanswered in-person invite links show a friendly closed message. Virtual RSVPs stay open."
                           }
                           actionLabel="Open Controls"
                           tone={isRsvpOpen ? "emerald" : "rose"}
@@ -3132,7 +3378,7 @@ export default function StudioProPage() {
                           }
                           actionLabel={isSeatingChartEnabled ? "Open Page" : "Open Controls"}
                           tone={isSeatingChartEnabled ? "emerald" : "stone"}
-                          href={isSeatingChartEnabled ? "/mytable" : undefined}
+                          href={isSeatingChartEnabled ? "/table" : undefined}
                           onAction={isSeatingChartEnabled ? undefined : () => setActiveView("settings")}
                         />
                         <PlannerActionCard
@@ -3731,12 +3977,12 @@ export default function StudioProPage() {
                                 <StatusBadge attending={guest.attending} />
                                 {Boolean(guest.virtual_guest) && <VirtualGuestBadge />}
                                 {Boolean(guest.has_children) && <ChildrenCountBadge count={guest.children_count || 0} />}
-                                {guestsNeedingSeatingKeys.has(normalizeNameKey(guest.guest_name)) && <IssueBadge label="Seats Needed" tone="amber" />}
-                                {seatedPendingOrDeclinedKeys.has(normalizeNameKey(guest.guest_name)) && (
+                                {guestsNeedingSeatingKeys.has(getGuestIssueKey(guest)) && <IssueBadge label="Seats Needed" tone="amber" />}
+                                {seatedPendingOrDeclinedKeys.has(getGuestIssueKey(guest)) && (
                                   <IssueBadge label={guest.attending === false ? "Seated While Declined" : "Seated While Pending"} tone="rose" />
                                 )}
-                                {acceptedSeatOverageKeys.has(normalizeNameKey(guest.guest_name)) && <IssueBadge label="Seat Mismatch" tone="rose" />}
-                                {guestCountIntegrityIssueKeys.has(normalizeNameKey(guest.guest_name)) && (
+                                {acceptedSeatOverageKeys.has(getGuestIssueKey(guest)) && <IssueBadge label="Seat Mismatch" tone="rose" />}
+                                {guestCountIntegrityIssueKeys.has(getGuestIssueKey(guest)) && (
                                   <IssueBadge label="Count Check" tone="rose" />
                                 )}
                               </>
@@ -5626,13 +5872,25 @@ export default function StudioProPage() {
                   <div className="mt-5 grid gap-4 xl:grid-cols-2">
                     <ToggleTile
                       label="RSVPs & Invites"
-                      description="Control whether invite envelopes and RSVP forms are open to guests."
+                      description="Control whether unanswered in-person invite envelopes and RSVP forms are open. Virtual RSVPs stay open."
                       enabled={isRsvpOpen}
                       onToggle={() =>
                         void updateSetting(
                           "is_rsvp_open",
                           !isRsvpOpen,
                           `RSVPs and invites ${!isRsvpOpen ? "opened" : "closed"}.`,
+                        )
+                      }
+                    />
+                    <ToggleTile
+                      label="Show RSVP Date"
+                      description="Show or hide the “Kindly reply by” message on invite and RSVP pages."
+                      enabled={isRsvpByDateVisible}
+                      onToggle={() =>
+                        void updateSetting(
+                          RSVP_BY_DATE_VISIBILITY_SETTING_KEY,
+                          !isRsvpByDateVisible,
+                          `RSVP reply-by date ${!isRsvpByDateVisible ? "shown" : "hidden"}.`,
                         )
                       }
                     />
@@ -5720,6 +5978,40 @@ export default function StudioProPage() {
                         )
                       }
                     />
+                    <ToggleTile
+                      label="Coordinator Share Link"
+                      description="Allow the day-of coordinator list to open with an access-code link instead of full Admin Studio access."
+                      enabled={isCoordinatorShareEnabled}
+                      onToggle={() =>
+                        void updateSetting(
+                          "is_coordinator_share_enabled",
+                          !isCoordinatorShareEnabled,
+                          `Coordinator share link ${!isCoordinatorShareEnabled ? "enabled" : "disabled"}.`,
+                        )
+                      }
+                    />
+                  </div>
+
+                  <div className="mt-5 rounded-[22px] border border-stone-100 bg-stone-50 p-4">
+                    <FormField label="RSVP Reply-By Date">
+                      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+                        <input
+                          type="date"
+                          value={rsvpByDateDraft}
+                          onChange={(event) => setRsvpByDateDraft(event.target.value)}
+                          className="wedding-inline-edit-input"
+                        />
+                        <button type="button" onClick={() => void saveRsvpByDate()} className="wedding-button-primary w-full xl:w-auto">
+                          Save Date
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs leading-relaxed text-stone-500">
+                        {isRsvpByDateVisible
+                          ? `Guests see “Kindly reply by ${formatRsvpByDateLabel(rsvpByDate)}.”`
+                          : `The saved date is ${formatRsvpByDateLabel(rsvpByDate)}, but it is currently hidden from guests.`}{" "}
+                        If this setting is blank in the database, the site uses the env RSVP date, then the built-in default.
+                      </p>
+                    </FormField>
                   </div>
 
                   <div className="mt-5 rounded-[22px] border border-stone-100 bg-stone-50 p-4">
@@ -5740,7 +6032,48 @@ export default function StudioProPage() {
                         </button>
                       </div>
                       <p className="mt-2 text-xs leading-relaxed text-stone-500">
-                        Normal YouTube links are okay. Studio Pro will save them in the embed format the livestream page needs.
+                        Normal YouTube links are okay. Admin Studio will save them in the embed format the livestream page needs.
+                      </p>
+                    </FormField>
+                  </div>
+
+                  <div className="mt-5 rounded-[22px] border border-stone-100 bg-stone-50 p-4">
+                    <FormField label="Coordinator Access Code">
+                      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto_auto]">
+                        <input
+                          value={coordinatorShareCodeDraft}
+                          onChange={(event) => setCoordinatorShareCodeDraft(event.target.value)}
+                          className="wedding-inline-edit-input"
+                          placeholder="DAYOF-2026"
+                          autoCapitalize="characters"
+                          autoCorrect="off"
+                          spellCheck={false}
+                        />
+                        <button type="button" onClick={generateCoordinatorShareCode} className="wedding-button-secondary w-full xl:w-auto">
+                          Generate
+                        </button>
+                        <button type="button" onClick={() => void saveCoordinatorShareCode()} className="wedding-button-primary w-full xl:w-auto">
+                          Save Code
+                        </button>
+                      </div>
+                      <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+                        <input
+                          value={coordinatorShareCode.trim() ? buildCoordinatorShareUrl(coordinatorShareCode) : ""}
+                          readOnly
+                          className="wedding-inline-edit-input bg-white text-xs"
+                          placeholder="Save an access code to create the shareable coordinator link"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void copyCoordinatorShareLink()}
+                          disabled={!coordinatorShareCode.trim()}
+                          className="wedding-button-secondary w-full disabled:cursor-not-allowed disabled:opacity-50 xl:w-auto"
+                        >
+                          Copy Link
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs leading-relaxed text-stone-500">
+                        Turn on Coordinator Share Link above, save an access code, then share this read-only day-of list URL with the coordinator.
                       </p>
                     </FormField>
                   </div>
@@ -5793,41 +6126,157 @@ function PlannerNavigation({
   activeView: AdminView;
   onChange: (key: AdminView) => void;
 }) {
+  const activeItem = items.find((item) => item.key === activeView) || items[0];
+
   return (
-    <nav className="grid gap-2 md:grid-cols-2 xl:grid-cols-4" aria-label="Studio Pro workspaces">
-      {items.map((item) => {
-        const active = activeView === item.key;
-        return (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => onChange(item.key)}
-            className={`min-w-0 rounded-[18px] border px-3 py-3 text-left shadow-sm transition ${
-              active
-                ? "border-stone-900 bg-stone-900 text-white"
-                : "border-white/85 bg-white/92 text-stone-800 hover:border-stone-200 hover:bg-white"
-            }`}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className={`text-[9px] font-bold uppercase tracking-[0.14em] ${active ? "text-white/60" : "text-stone-400"}`}>
-                  {item.eyebrow}
-                </p>
-                <p className="mt-1 font-serif text-xl leading-tight">{item.label}</p>
-              </div>
-              <span
-                className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-tight tracking-[0.09em] ${
-                  active ? "bg-white/12 text-white/78" : "bg-stone-100 text-stone-500"
+    <nav aria-label="Admin Studio workspaces">
+      <div className="rounded-[20px] border border-white/85 bg-white/92 p-2.5 shadow-sm md:hidden">
+        <div className="flex items-center justify-between gap-3 rounded-[16px] bg-stone-900 px-3 py-2.5 text-white">
+          <div className="min-w-0">
+            <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/55">Workspace</p>
+            <p className="truncate font-serif text-xl leading-tight">{activeItem.label}</p>
+          </div>
+          <span className="shrink-0 rounded-full bg-white/12 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.08em] text-white/75">
+            {activeItem.meta}
+          </span>
+        </div>
+
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {items.map((item) => {
+            const active = activeView === item.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onChange(item.key)}
+                aria-current={active ? "page" : undefined}
+                className={`min-h-12 rounded-[15px] border px-3 py-2 text-left transition active:scale-[0.99] ${
+                  active
+                    ? "border-stone-900 bg-stone-900 text-white shadow-sm"
+                    : "border-stone-100 bg-stone-50 text-stone-700 hover:border-stone-200 hover:bg-white"
                 }`}
               >
-                {item.meta}
+                <span className={`block text-[8px] font-bold uppercase tracking-[0.12em] ${active ? "text-white/55" : "text-stone-400"}`}>
+                  {item.eyebrow}
+                </span>
+                <span className="mt-1 block truncate text-sm font-bold leading-tight">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="hidden gap-2 md:grid md:grid-cols-2 xl:grid-cols-4">
+        {items.map((item) => {
+          const active = activeView === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => onChange(item.key)}
+              className={`min-w-0 rounded-[18px] border px-3 py-3 text-left shadow-sm transition ${
+                active
+                  ? "border-stone-900 bg-stone-900 text-white"
+                  : "border-white/85 bg-white/92 text-stone-800 hover:border-stone-200 hover:bg-white"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className={`text-[9px] font-bold uppercase tracking-[0.14em] ${active ? "text-white/60" : "text-stone-400"}`}>
+                    {item.eyebrow}
+                  </p>
+                  <p className="mt-1 font-serif text-xl leading-tight">{item.label}</p>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-tight tracking-[0.09em] ${
+                    active ? "bg-white/12 text-white/78" : "bg-stone-100 text-stone-500"
+                  }`}
+                >
+                  {item.meta}
+                </span>
+              </div>
+              <p className={`mt-2 text-sm leading-relaxed ${active ? "text-white/72" : "text-stone-500"}`}>{item.description}</p>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function QuickViewsPanel({ items, onSelect }: { items: QuickViewItem[]; onSelect: (view: StudioSavedView) => void }) {
+  const attentionCount = items.filter((item) => item.tone === "amber").length;
+
+  return (
+    <section className="mt-3 rounded-[22px] border border-white/90 bg-white/90 px-3 py-3 shadow-sm backdrop-blur md:px-4">
+      <details className="group md:hidden">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-1 py-1 text-left [&::-webkit-details-marker]:hidden">
+          <span className="min-w-0">
+            <span className="block text-[10px] font-bold uppercase tracking-[0.2em] text-stone-500">Quick Views</span>
+            <span className="mt-1 block text-sm font-medium text-stone-500">
+              {attentionCount > 0 ? `${attentionCount} planner shortcut${attentionCount === 1 ? "" : "s"} need attention.` : "Planner shortcuts are ready when needed."}
+            </span>
+          </span>
+          <span className="rounded-full bg-white px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-stone-500 ring-1 ring-stone-200">
+            <span className="group-open:hidden">Open</span>
+            <span className="hidden group-open:inline">Hide</span>
+          </span>
+        </summary>
+        <QuickViewsGrid items={items} onSelect={onSelect} className="mt-3 grid grid-cols-2 gap-2" />
+      </details>
+
+      <div className="hidden flex-col gap-3 md:flex xl:flex-row xl:items-center xl:justify-between">
+        <div className="min-w-0 px-1">
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-500">Quick Views</p>
+          <p className="mt-1 text-sm font-medium text-stone-500">
+            Jump straight into the planner work that usually needs attention.
+          </p>
+        </div>
+        <QuickViewsGrid items={items} onSelect={onSelect} className="grid grid-cols-3 gap-2 xl:flex xl:flex-wrap xl:justify-end" />
+      </div>
+    </section>
+  );
+}
+
+function QuickViewsGrid({
+  items,
+  onSelect,
+  className,
+}: {
+  items: QuickViewItem[];
+  onSelect: (view: StudioSavedView) => void;
+  className: string;
+}) {
+  return (
+    <div className={className}>
+      {items.map((view) => {
+        const badgeClass =
+          view.tone === "amber"
+            ? "bg-amber-50 text-amber-800 ring-amber-100"
+            : view.tone === "emerald"
+              ? "bg-emerald-50 text-emerald-700 ring-emerald-100"
+              : "bg-stone-100 text-stone-700 ring-stone-200";
+
+        return (
+          <button
+            key={view.key}
+            type="button"
+            onClick={() => onSelect(view.key)}
+            className="group min-w-0 rounded-[16px] border border-stone-100 bg-stone-50/80 px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-stone-200 hover:bg-white hover:shadow-md active:translate-y-0 xl:w-[150px]"
+          >
+            <span className="flex items-start justify-between gap-2">
+              <span className="min-w-0 text-[10px] font-bold uppercase leading-snug tracking-[0.12em] text-stone-700">
+                {view.label}
               </span>
-            </div>
-            <p className={`mt-2 text-sm leading-relaxed ${active ? "text-white/72" : "text-stone-500"}`}>{item.description}</p>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ring-1 ${badgeClass}`}>
+                {view.count}
+              </span>
+            </span>
+            <span className="mt-2 block text-xs font-semibold leading-snug text-stone-500">{view.detail}</span>
           </button>
         );
       })}
-    </nav>
+    </div>
   );
 }
 

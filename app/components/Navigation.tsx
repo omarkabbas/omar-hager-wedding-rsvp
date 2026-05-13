@@ -11,13 +11,19 @@ const links = [
 ];
 
 const RSVP_SESSION_KEY = "active_rsvp_code";
+const defaultNavigationSettings = {
+  isSeatingEnabled: false,
+  isGalleryEnabled: false,
+  isLivestreamEnabled: false,
+  isRsvpOpen: true,
+};
+
+let cachedNavigationSettings = defaultNavigationSettings;
 
 export default function Navigation() {
   const pathname = usePathname();
-  const [isSeatingEnabled, setIsSeatingEnabled] = useState(false);
-  const [isGalleryEnabled, setIsGalleryEnabled] = useState(false);
-  const [isLivestreamEnabled, setIsLivestreamEnabled] = useState(false);
-  const [isRsvpOpen, setIsRsvpOpen] = useState(true);
+  const [navigationSettings, setNavigationSettings] = useState(cachedNavigationSettings);
+  const { isGalleryEnabled, isLivestreamEnabled, isRsvpOpen, isSeatingEnabled } = navigationSettings;
   const activeRsvpCode = useSyncExternalStore(
     (callback) => {
       window.addEventListener("storage", callback);
@@ -30,10 +36,20 @@ export default function Navigation() {
   useEffect(() => {
     const applySetting = (key: string, value?: string) => {
       if (typeof value !== "string") return;
-      if (key === "is_seating_chart_enabled") setIsSeatingEnabled(value === "true");
-      if (key === "is_gallery_enabled") setIsGalleryEnabled(value === "true");
-      if (key === "is_livestream_enabled") setIsLivestreamEnabled(value === "true");
-      if (key === "is_rsvp_open") setIsRsvpOpen(value !== "false");
+
+      if (key === "is_seating_chart_enabled") {
+        cachedNavigationSettings = { ...cachedNavigationSettings, isSeatingEnabled: value === "true" };
+      } else if (key === "is_gallery_enabled") {
+        cachedNavigationSettings = { ...cachedNavigationSettings, isGalleryEnabled: value === "true" };
+      } else if (key === "is_livestream_enabled") {
+        cachedNavigationSettings = { ...cachedNavigationSettings, isLivestreamEnabled: value === "true" };
+      } else if (key === "is_rsvp_open") {
+        cachedNavigationSettings = { ...cachedNavigationSettings, isRsvpOpen: value !== "false" };
+      } else {
+        return;
+      }
+
+      setNavigationSettings(cachedNavigationSettings);
     };
 
     const fetchSettings = async () => {
@@ -76,7 +92,7 @@ export default function Navigation() {
     () => {
       const liveLinks = [
         ...links,
-        ...(isSeatingEnabled ? [{ href: "/mytable", label: "Find Table", mobileLabel: "Table" }] : []),
+        ...(isSeatingEnabled ? [{ href: "/table", label: "Find Table", mobileLabel: "Table" }] : []),
         ...(isGalleryEnabled ? [{ href: "/gallery", label: "Gallery" }] : []),
         ...(isLivestreamEnabled ? [{ href: "/livestream", label: "Livestream", mobileLabel: "Live" }] : []),
       ];
@@ -89,7 +105,7 @@ export default function Navigation() {
   );
 
   return (
-    <nav className="wedding-nav-shell wedding-animate-fade">
+    <nav className="wedding-nav-shell">
       <div className="wedding-nav-inner">
         {visibleLinks.map((link) => {
           const active = pathname === link.href;
