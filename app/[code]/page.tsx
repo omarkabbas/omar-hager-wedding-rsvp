@@ -354,7 +354,7 @@ export default function GuestRSVP() {
                   {guestData.attending ? "You’re RSVP’d!" : "We’ve received your response"}
                 </h2>
                 <div className="wedding-divider mb-8" />
-                <p className="wedding-lead text-stone-600 text-lg md:text-xl mb-8 md:mb-10">
+                <p className={`wedding-lead text-lg text-stone-600 md:text-xl ${guestData.attending === false ? "mb-5" : "mb-8 md:mb-10"}`}>
                   {guestData.attending ? (
                     <>
                       We can’t wait to celebrate with you,
@@ -365,9 +365,12 @@ export default function GuestRSVP() {
                   )}
                 </p>
                 {guestData.attending === false && (
-                  <p className="mx-auto mb-8 max-w-lg text-sm leading-relaxed text-stone-500 md:mb-10 md:text-base">
-                    If you need to make a change, please reach out to Omar & Hager directly ASAP.
-                  </p>
+                  <div className="wedding-subpanel mx-auto mb-8 max-w-xl px-5 py-5 text-center md:mb-10 md:px-6">
+                    <p className="wedding-kicker mb-2">Need to Update?</p>
+                    <p className="wedding-copy">
+                      If you need to make a change, please reach out to Omar & Hager directly ASAP.
+                    </p>
+                  </div>
                 )}
 
                 {guestData.attending && isVirtualGuest && (
