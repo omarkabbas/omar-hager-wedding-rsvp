@@ -224,8 +224,10 @@ const formatSeatingGroupName = (assignments: SeatingAssignment[]) => {
 const buildGuestInviteMessage = (guest: GuestResponse) =>
   `Dear ${guest.guest_name}, with great joy, Omar & Hager invite you to celebrate their wedding. Please RSVP here: ${getGuestInviteUrl(guest)}`;
 
-const buildGuestReminderMessage = (guest: GuestResponse) =>
-  `Dear ${guest.guest_name}, this is a kind reminder from Omar & Hager to please RSVP when you have a moment. You can reply here: ${getGuestInviteUrl(guest)}`;
+const buildGuestReminderMessage = (guest: GuestResponse, rsvpByDateLabel: string, showRsvpByDate: boolean) =>
+  `Hi ${guest.guest_name}! As we’re finalizing the guest count, this is a kind reminder from Omar & Hager to please RSVP${showRsvpByDate ? ` by ${rsvpByDateLabel}` : ""} using the RSVP link we previously sent: ${getGuestInviteUrl(guest)}
+
+We’re looking forward to celebrating with you!`;
 
 const formatPhoneNumberInput = (value?: string | null) => {
   const digits = (value || "").replace(/\D/g, "").slice(0, 11);
@@ -504,6 +506,7 @@ export default function StudioProPage() {
   const [rsvpByDate, setRsvpByDate] = useState(getRsvpByDateValue());
   const [rsvpByDateDraft, setRsvpByDateDraft] = useState(toRsvpDateInputValue());
   const [isRsvpByDateVisible, setIsRsvpByDateVisible] = useState(true);
+  const rsvpByDateLabel = useMemo(() => formatRsvpByDateLabel(rsvpByDate), [rsvpByDate]);
   const [livestreamEmbedUrl, setLivestreamEmbedUrl] = useState("");
   const [isCoordinatorShareEnabled, setIsCoordinatorShareEnabled] = useState(false);
   const [coordinatorShareCode, setCoordinatorShareCode] = useState("");
@@ -1472,6 +1475,15 @@ export default function StudioProPage() {
     }
   };
 
+  const copyRsvpReminder = async (guest: GuestResponse) => {
+    try {
+      await navigator.clipboard.writeText(buildGuestReminderMessage(guest, rsvpByDateLabel, isRsvpByDateVisible));
+      showToast("RSVP reminder copied.", "success");
+    } catch (copyError) {
+      showToast(copyError instanceof Error ? copyError.message : "Could not copy RSVP reminder.", "error");
+    }
+  };
+
   const copyInvitationToClipboard = async (guest: GuestResponse) => {
     const message = buildGuestInviteMessage(guest);
 
@@ -1530,7 +1542,7 @@ export default function StudioProPage() {
     }
 
     const isReminder = Boolean(guest.invitation_sent);
-    const message = isReminder ? buildGuestReminderMessage(guest) : buildGuestInviteMessage(guest);
+    const message = isReminder ? buildGuestReminderMessage(guest, rsvpByDateLabel, isRsvpByDateVisible) : buildGuestInviteMessage(guest);
 
     try {
       if (isReminder) {
@@ -3535,6 +3547,9 @@ export default function StudioProPage() {
                                 </p>
                               </div>
                               <div className="flex flex-wrap gap-2">
+                                <button type="button" onClick={() => void copyRsvpReminder(guest)} className="wedding-button-secondary">
+                                  Copy RSVP Reminder
+                                </button>
                                 <button type="button" onClick={() => void copyInviteLink(guest)} className="wedding-button-secondary">
                                   Copy RSVP Link
                                 </button>
@@ -3924,9 +3939,13 @@ export default function StudioProPage() {
                         const hasSplitSeating = guestAssignments.length > 1;
                         const assignedSeatCount = getAssignedSeatCountForGuest(guest);
                         const quickTableValue = quickTableDrafts[guest.id] ?? (seatingTable || "");
+                        const canCopyRsvpReminder = guest.invitation_sent === true && guest.attending === null;
                         const guestMenuItems: RowMenuItem[] = [
                           { label: "Open RSVP Page", href: guestInviteUrl },
                           { label: "Copy RSVP Link", onSelect: () => void copyInviteLink(guest) },
+                          ...(canCopyRsvpReminder
+                            ? [{ label: "Copy RSVP Reminder", onSelect: () => void copyRsvpReminder(guest) }]
+                            : []),
                           { label: "Copy Invitation", onSelect: () => void copyInvitation(guest) },
                           ...(isGuestPhoneAvailable && guest.phone_number
                             ? [
