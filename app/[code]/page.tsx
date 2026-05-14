@@ -470,7 +470,7 @@ export default function GuestRSVP() {
                   <p className="wedding-lead text-stone-600 text-xl font-medium mb-1">Welcome,</p>
                   <h2 className="wedding-title text-4xl text-[#4E5E72] md:text-5xl">{guestData.guest_name}</h2>
                   {!isVirtualGuest && (
-                    <p className="mt-3 text-sm font-semibold tracking-[0.01em] text-stone-800">
+                    <p className="mx-auto mt-4 max-w-md text-base font-semibold leading-relaxed tracking-[0.01em] text-stone-800 md:text-lg">
                       We have reserved {guestData.max_guests} {guestData.max_guests === 1 ? "seat" : "seats"} in your honor.
                     </p>
                   )}
@@ -482,11 +482,6 @@ export default function GuestRSVP() {
                 </div>
 
                 <div className="space-y-2 text-left">
-                  {isRsvpByDateVisible && !isVirtualGuest && (
-                    <p className="text-center text-sm font-medium tracking-[0.01em] text-stone-700">
-                      Kindly reply by {rsvpByLabel}.
-                    </p>
-                  )}
                   <label className="wedding-kicker block ml-2 text-stone-600">
                     {isVirtualGuest ? "Will you be joining us virtually?" : "Will you be attending?"}
                   </label>
@@ -595,6 +590,11 @@ export default function GuestRSVP() {
                 <button type="submit" className="wedding-button-primary w-full">
                   Submit RSVP
                 </button>
+                {isRsvpByDateVisible && !isVirtualGuest && (
+                  <p className="-mt-4 text-center text-base font-medium italic tracking-[0.01em] text-stone-700">
+                    Kindly reply by {rsvpByLabel}.
+                  </p>
+                )}
               </form>
             )}
           </section>
