@@ -61,7 +61,7 @@ type InvitationWorkspaceTab = "manage" | "bulk" | "composer";
 type SeatingWorkspaceTab = "board" | "tables" | "composer";
 type SeatingBoardMode = "assignments" | "invites";
 type GuestStatusFilter = "pending" | "attending" | "declined";
-type GuestExtraFilter = "sent" | "not_sent" | "has_children" | "virtual" | "needs_seating" | "sent_awaiting_response";
+type GuestExtraFilter = "sent" | "not_sent" | "has_children" | "in_person" | "virtual" | "needs_seating" | "sent_awaiting_response";
 type GuestSort = "recent" | "name" | "invite_code" | "largest_party";
 type SeatingSort = "table" | "name";
 type SeatingTableFilter = number[] | "all";
@@ -122,6 +122,7 @@ type ActivityItem = {
   id: string;
   title: string;
   detail: string;
+  inviteCode: string;
   timestamp: string;
   sortValue: number;
 };
@@ -391,6 +392,7 @@ const buildRecentActivity = (responses: GuestResponse[]) => {
           id: `${guest.id}-created`,
           title: "Invitation created",
           detail: guest.guest_name,
+          inviteCode: guest.invite_code,
           timestamp: formatAdminDateTime(guest.created_at) ?? "Recently",
           sortValue: createdAt,
         };
@@ -401,6 +403,7 @@ const buildRecentActivity = (responses: GuestResponse[]) => {
           id: `${guest.id}-responded`,
           title: guest.attending ? "RSVP accepted" : "RSVP declined",
           detail: guest.guest_name,
+          inviteCode: guest.invite_code,
           timestamp: formatAdminDateTime(guest.responded_at) ?? "Recently",
           sortValue: respondedAt,
         };
@@ -411,6 +414,7 @@ const buildRecentActivity = (responses: GuestResponse[]) => {
           id: `${guest.id}-sent`,
           title: "Invitation sent",
           detail: guest.guest_name,
+          inviteCode: guest.invite_code,
           timestamp: formatAdminDateTime(guest.invitation_sent_at) ?? "Recently",
           sortValue: invitationSentAt,
         };
@@ -421,6 +425,7 @@ const buildRecentActivity = (responses: GuestResponse[]) => {
           id: `${guest.id}-updated`,
           title: "Invitation updated",
           detail: guest.guest_name,
+          inviteCode: guest.invite_code,
           timestamp: formatAdminDateTime(guest.updated_at) ?? "Recently",
           sortValue: updatedAt,
         };
@@ -430,6 +435,7 @@ const buildRecentActivity = (responses: GuestResponse[]) => {
         id: `${guest.id}-created`,
         title: "Invitation created",
         detail: guest.guest_name,
+        inviteCode: guest.invite_code,
         timestamp: formatAdminDateTime(guest.created_at) ?? "Recently",
         sortValue: createdAt,
       };
@@ -2189,6 +2195,12 @@ export default function StudioProPage() {
       if (filter === "sent_awaiting_response") {
         next = next.filter((value) => value !== "not_sent");
       }
+      if (filter === "in_person") {
+        next = next.filter((value) => value !== "virtual");
+      }
+      if (filter === "virtual") {
+        next = next.filter((value) => value !== "in_person");
+      }
 
       next.push(filter);
       return next;
@@ -2205,8 +2217,27 @@ export default function StudioProPage() {
     const pendingInvitations = physicalResponses.filter((guest) => guest.invitation_sent !== true).length;
     const awaitingResponse = physicalResponses.filter((guest) => guest.attending === null).length;
     const declinedInvitations = physicalResponses.filter((guest) => guest.attending === false).length;
+    const partialRsvps = physicalResponses.filter((guest) => {
+      if (guest.attending !== true) return false;
+      return Math.max(0, guest.confirmed_guests || 0) < Math.max(0, guest.max_guests || 0);
+    }).length;
     const acceptedGuests = physicalResponses.reduce(
       (sum, guest) => sum + (guest.attending === true ? guest.confirmed_guests || 0 : 0),
+      0,
+    );
+    const declinedGuestSpots = physicalResponses.reduce(
+      (sum, guest) => sum + (guest.attending === false ? Math.max(0, guest.max_guests || 0) : 0),
+      0,
+    );
+    const partialRsvpReleasedSpots = physicalResponses.reduce((sum, guest) => {
+      if (guest.attending !== true) return sum;
+      const invitedSeats = Math.max(0, guest.max_guests || 0);
+      const confirmedSeats = Math.min(invitedSeats, Math.max(0, guest.confirmed_guests || 0));
+      return sum + Math.max(0, invitedSeats - confirmedSeats);
+    }, 0);
+    const releasedGuestSpots = declinedGuestSpots + partialRsvpReleasedSpots;
+    const pendingGuestSpots = physicalResponses.reduce(
+      (sum, guest) => sum + (guest.attending === null ? Math.max(0, guest.max_guests || 0) : 0),
       0,
     );
     const acceptedGuestsSeated = physicalResponses.reduce((sum, guest) => {
@@ -2216,21 +2247,30 @@ export default function StudioProPage() {
       return sum + Math.min(confirmed, seatedCount);
     }, 0);
     const totalInvitedGuests = physicalResponses.reduce((sum, guest) => sum + (guest.max_guests || 0), 0);
+    const currentMaxHeadcount = Math.max(0, totalInvitedGuests - releasedGuestSpots);
     const virtualAccepted = virtualResponses.filter((guest) => guest.attending === true).length;
     const virtualDeclined = virtualResponses.filter((guest) => guest.attending === false).length;
     const virtualAwaiting = virtualResponses.filter((guest) => guest.attending === null).length;
+    const virtualRepliesReceived = virtualAccepted + virtualDeclined;
     const uniqueTables = new Set(seatingAssignments.map((assignment) => assignment.table_number)).size;
     return {
       totalInvitations: physicalResponses.length,
       totalInvitedGuests,
+      currentMaxHeadcount,
+      declinedGuestSpots,
+      partialRsvpReleasedSpots,
+      releasedGuestSpots,
+      pendingGuestSpots,
       virtualInvitations: virtualResponses.length,
       virtualAccepted,
       virtualDeclined,
       virtualAwaiting,
+      virtualRepliesReceived,
       sentInvitations,
       pendingInvitations,
       awaitingResponse,
       declinedInvitations,
+      partialRsvps,
       acceptedGuests,
       acceptedGuestsSeated,
       acceptedNeedingSeating: acceptedGuestsNeedingSeating.length,
@@ -2265,6 +2305,7 @@ export default function StudioProPage() {
         if (filter === "not_sent") return guest.invitation_sent !== true;
         if (filter === "has_children") return guest.has_children === true;
         if (filter === "sent_awaiting_response") return guest.invitation_sent === true && guest.attending === null;
+        if (filter === "in_person") return guest.virtual_guest !== true;
         if (filter === "virtual") return guest.virtual_guest === true;
         return guestsNeedingSeatingKeys.has(getGuestIssueKey(guest));
       });
@@ -3284,7 +3325,7 @@ export default function StudioProPage() {
                 <WorkspaceTabs
                   tabs={[
                     { key: "summary", label: "Overview" },
-                    { key: "follow_up", label: "Follow Up" },
+                    { key: "follow_up", label: `Follow Up (${followUpGuests.length})` },
                     { key: "needs_seating", label: `Seats Needed (${stats.acceptedNeedingSeating})` },
                     { key: "activity", label: "Recent Activity" },
                     { key: "checks", label: `Checks (${integrityIssueCount})` },
@@ -3295,137 +3336,6 @@ export default function StudioProPage() {
 
                 {overviewTab === "summary" && (
                   <div className="space-y-5">
-                    <StudioPanel>
-                      <SectionHeading
-                        kicker="Planner Command Center"
-                        title="What Needs Attention Now"
-                        description="Start here when you open Admin Studio. Each card takes you straight to the workspace that fixes the item."
-                      />
-                      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-                        <PlannerActionCard
-                          eyebrow="Follow Up"
-                          title={`${followUpGuests.length} awaiting reply`}
-                          description="Sent invitations that still need an RSVP."
-                          actionLabel="Open Follow Up"
-                          tone={followUpGuests.length > 0 ? "amber" : "stone"}
-                          onAction={() => openOverviewWorkspace("follow_up")}
-                        />
-                        <PlannerActionCard
-                          eyebrow="Seating"
-                          title={`${stats.acceptedNeedingSeating} ${stats.acceptedNeedingSeating === 1 ? "needs" : "need"} seating`}
-                          description="On-site attending invitations without enough seats."
-                          actionLabel="Seat Guests"
-                          tone={stats.acceptedNeedingSeating > 0 ? "amber" : "emerald"}
-                          onAction={() => openOverviewWorkspace("needs_seating")}
-                        />
-                        <PlannerActionCard
-                          eyebrow="Checks"
-                          title={`${integrityIssueCount} issue${integrityIssueCount === 1 ? "" : "s"}`}
-                          description="Review mismatches before they become day-of problems."
-                          actionLabel="Run Checks"
-                          tone={integrityIssueCount > 0 ? "rose" : "emerald"}
-                          onAction={() => openOverviewWorkspace("checks")}
-                        />
-                        <PlannerActionCard
-                          eyebrow="Guest List"
-                          title="Add an invitation"
-                          description="Create an in-person or virtual invitation."
-                          actionLabel="New Invitation"
-                          tone="sky"
-                          onAction={beginGuestFormCreate}
-                        />
-                        <PlannerActionCard
-                          eyebrow="Floor Plan"
-                          title="Open visual seating"
-                          description="Drag tables, guests, and room elements."
-                          actionLabel="Open Floor Plan"
-                          tone="stone"
-                          href="/studio-pro/floor-plan"
-                        />
-                        <PlannerActionCard
-                          eyebrow="Day Of"
-                          title="Coordinator guest list"
-                          description="Guest names, aliases, and table numbers for the wedding day."
-                          actionLabel="Open List"
-                          tone="sky"
-                          href="/studio-pro/coordinator"
-                        />
-                      </div>
-                    </StudioPanel>
-
-                    <StudioPanel>
-                      <SectionHeading
-                        kicker="Guest-Facing Website"
-                        title="Open And Check Live Pages"
-                        description="Quickly preview the pages guests can see. Hidden pages point back to Site Controls so a planner can turn them on when ready."
-                      />
-                      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-                        <PlannerActionCard
-                          eyebrow="Always Live"
-                          title="Homepage"
-                          description="Main wedding site with the active guest navigation."
-                          actionLabel="Open Home"
-                          tone="sky"
-                          href="/"
-                        />
-                        <PlannerActionCard
-                          eyebrow={isRsvpOpen ? "Open" : "Closed"}
-                          title="RSVPs"
-                          description={
-                            isRsvpOpen
-                              ? "Invite links can open envelopes and RSVP forms."
-                              : "Unanswered in-person invite links show a friendly closed message. Virtual RSVPs stay open."
-                          }
-                          actionLabel="Open Controls"
-                          tone={isRsvpOpen ? "emerald" : "rose"}
-                          onAction={() => setActiveView("settings")}
-                        />
-                        <PlannerActionCard
-                          eyebrow={isSeatingChartEnabled ? "Live" : "Hidden"}
-                          title="Find Table"
-                          description={
-                            isSeatingChartEnabled
-                              ? "Check the guest table lookup experience."
-                              : "Enable the table finder when seating is ready."
-                          }
-                          actionLabel={isSeatingChartEnabled ? "Open Page" : "Open Controls"}
-                          tone={isSeatingChartEnabled ? "emerald" : "stone"}
-                          href={isSeatingChartEnabled ? "/table" : undefined}
-                          onAction={isSeatingChartEnabled ? undefined : () => setActiveView("settings")}
-                        />
-                        <PlannerActionCard
-                          eyebrow={isGalleryEnabled ? "Live" : "Hidden"}
-                          title="Gallery"
-                          description={isGalleryEnabled ? "Review guest photo uploads and browsing." : "Keep guest photos hidden until launch."}
-                          actionLabel={isGalleryEnabled ? "Open Page" : "Open Controls"}
-                          tone={isGalleryEnabled ? "emerald" : "stone"}
-                          href={isGalleryEnabled ? "/gallery" : undefined}
-                          onAction={isGalleryEnabled ? undefined : () => setActiveView("settings")}
-                        />
-                        <PlannerActionCard
-                          eyebrow={isLivestreamEnabled ? "Live" : "Hidden"}
-                          title="Livestream"
-                          description={
-                            isLivestreamEnabled
-                              ? "Preview the virtual guest livestream page."
-                              : "Enable livestream access when the video link is ready."
-                          }
-                          actionLabel={isLivestreamEnabled ? "Open Page" : "Open Controls"}
-                          tone={isLivestreamEnabled ? "emerald" : "stone"}
-                          href={isLivestreamEnabled ? "/livestream" : undefined}
-                          onAction={isLivestreamEnabled ? undefined : () => setActiveView("settings")}
-                        />
-                        <PlannerActionCard
-                          eyebrow="Controls"
-                          title="Site Toggles"
-                          description="Turn RSVPs, homepage sections, table lookup, gallery, and livestream on or off."
-                          actionLabel="Open Controls"
-                          tone="amber"
-                          onAction={() => setActiveView("settings")}
-                        />
-                      </div>
-                    </StudioPanel>
-
                     <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
                       <StudioPanel>
                         <SectionHeading
@@ -3433,23 +3343,39 @@ export default function StudioProPage() {
                           title="Counts That Matter"
                           description="In-person and virtual RSVP numbers are separated so seating work stays focused on guests attending in person."
                         />
-                        <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                          <MetricGroup title="In-Person">
+                        <div className="mt-5 grid gap-4">
+                          <MetricGroup title="In-Person Invitation Counts">
                             <StatTile label="Invitations Total" value={stats.totalInvitations} tone="stone" />
                             <StatTile label="Invitations Sent" value={stats.sentInvitations} tone="sky" />
-                            <StatTile label="Invitations Not Sent" value={stats.pendingInvitations} tone="stone" />
-                            <StatTile label="Invitations Awaiting Reply" value={stats.awaitingResponse} tone="stone" />
-                            <StatTile label="Guests Attending" value={stats.acceptedGuests} tone="emerald" />
+                            <StatTile label="Invitations Not Sent" value={stats.pendingInvitations} tone="amber" />
+                            <StatTile label="Awaiting Reply" value={stats.awaitingResponse} tone="amber" />
                             <StatTile label="Invitations Declined" value={stats.declinedInvitations} tone="rose" />
-                            <StatTile label="Guests Invited" value={stats.totalInvitedGuests} tone="stone" />
-                            <StatTile label="Seats Needed" value={stats.acceptedNeedingSeating} tone="amber" />
+                            <StatTile label="Partial RSVPs" value={stats.partialRsvps} tone="rose" />
                           </MetricGroup>
 
-                          <MetricGroup title="Virtual">
+                          <MetricGroup title="In-Person Guest Counts">
+                            <StatTile label="Total Guests Invited" value={stats.totalInvitedGuests} tone="stone" />
+                            <StatTile label="Guests Attending" value={stats.acceptedGuests} tone="emerald" />
+                            <StatTile label="Guests Declined" value={stats.declinedGuestSpots} tone="rose" />
+                            <StatTile label="Current Max Headcount" value={stats.currentMaxHeadcount} tone="sky" />
+                            <StatTile label="Guests Pending Reply" value={stats.pendingGuestSpots} tone="amber" />
+                          </MetricGroup>
+
+                          <MetricGroup title="Seating Counts">
+                            <StatTile label="Guests Seated" value={stats.acceptedGuestsSeated} tone="emerald" />
+                            <StatTile label="Seats Needed" value={stats.acceptedNeedingSeating} tone="amber" />
+                            <StatTile label="Seats Released" value={stats.releasedGuestSpots} tone="rose" />
+                            <StatTile label="Released by Declines" value={stats.declinedGuestSpots} tone="rose" />
+                            <StatTile label="Released by Partial RSVPs" value={stats.partialRsvpReleasedSpots} tone="rose" />
+                            <StatTile label="Tables Used" value={stats.uniqueTables} tone="stone" />
+                          </MetricGroup>
+
+                          <MetricGroup title="Virtual Counts">
                             <StatTile label="Invitations Total" value={stats.virtualInvitations} tone="sky" />
+                            <StatTile label="Invitations Replied" value={stats.virtualRepliesReceived} tone="stone" />
                             <StatTile label="Invitations Attending" value={stats.virtualAccepted} tone="emerald" />
-                            <StatTile label="Invitations Declined" value={stats.virtualDeclined} tone="rose" />
                             <StatTile label="Invitations Awaiting Reply" value={stats.virtualAwaiting} tone="stone" />
+                            <StatTile label="Invitations Declined" value={stats.virtualDeclined} tone="rose" />
                           </MetricGroup>
                         </div>
                       </StudioPanel>
@@ -3461,19 +3387,29 @@ export default function StudioProPage() {
                           description="A quick read on invitation sending, guest headcount, and seat coverage."
                         />
                         <div className="mt-5 space-y-4">
-                          <ProgressLine label="In-Person Invitations Sent" value={stats.sentInvitations} total={stats.totalInvitations} tone="sky" />
                           <ProgressLine
                             label="In-Person RSVP Replies Received"
                             value={stats.totalInvitations - stats.awaitingResponse}
                             total={stats.totalInvitations}
                             tone="stone"
                           />
-                          <ProgressLine label="In-Person Guests Attending" value={stats.acceptedGuests} total={stats.totalInvitedGuests} tone="emerald" />
+                          <ProgressLine
+                            label="In-Person Current Max Headcount"
+                            value={stats.currentMaxHeadcount}
+                            total={stats.totalInvitedGuests}
+                            tone="sky"
+                          />
                           <ProgressLine
                             label="In-Person Guests Seated"
                             value={stats.acceptedGuestsSeated}
                             total={Math.max(stats.acceptedGuests, 1)}
                             tone="amber"
+                          />
+                          <ProgressLine
+                            label="Virtual RSVP Replies Received"
+                            value={stats.virtualRepliesReceived}
+                            total={stats.virtualInvitations}
+                            tone="sky"
                           />
                         </div>
                       </StudioPanel>
@@ -3614,7 +3550,7 @@ export default function StudioProPage() {
                         <EmptyState title="No activity yet" description="Activity will appear here as guests respond and records are updated." />
                       ) : (
                         recentActivity.map((item) => (
-                          <ActivityRow key={item.id} title={item.title} detail={item.detail} timestamp={item.timestamp} />
+                          <ActivityRow key={item.id} title={item.title} detail={item.detail} inviteCode={item.inviteCode} timestamp={item.timestamp} />
                         ))
                       )}
                     </div>
@@ -3867,6 +3803,7 @@ export default function StudioProPage() {
                               { key: "not_sent", label: "Not Sent" },
                               { key: "sent_awaiting_response", label: "Sent + Awaiting Reply" },
                               { key: "has_children", label: "Has Children" },
+                              { key: "in_person", label: "In-Person" },
                               { key: "virtual", label: "Virtual" },
                               { key: "needs_seating", label: "Seats Needed" },
                             ] as { key: GuestExtraFilter; label: string }[]).map((item) => (
@@ -6299,59 +6236,6 @@ function QuickViewsGrid({
   );
 }
 
-function PlannerActionCard({
-  eyebrow,
-  title,
-  description,
-  actionLabel,
-  tone = "stone",
-  onAction,
-  href,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  actionLabel: string;
-  tone?: "stone" | "sky" | "emerald" | "amber" | "rose";
-  onAction?: () => void;
-  href?: string;
-}) {
-  const toneStyles = {
-    stone: "border-stone-200 bg-stone-50 text-stone-800",
-    sky: "border-sky-100 bg-sky-50 text-sky-800",
-    emerald: "border-emerald-100 bg-emerald-50 text-emerald-800",
-    amber: "border-amber-100 bg-amber-50 text-amber-800",
-    rose: "border-rose-100 bg-rose-50 text-rose-800",
-  }[tone];
-
-  const content = (
-    <>
-      <p className="text-[9px] font-bold uppercase tracking-[0.16em] opacity-65">{eyebrow}</p>
-      <p className="mt-2 font-serif text-2xl leading-tight">{title}</p>
-      <p className="mt-2 text-sm leading-relaxed opacity-78">{description}</p>
-      <span className="mt-4 inline-flex rounded-full bg-white/80 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-stone-700 ring-1 ring-black/5">
-        {actionLabel}
-      </span>
-    </>
-  );
-
-  const className = `block min-h-full rounded-[18px] border px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneStyles}`;
-
-  if (href) {
-    return (
-      <Link href={href} className={className}>
-        {content}
-      </Link>
-    );
-  }
-
-  return (
-    <button type="button" onClick={onAction} className={className}>
-      {content}
-    </button>
-  );
-}
-
 function StudioPanel({
   children,
   refProp,
@@ -6453,7 +6337,7 @@ function MetricGroup({ title, children }: { title: string; children: ReactNode }
       <div className="mb-4 border-b border-stone-200/80 pb-3">
         <p className="text-[12px] font-extrabold uppercase tracking-[0.18em] text-stone-500">{title}</p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">{children}</div>
+      <div className="grid gap-3 sm:grid-cols-3">{children}</div>
     </div>
   );
 }
@@ -6525,13 +6409,16 @@ function CompactDisclosure({
   );
 }
 
-function ActivityRow({ title, detail, timestamp }: { title: string; detail: string; timestamp: string }) {
+function ActivityRow({ title, detail, inviteCode, timestamp }: { title: string; detail: string; inviteCode: string; timestamp: string }) {
   return (
     <div className="rounded-[26px] border border-stone-100 bg-stone-50 px-5 py-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-serif text-xl text-stone-900">{title}</p>
-          <p className="mt-1 text-sm text-stone-500">{detail}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <p className="text-sm text-stone-500">{detail}</p>
+            <span className="wedding-code rounded-full border border-stone-200 bg-white px-2.5 py-1">{inviteCode}</span>
+          </div>
         </div>
         <span className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-400">{timestamp}</span>
       </div>
