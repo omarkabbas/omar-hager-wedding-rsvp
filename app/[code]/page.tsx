@@ -351,7 +351,7 @@ export default function GuestRSVP() {
 
                 <p className="wedding-kicker mb-3">Response Received</p>
                 <h2 className="wedding-page-title mb-5 text-[#4E5E72]">
-                  {guestData.attending ? "You’re RSVP’d!" : "We’ve received your response"}
+                  {guestData.attending ? "You’re RSVP’d!" : "Thank you for letting us know"}
                 </h2>
                 <div className="wedding-divider mb-8" />
                 <p className={`wedding-lead text-lg text-stone-600 md:text-xl ${guestData.attending === false ? "mb-5" : "mb-8 md:mb-10"}`}>
@@ -361,14 +361,15 @@ export default function GuestRSVP() {
                       <span className="mt-2 block font-serif text-2xl leading-tight text-[#4E5E72] md:text-3xl">{guestData.guest_name}!</span>
                     </>
                   ) : (
-                    "We’ll miss you, but thanks for letting us know!"
+                    "We’ll miss having you with us."
                   )}
                 </p>
                 {guestData.attending === false && (
                   <div className="wedding-subpanel mx-auto mb-8 max-w-xl px-5 py-5 text-center md:mb-10 md:px-6">
-                    <p className="wedding-kicker mb-2">Need to Update?</p>
+                    <p className="wedding-kicker mb-2">Need to Make a Change?</p>
                     <p className="wedding-copy">
-                      If you need to make a change, please reach out to Omar & Hager directly ASAP.
+                      If your plans change, please reach out to Omar & Hager directly
+                      {isRsvpByDateVisible ? ` by ${rsvpByLabel}` : ""}.
                     </p>
                   </div>
                 )}
