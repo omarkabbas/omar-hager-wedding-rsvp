@@ -5,19 +5,17 @@ import Image from "next/image";
 import Navigation from "@/app/components/Navigation";
 import { supabase } from "@/lib/supabase";
 
-type SeatingSearchEntry = { name: string; table_number: number; name_aliases?: string | null };
-type SeatingSuggestion = {
+type SeatingSearchEntry = { id?: number; name: string; table_number: number; name_aliases?: string | null; invite_code?: string | null };
+type SeatingLookupOption = {
+  key: string;
   displayName: string;
   secondaryName?: string;
-  tableNumber: number;
-  searchValue: string;
-};
-type SeatingSearchResult = {
-  displayName: string;
   invitationName: string;
-  table_number: number;
+  tableNumbers: number[];
+  searchValue: string;
   matchedAlias?: string;
 };
+type SeatingSuggestion = SeatingLookupOption;
 
 const normalizeLookupName = (value: string) =>
   value
@@ -27,6 +25,12 @@ const normalizeLookupName = (value: string) =>
     .trim();
 
 const getLookupTokens = (value: string) => normalizeLookupName(value).split(" ").filter(Boolean);
+const formatLookupDisplayName = (value: string) =>
+  value
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
 const parseNameAliases = (value?: string | null) =>
   (value || "")
     .split(",")
@@ -36,6 +40,70 @@ const parseNameAliases = (value?: string | null) =>
 const getLastLookupToken = (value: string) => {
   const tokens = getLookupTokens(value);
   return tokens[tokens.length - 1] || "";
+};
+
+const getSeatingEntryKey = (entry: SeatingSearchEntry) =>
+  entry.id != null
+    ? `id:${entry.id}`
+    : `${normalizeLookupName(entry.name)}|${entry.table_number}|${parseNameAliases(entry.name_aliases).map(normalizeLookupName).join(",")}`;
+const normalizeInviteCode = (value?: string | null) => (value || "").trim().toUpperCase();
+const getLookupGroupKey = (entry: SeatingSearchEntry) => {
+  const inviteCode = normalizeInviteCode(entry.invite_code);
+  return inviteCode ? `invite:${inviteCode}` : getSeatingEntryKey(entry);
+};
+const formatTableNumbers = (tableNumbers: number[]) => {
+  if (tableNumbers.length <= 2) return tableNumbers.join(" & ");
+  return `${tableNumbers.slice(0, -1).join(", ")} & ${tableNumbers[tableNumbers.length - 1]}`;
+};
+const formatTableInstruction = (tableNumbers: number[]) =>
+  tableNumbers.length === 1 ? `Please head to table ${tableNumbers[0]}.` : `Please head to tables ${formatTableNumbers(tableNumbers)}.`;
+
+const getEditDistance = (left: string, right: string) => {
+  const rows = left.length + 1;
+  const columns = right.length + 1;
+  const distances = Array.from({ length: rows }, (_, row) =>
+    Array.from({ length: columns }, (_, column) => (row === 0 ? column : column === 0 ? row : 0)),
+  );
+
+  for (let row = 1; row < rows; row += 1) {
+    for (let column = 1; column < columns; column += 1) {
+      const substitutionCost = left[row - 1] === right[column - 1] ? 0 : 1;
+      distances[row][column] = Math.min(
+        distances[row - 1][column] + 1,
+        distances[row][column - 1] + 1,
+        distances[row - 1][column - 1] + substitutionCost,
+      );
+    }
+  }
+
+  return distances[left.length][right.length];
+};
+
+const getTypoSuggestionScore = (query: string, name: string) => {
+  const normalizedQuery = normalizeLookupName(query);
+  const normalizedName = normalizeLookupName(name);
+  if (normalizedQuery.length < 3 || normalizedName.length < 3) return 0;
+
+  const wholeDistance = getEditDistance(normalizedQuery, normalizedName);
+  const wholeDistanceLimit = normalizedQuery.length <= 4 ? 1 : 2;
+  if (wholeDistance <= wholeDistanceLimit) {
+    return 480 - wholeDistance * 70 - Math.abs(normalizedName.length - normalizedQuery.length);
+  }
+
+  const queryTokens = getLookupTokens(query);
+  const nameTokens = getLookupTokens(name);
+  if (queryTokens.length === 0 || nameTokens.length === 0) return 0;
+
+  const tokenDistances = queryTokens.map((queryToken) => {
+    const tokenLimit = queryToken.length <= 4 ? 1 : 2;
+    const bestDistance = Math.min(...nameTokens.map((nameToken) => getEditDistance(queryToken, nameToken)));
+    return bestDistance <= tokenLimit ? bestDistance : Number.POSITIVE_INFINITY;
+  });
+
+  if (tokenDistances.some((distance) => !Number.isFinite(distance))) return 0;
+
+  const totalDistance = tokenDistances.reduce((sum, distance) => sum + distance, 0);
+  return 420 - totalDistance * 55 - Math.abs(nameTokens.length - queryTokens.length) * 12;
 };
 
 const looksLikeHouseholdEntry = (value: string) => {
@@ -82,12 +150,26 @@ const getSuggestionScore = (query: string, name: string) => {
 
 const getEntrySuggestionScore = (query: string, entry: SeatingSearchEntry) => {
   const primaryScore = getSuggestionScore(query, entry.name);
-  const aliasScore = parseNameAliases(entry.name_aliases).reduce((bestScore, alias) => {
+  const aliases = parseNameAliases(entry.name_aliases);
+  const aliasScore = aliases.reduce((bestScore, alias) => {
     const nextScore = getSuggestionScore(query, alias);
     return Math.max(bestScore, nextScore > 0 ? nextScore - 10 : 0);
   }, 0);
+  const combinedScore = aliases.length > 0 ? Math.max(0, getSuggestionScore(query, [entry.name, ...aliases].join(" ")) - 5) : 0;
 
-  return Math.max(primaryScore, aliasScore);
+  return Math.max(primaryScore, aliasScore, combinedScore);
+};
+
+const getEntryTypoSuggestionScore = (query: string, entry: SeatingSearchEntry) => {
+  const primaryScore = getTypoSuggestionScore(query, entry.name);
+  const aliases = parseNameAliases(entry.name_aliases);
+  const aliasScore = aliases.reduce((bestScore, alias) => {
+    const nextScore = getTypoSuggestionScore(query, alias);
+    return Math.max(bestScore, nextScore > 0 ? nextScore - 10 : 0);
+  }, 0);
+  const combinedScore = aliases.length > 0 ? Math.max(0, getTypoSuggestionScore(query, [entry.name, ...aliases].join(" ")) - 5) : 0;
+
+  return Math.max(primaryScore, aliasScore, combinedScore);
 };
 
 const getBestMatchingAlias = (query: string, entry: SeatingSearchEntry) => {
@@ -107,7 +189,7 @@ const getEntryDisplayMatch = (
   entry: SeatingSearchEntry,
 ): { displayName: string; secondaryName?: string; matchedAlias?: string } => {
   const alias = getBestMatchingAlias(query, entry);
-  if (!alias) return { displayName: entry.name };
+  if (!alias) return { displayName: formatLookupDisplayName(entry.name) };
 
   const normalizedQuery = normalizeLookupName(query);
   const normalizedAlias = normalizeLookupName(alias);
@@ -116,56 +198,180 @@ const getEntryDisplayMatch = (
   const exactAliasMatch = normalizedAlias === normalizedQuery;
   const shouldLeadWithAlias = exactAliasMatch || aliasStartsWithQuery || primaryScore === 0;
 
-  if (!shouldLeadWithAlias) return { displayName: entry.name };
+  if (!shouldLeadWithAlias) return { displayName: formatLookupDisplayName(entry.name) };
 
   return {
-    displayName: alias,
-    secondaryName: normalizeLookupName(alias) === normalizeLookupName(entry.name) ? undefined : entry.name,
-    matchedAlias: alias,
+    displayName: formatLookupDisplayName(alias),
+    secondaryName: normalizeLookupName(alias) === normalizeLookupName(entry.name) ? undefined : formatLookupDisplayName(entry.name),
+    matchedAlias: formatLookupDisplayName(alias),
   };
+};
+
+const getEntryTypoDisplayMatch = (
+  query: string,
+  entry: SeatingSearchEntry,
+): { displayName: string; secondaryName?: string; matchedAlias?: string } => {
+  const primaryScore = getTypoSuggestionScore(query, entry.name);
+  const alias =
+    parseNameAliases(entry.name_aliases)
+      .map((aliasName) => ({ alias: aliasName, score: getTypoSuggestionScore(query, aliasName) }))
+      .filter(({ score }) => score > 0)
+      .sort((left, right) => right.score - left.score || left.alias.localeCompare(right.alias))[0]?.alias || null;
+
+  if (!alias) return { displayName: formatLookupDisplayName(entry.name) };
+
+  const aliasScore = getTypoSuggestionScore(query, alias) - 10;
+  if (primaryScore >= aliasScore) return { displayName: formatLookupDisplayName(entry.name) };
+
+  return {
+    displayName: formatLookupDisplayName(alias),
+    secondaryName: normalizeLookupName(alias) === normalizeLookupName(entry.name) ? undefined : formatLookupDisplayName(entry.name),
+    matchedAlias: formatLookupDisplayName(alias),
+  };
+};
+
+const buildLookupOption = (query: string, key: string, entries: SeatingSearchEntry[]): SeatingLookupOption & { score: number } => {
+  const rankedEntries = [...entries].sort(
+    (left, right) => getEntrySuggestionScore(query, right) - getEntrySuggestionScore(query, left) || left.name.localeCompare(right.name),
+  );
+  const bestEntry = rankedEntries[0];
+  const display = getEntryDisplayMatch(query, bestEntry);
+  const tableNumbers = Array.from(new Set(entries.map((entry) => entry.table_number))).sort((left, right) => left - right);
+
+  return {
+    key,
+    displayName: display.displayName,
+    secondaryName: display.secondaryName,
+    invitationName: formatLookupDisplayName(bestEntry.name),
+    tableNumbers,
+    searchValue: display.displayName,
+    matchedAlias: display.matchedAlias,
+    score: Math.max(...entries.map((entry) => getEntrySuggestionScore(query, entry))),
+  };
+};
+
+const buildLookupOptions = (query: string, entries: SeatingSearchEntry[]) => {
+  const groups = new Map<string, SeatingSearchEntry[]>();
+
+  entries.forEach((entry) => {
+    const key = getLookupGroupKey(entry);
+    groups.set(key, [...(groups.get(key) || []), entry]);
+  });
+
+  return Array.from(groups.entries())
+    .map(([key, groupedEntries]) => buildLookupOption(query, key, groupedEntries))
+    .filter((option) => option.score > 0)
+    .sort((left, right) => right.score - left.score || left.displayName.localeCompare(right.displayName))
+    .map(
+      (option): SeatingLookupOption => ({
+        key: option.key,
+        displayName: option.displayName,
+        secondaryName: option.secondaryName,
+        invitationName: option.invitationName,
+        tableNumbers: option.tableNumbers,
+        searchValue: option.searchValue,
+        matchedAlias: option.matchedAlias,
+      }),
+    );
+};
+
+const getLookupOptionByKey = (query: string, key: string, entries: SeatingSearchEntry[]) => {
+  const groupedEntries = entries.filter((entry) => getLookupGroupKey(entry) === key);
+  if (groupedEntries.length === 0) return null;
+  const { score, ...option } = buildLookupOption(query, key, groupedEntries);
+  return score > 0 ? option : null;
 };
 
 const buildSuggestions = (query: string, entries: SeatingSearchEntry[]) => {
   const seen = new Set<string>();
 
-  return entries
-    .map((entry) => {
-      const score = getEntrySuggestionScore(query, entry);
-      const display = getEntryDisplayMatch(query, entry);
-
-      return { entry, score, ...display };
+  return buildLookupOptions(query, entries)
+    .filter((suggestion) => {
+      const key = `${normalizeLookupName(suggestion.displayName)}|${normalizeLookupName(suggestion.invitationName)}|${suggestion.tableNumbers.join(",")}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     })
-    .filter(({ score }) => score > 0)
+    .slice(0, 6);
+};
+
+const buildTypoLookupOption = (query: string, key: string, entries: SeatingSearchEntry[]): SeatingLookupOption & { score: number } => {
+  const rankedEntries = [...entries].sort(
+    (left, right) => getEntryTypoSuggestionScore(query, right) - getEntryTypoSuggestionScore(query, left) || left.name.localeCompare(right.name),
+  );
+  const bestEntry = rankedEntries[0];
+  const display = getEntryTypoDisplayMatch(query, bestEntry);
+  const tableNumbers = Array.from(new Set(entries.map((entry) => entry.table_number))).sort((left, right) => left - right);
+
+  return {
+    key,
+    displayName: display.displayName,
+    secondaryName: display.secondaryName,
+    invitationName: formatLookupDisplayName(bestEntry.name),
+    tableNumbers,
+    searchValue: display.displayName,
+    matchedAlias: display.matchedAlias,
+    score: Math.max(...entries.map((entry) => getEntryTypoSuggestionScore(query, entry))),
+  };
+};
+
+const buildTypoSuggestions = (query: string, entries: SeatingSearchEntry[]) => {
+  const groups = new Map<string, SeatingSearchEntry[]>();
+  const seen = new Set<string>();
+
+  entries.forEach((entry) => {
+    const key = getLookupGroupKey(entry);
+    groups.set(key, [...(groups.get(key) || []), entry]);
+  });
+
+  return Array.from(groups.entries())
+    .map(([key, groupedEntries]) => buildTypoLookupOption(query, key, groupedEntries))
+    .filter((option) => option.score > 0)
     .sort((left, right) => right.score - left.score || left.displayName.localeCompare(right.displayName))
     .filter((suggestion) => {
-      const key = `${normalizeLookupName(suggestion.displayName)}|${normalizeLookupName(suggestion.entry.name)}|${suggestion.entry.table_number}`;
+      const key = `${normalizeLookupName(suggestion.displayName)}|${normalizeLookupName(suggestion.invitationName)}|${suggestion.tableNumbers.join(",")}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     })
     .slice(0, 6)
     .map(
-      (suggestion): SeatingSuggestion => ({
-        displayName: suggestion.displayName,
-        secondaryName: suggestion.secondaryName,
-        tableNumber: suggestion.entry.table_number,
-        searchValue: suggestion.displayName,
+      (option): SeatingLookupOption => ({
+        key: option.key,
+        displayName: option.displayName,
+        secondaryName: option.secondaryName,
+        invitationName: option.invitationName,
+        tableNumbers: option.tableNumbers,
+        searchValue: option.searchValue,
+        matchedAlias: option.matchedAlias,
       }),
     );
 };
 
 export default function MyTablePage() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SeatingSearchResult[]>([]);
+  const [confirmedResult, setConfirmedResult] = useState<SeatingLookupOption | null>(null);
+  const [choiceOptions, setChoiceOptions] = useState<SeatingLookupOption[]>([]);
   const [suggestions, setSuggestions] = useState<SeatingSuggestion[]>([]);
+  const [fallbackSuggestions, setFallbackSuggestions] = useState<SeatingSuggestion[]>([]);
   const [seatingEntries, setSeatingEntries] = useState<SeatingSearchEntry[]>([]);
   const [isSeatingAliasesAvailable, setIsSeatingAliasesAvailable] = useState<boolean | null>(null);
+  const [isSeatingInviteCodeAvailable, setIsSeatingInviteCodeAvailable] = useState<boolean | null>(null);
   const [isSeatingChartEnabled, setIsSeatingChartEnabled] = useState<boolean | null>(null);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
   const [searchAttempted, setSearchAttempted] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const resultSectionRef = useRef<HTMLDivElement | null>(null);
+  const seatingSelectColumns = [
+    "id",
+    "name",
+    "table_number",
+    isSeatingAliasesAvailable ? "name_aliases" : null,
+    isSeatingInviteCodeAvailable ? "invite_code" : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -181,7 +387,7 @@ export default function MyTablePage() {
     const fetchSeating = async () => {
       const { data } = await supabase
         .from("seating")
-        .select(isSeatingAliasesAvailable ? "name, table_number, name_aliases" : "name, table_number")
+        .select(seatingSelectColumns)
         .order("name", { ascending: true });
       setSeatingEntries((data as SeatingSearchEntry[] | null) || []);
     };
@@ -189,6 +395,11 @@ export default function MyTablePage() {
     const detectSeatingAliasesColumn = async () => {
       const { error } = await supabase.from("seating").select("name_aliases").limit(1);
       setIsSeatingAliasesAvailable(!error);
+    };
+
+    const detectSeatingInviteCodeColumn = async () => {
+      const { error } = await supabase.from("seating").select("invite_code").limit(1);
+      setIsSeatingInviteCodeAvailable(!error);
     };
 
     const handleVisibilityOrFocus = () => {
@@ -200,6 +411,7 @@ export default function MyTablePage() {
 
     void fetchSettings();
     void detectSeatingAliasesColumn();
+    void detectSeatingInviteCodeColumn();
 
     const channel = supabase
       .channel("mytable_live_settings")
@@ -225,21 +437,21 @@ export default function MyTablePage() {
       window.removeEventListener("focus", handleVisibilityOrFocus);
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
     };
-  }, [isSeatingAliasesAvailable]);
+  }, [isSeatingAliasesAvailable, isSeatingInviteCodeAvailable, seatingSelectColumns]);
 
   useEffect(() => {
-    if (isSeatingAliasesAvailable === null) return;
+    if (isSeatingAliasesAvailable === null || isSeatingInviteCodeAvailable === null) return;
 
     const fetchSeating = async () => {
       const { data } = await supabase
         .from("seating")
-        .select(isSeatingAliasesAvailable ? "name, table_number, name_aliases" : "name, table_number")
+        .select(seatingSelectColumns)
         .order("name", { ascending: true });
       setSeatingEntries((data as SeatingSearchEntry[] | null) || []);
     };
 
     void fetchSeating();
-  }, [isSeatingAliasesAvailable]);
+  }, [isSeatingAliasesAvailable, isSeatingInviteCodeAvailable, seatingSelectColumns]);
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
@@ -255,16 +467,33 @@ export default function MyTablePage() {
   }, []);
 
   useEffect(() => {
-    if (searchResults.length === 0) return;
+    if (!confirmedResult && choiceOptions.length === 0) return;
 
     const scrollToResult = window.setTimeout(() => {
       resultSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
 
     return () => window.clearTimeout(scrollToResult);
-  }, [searchResults]);
+  }, [choiceOptions.length, confirmedResult]);
 
-  const performSearch = async (name: string) => {
+  const showConfirmedResult = (option: SeatingLookupOption) => {
+    setConfirmedResult(option);
+    setChoiceOptions([]);
+    setSuggestions([]);
+    setFallbackSuggestions([]);
+  };
+
+  const selectLookupOption = (option: SeatingLookupOption) => {
+    setSearchQuery(option.searchValue);
+    setSearchAttempted(true);
+    setActiveSuggestionIndex(0);
+    showConfirmedResult(option);
+    window.requestAnimationFrame(() => {
+      resultSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const performSearch = async (name: string, selectedOptionKey?: string) => {
     const trimmedName = name.trim();
     if (trimmedName === "") return;
 
@@ -273,6 +502,13 @@ export default function MyTablePage() {
     setActiveSuggestionIndex(0);
 
     const normalizedQuery = normalizeLookupName(trimmedName);
+    const selectedOption = selectedOptionKey ? getLookupOptionByKey(trimmedName, selectedOptionKey, seatingEntries) : null;
+
+    if (selectedOption) {
+      showConfirmedResult(selectedOption);
+      return;
+    }
+
     const rankedMatches = [...seatingEntries]
       .map((entry) => ({ entry, score: getEntrySuggestionScore(trimmedName, entry) }))
       .filter(({ score }) => score > 0)
@@ -285,20 +521,17 @@ export default function MyTablePage() {
     const topScore = rankedMatches[0]?.score || 0;
     const topRankedMatches = topScore > 0 ? rankedMatches.filter(({ score }) => score === topScore).map(({ entry }) => entry) : [];
     const matches = exactAliasMatches.length > 0 ? exactAliasMatches : exactNameMatches.length > 0 ? exactNameMatches : topRankedMatches;
+    const options = buildLookupOptions(trimmedName, matches);
 
-    setSearchResults(
-      matches.map((entry) => {
-        const display = getEntryDisplayMatch(trimmedName, entry);
+    if (options.length === 1) {
+      showConfirmedResult(options[0]);
+      return;
+    }
 
-        return {
-          displayName: display.displayName,
-          invitationName: entry.name,
-          table_number: entry.table_number,
-          matchedAlias: display.matchedAlias,
-        };
-      }),
-    );
-    setSuggestions(matches.length > 0 ? [] : buildSuggestions(trimmedName, seatingEntries));
+    setConfirmedResult(null);
+    setChoiceOptions(options);
+    setSuggestions([]);
+    setFallbackSuggestions(options.length > 0 ? [] : buildTypoSuggestions(trimmedName, seatingEntries));
   };
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -310,12 +543,15 @@ export default function MyTablePage() {
     setSearchQuery(query);
     setActiveSuggestionIndex(0);
     if (clearSearchResult) {
-      setSearchResults([]);
+      setConfirmedResult(null);
+      setChoiceOptions([]);
+      setFallbackSuggestions([]);
     }
 
     if (query.trim().length === 0) {
       setSearchAttempted(false);
       setSuggestions([]);
+      setFallbackSuggestions([]);
       return;
     }
 
@@ -337,9 +573,8 @@ export default function MyTablePage() {
       setActiveSuggestionIndex((prevIndex) => (prevIndex - 1 + suggestions.length) % suggestions.length);
     } else if (e.key === "Enter" || e.key === "Tab") {
       e.preventDefault();
-      const selectedName = suggestions[activeSuggestionIndex].searchValue;
-      setSearchQuery(selectedName);
-      void performSearch(selectedName);
+      const selectedSuggestion = suggestions[activeSuggestionIndex];
+      selectLookupOption(selectedSuggestion);
     } else if (e.key === "Escape") {
       setSuggestions([]);
     }
@@ -347,8 +582,10 @@ export default function MyTablePage() {
 
   const resetSearch = () => {
     setSearchQuery("");
-    setSearchResults([]);
+    setConfirmedResult(null);
+    setChoiceOptions([]);
     setSuggestions([]);
+    setFallbackSuggestions([]);
     setSearchAttempted(false);
     setActiveSuggestionIndex(0);
     window.requestAnimationFrame(() => searchInputRef.current?.focus());
@@ -446,10 +683,10 @@ export default function MyTablePage() {
                   <ul id="table-search-suggestions" className="absolute z-20 w-full mt-2 overflow-auto rounded-[24px] border border-stone-100 bg-white text-left shadow-xl max-h-64">
                     {suggestions.map((suggestion, index) => (
                       <li
-                        key={`${suggestion.displayName}-${suggestion.tableNumber}-${suggestion.secondaryName || "primary"}`}
-                        onClick={() => {
-                          setSearchQuery(suggestion.searchValue);
-                          void performSearch(suggestion.searchValue);
+                        key={suggestion.key}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          selectLookupOption(suggestion);
                         }}
                         className={`px-5 py-4 cursor-pointer text-stone-700 transition-colors border-b border-stone-50 last:border-none ${
                           index === activeSuggestionIndex ? "bg-stone-50 font-bold text-stone-900" : "hover:bg-stone-50"
@@ -472,7 +709,7 @@ export default function MyTablePage() {
               <button type="submit" disabled={searchQuery.trim().length === 0} className="wedding-button-primary w-full disabled:cursor-not-allowed disabled:opacity-45">
                 Show My Table
               </button>
-              {(searchQuery.trim().length > 0 || searchResults.length > 0 || searchAttempted) && (
+              {(searchQuery.trim().length > 0 || confirmedResult || choiceOptions.length > 0 || searchAttempted) && (
                 <button type="button" onClick={resetSearch} className="wedding-button-secondary w-full sm:w-auto">
                   Start Over
                 </button>
@@ -480,26 +717,56 @@ export default function MyTablePage() {
             </div>
           </form>
 
-          {searchResults.length > 0 && (
+          {choiceOptions.length > 0 && !confirmedResult && (
+            <div ref={resultSectionRef} className="wedding-animate-up scroll-mt-24 mt-5 md:mt-7">
+              <div className="wedding-subpanel px-5 py-6 text-left md:px-7 md:py-7">
+                <p className="wedding-kicker mb-3 text-center">Choose Your Match</p>
+                <h2 className="wedding-subtitle mb-3 text-center text-[#4E5E72]">We found a few possible matches.</h2>
+                <p className="wedding-copy mx-auto mb-5 max-w-lg text-center">
+                  Select the name or party that matches your invitation, then your table will appear.
+                </p>
+                <div className="space-y-2">
+                  {choiceOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        selectLookupOption(option);
+                      }}
+                      className="w-full rounded-[20px] border border-stone-100 bg-white px-5 py-4 text-left shadow-sm transition-colors hover:border-stone-200 hover:bg-stone-50"
+                    >
+                      <span className="block text-sm font-semibold leading-snug text-stone-800">{option.displayName}</span>
+                      <span className="mt-1 block text-xs font-medium leading-snug text-stone-500">
+                        {option.secondaryName ? `Listed under ${option.secondaryName}` : `Invitation name: ${option.invitationName}`}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {confirmedResult && (
             <div ref={resultSectionRef} className="wedding-animate-up scroll-mt-24 mt-5 md:mt-7">
               <div className="space-y-4">
-                {searchResults.map((result, index) => (
-                  <div key={`${result.displayName}-${result.table_number}-${index}`} className="wedding-subpanel overflow-hidden px-5 py-5 md:px-8 md:py-7">
-                    <div className="mx-auto mb-5 w-full rounded-[24px] border border-white bg-white px-5 py-5 shadow-sm">
-                      <p className="wedding-kicker mb-2 text-stone-500">Your Table</p>
-                      <p className="font-serif text-5xl leading-none text-[#4E5E72] md:text-6xl">{result.table_number}</p>
-                    </div>
-                    <p className="wedding-lead text-lg mb-2">Welcome, {result.displayName}.</p>
-                    {result.matchedAlias && result.invitationName !== result.displayName && (
-                      <p className="mb-4 text-sm font-semibold leading-relaxed text-stone-500">
-                        Listed under {result.invitationName}
-                      </p>
-                    )}
-                    <p className="wedding-copy mx-auto max-w-md">
-                      Please head to table {result.table_number}. If you need help, show this screen to anyone helping with seating.
+                <div className="wedding-subpanel overflow-hidden px-5 py-5 md:px-8 md:py-7">
+                  <div className="mx-auto mb-5 w-full rounded-[24px] border border-white bg-white px-5 py-5 shadow-sm">
+                    <p className="wedding-kicker mb-2 text-stone-500">
+                      {confirmedResult.tableNumbers.length === 1 ? "Your Table" : "Your Tables"}
                     </p>
+                    <p className="font-serif text-5xl leading-none text-[#4E5E72] md:text-6xl">{formatTableNumbers(confirmedResult.tableNumbers)}</p>
                   </div>
-                ))}
+                  <p className="wedding-lead text-lg mb-2">Welcome, {confirmedResult.displayName}.</p>
+                  {confirmedResult.matchedAlias && confirmedResult.invitationName !== confirmedResult.displayName && (
+                    <p className="mb-4 text-sm font-semibold leading-relaxed text-stone-500">
+                      Listed under {confirmedResult.invitationName}
+                    </p>
+                  )}
+                  <p className="wedding-copy mx-auto max-w-md">
+                    {formatTableInstruction(confirmedResult.tableNumbers)} If you need help, show this screen to anyone helping with seating.
+                  </p>
+                </div>
               </div>
               <button type="button" onClick={resetSearch} className="wedding-button-secondary mt-4 w-full">
                 Search Another Name
@@ -507,7 +774,7 @@ export default function MyTablePage() {
             </div>
           )}
 
-          {searchAttempted && searchResults.length === 0 && searchQuery.trim().length > 0 && (
+          {searchAttempted && !confirmedResult && choiceOptions.length === 0 && searchQuery.trim().length > 0 && (
             <div className="wedding-animate-up mt-8 md:mt-10">
               <div className="wedding-divider mb-8" />
               <div className="wedding-subpanel px-6 py-7 text-center md:px-8 md:py-8">
@@ -517,17 +784,17 @@ export default function MyTablePage() {
                   Please try the name as it appears on your invitation. If you still need help when you arrive, a
                   member of our family will be happy to assist you.
                 </p>
-                {suggestions.length > 0 ? (
+                {fallbackSuggestions.length > 0 ? (
                   <div className="mt-5">
                     <p className="wedding-kicker mb-3">Did You Mean</p>
                     <div className="flex flex-wrap justify-center gap-2">
-                      {suggestions.map((suggestion) => (
+                      {fallbackSuggestions.map((suggestion) => (
                         <button
-                          key={`${suggestion.displayName}-${suggestion.tableNumber}-${suggestion.secondaryName || "primary"}`}
+                          key={suggestion.key}
                           type="button"
+                          onMouseDown={(event) => event.preventDefault()}
                           onClick={() => {
-                            setSearchQuery(suggestion.searchValue);
-                            void performSearch(suggestion.searchValue);
+                            selectLookupOption(suggestion);
                           }}
                           className="wedding-button-secondary"
                         >
